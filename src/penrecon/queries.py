@@ -330,11 +330,18 @@ def paginate(
     return rows[start : start + per_page], page, pages
 
 
-SORT_DEFAULT_DIR = {"ports": "desc", "ip": "asc", "status": "asc"}
+SORT_DEFAULT_DIR = {"change": "asc", "ports": "desc", "ip": "asc", "status": "asc"}
+
+# change is the story: new first, then changed, then unchanged
+_CHANGE_RANK = {"new": 0, "changed": 1}
 
 
 def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[HostRow]:
     reverse = direction == "desc"
+    if sort == "change":
+        # two stable passes: most-open-ports first within each change group
+        by_ports = sorted(rows, key=lambda r: r.open_count, reverse=True)
+        return sorted(by_ports, key=lambda r: _CHANGE_RANK.get(r.change, 2), reverse=reverse)
     if sort == "ports":
         return sorted(rows, key=lambda r: r.open_count, reverse=reverse)
     if sort == "status":

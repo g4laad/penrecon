@@ -23,6 +23,21 @@ def test_ports_sort_direction() -> None:
     assert [r.open_count for r in sort_hosts(rows, "ports", "asc")] == [1, 3, 9]
 
 
+def test_change_sort_groups_new_then_changed_then_unchanged_ports_desc() -> None:
+    rows = [
+        _row("10.0.0.1", 9, change=""),        # unchanged, most open
+        _row("10.0.0.2", 2, change="new"),     # new, few open
+        _row("10.0.0.3", 5, change="changed"),
+        _row("10.0.0.4", 7, change="new"),     # new, more open -> before .2
+        _row("10.0.0.5", 1, change=""),
+    ]
+    # new (ports desc) -> changed -> unchanged (ports desc)
+    assert [r.ip for r in sort_hosts(rows, "change", "asc")] == \
+        ["10.0.0.4", "10.0.0.2", "10.0.0.3", "10.0.0.1", "10.0.0.5"]
+    # desc reverses the change groups
+    assert [r.change for r in sort_hosts(rows, "change", "desc")][:1] == [""]
+
+
 def test_filter_by_change() -> None:
     rows = [_row("10.0.0.1", change="new"), _row("10.0.0.2", change="changed"),
             _row("10.0.0.3", change="")]

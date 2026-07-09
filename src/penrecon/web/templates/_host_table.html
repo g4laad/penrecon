@@ -4,12 +4,12 @@
 {%- set base = "q=" ~ (q|urlencode) ~ "&port=" ~ (port|urlencode) ~ "&tag=" ~ (tag|urlencode) ~ "&status=" ~ (status|urlencode) ~ "&change=" ~ (change|urlencode) -%}
 {%- set start = (page - 1) * per_page + 1 -%}
 {%- set end = start + n - 1 -%}
-{% macro sort_th(label, col, default_dir) -%}
+{% macro sort_th(label, col, default_dir, th_class='') -%}
   {%- set active = sort == col -%}
   {%- set next_dir = ('asc' if active and direction == 'desc' else ('desc' if active and direction == 'asc' else default_dir)) -%}
   {%- set url = "/?" ~ base ~ "&sort=" ~ col ~ "&dir=" ~ next_dir -%}
-  <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}">
-    <a class="th-sort" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true"
+  <th{% if th_class %} class="{{ th_class }}"{% endif %} aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}">
+    <a class="th-sort" data-fk="th-{{ col }}" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true"
        hx-swap="innerHTML transition:true swap:120ms">{{ label }}{% if active %}{{ icons.icon('chevron-up' if direction == 'asc' else 'chevron-down', 'icon-sm') }}{% endif %}</a>
   </th>
 {%- endmacro %}
@@ -17,7 +17,7 @@
 <div class="table-wrap">
 <table data-sort="{{ sort }}" data-dir="{{ direction }}">
   <thead>
-    <tr><th class="col-chg">Change</th>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
+    <tr>{{ sort_th('Change', 'change', 'asc', 'col-chg') }}{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
   </thead>
   <tbody>
     {% for r in rows %}
@@ -52,9 +52,19 @@
 </div>
 {% if pages > 1 %}
 {%- set qs = base ~ "&sort=" ~ sort ~ "&dir=" ~ direction -%}
+{%- macro pager_link(target_page, fk, rel, label, icon, trailing) -%}
+  {%- set url = "/?" ~ qs ~ "&page=" ~ target_page -%}
+  <a class="pager-btn" data-fk="{{ fk }}" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms"{% if rel %} rel="{{ rel }}"{% endif %}>{% if not trailing %}{{ icons.icon(icon, 'icon-sm') }}{% endif %}{{ label }}{% if trailing %}{{ icons.icon(icon, 'icon-sm') }}{% endif %}</a>
+{%- endmacro -%}
+{%- macro pager_off(label, icon, trailing) -%}
+  <span class="pager-btn" aria-disabled="true">{% if not trailing %}{{ icons.icon(icon, 'icon-sm') }}{% endif %}{{ label }}{% if trailing %}{{ icons.icon(icon, 'icon-sm') }}{% endif %}</span>
+{%- endmacro -%}
 <nav class="pager" aria-label="Host list pages">
-  {% if page > 1 %}{% set prev = "/?" ~ qs ~ "&page=" ~ (page - 1) %}<a class="pager-btn" href="{{ prev }}" hx-get="{{ prev }}" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms" rel="prev">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</a>{% else %}<span class="pager-btn" aria-disabled="true">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</span>{% endif %}
-  <span class="pager-info">Page {{ page }} of {{ pages }}</span>
-  {% if page < pages %}{% set next = "/?" ~ qs ~ "&page=" ~ (page + 1) %}<a class="pager-btn" href="{{ next }}" hx-get="{{ next }}" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms" rel="next">Next{{ icons.icon('chevron-right', 'icon-sm') }}</a>{% else %}<span class="pager-btn" aria-disabled="true">Next{{ icons.icon('chevron-right', 'icon-sm') }}</span>{% endif %}
+  {% if page > 1 %}{{ pager_link(1, 'pg-first', '', 'First', 'chevrons-left', false) }}{{ pager_link(page - 1, 'pg-prev', 'prev', 'Prev', 'chevron-left', false) }}{% else %}{{ pager_off('First', 'chevrons-left', false) }}{{ pager_off('Prev', 'chevron-left', false) }}{% endif %}
+  <form class="pager-jump" hx-get="/" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms" aria-label="Jump to page">
+    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="port" value="{{ port }}"><input type="hidden" name="tag" value="{{ tag }}"><input type="hidden" name="status" value="{{ status }}"><input type="hidden" name="change" value="{{ change }}"><input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ direction }}">
+    <label class="pager-jump-label">Page <input class="pager-jump-input mono" type="number" name="page" min="1" max="{{ pages }}" value="{{ page }}" inputmode="numeric" aria-label="Go to page, {{ pages }} total"> of {{ pages }}</label>
+  </form>
+  {% if page < pages %}{{ pager_link(page + 1, 'pg-next', 'next', 'Next', 'chevron-right', true) }}{{ pager_link(pages, 'pg-last', '', 'Last', 'chevrons-right', true) }}{% else %}{{ pager_off('Next', 'chevron-right', true) }}{{ pager_off('Last', 'chevrons-right', true) }}{% endif %}
 </nav>
 {% endif %}

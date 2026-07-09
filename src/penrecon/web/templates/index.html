@@ -71,21 +71,51 @@
   dialog.addEventListener('click', (e) => {          // click on the backdrop (outside the form) closes
     if (e.target === dialog) dialog.close();
   });
+  // guard against a double-submit posting the host twice: disable the button
+  // after submit fires (timeout so the browser still sends the form first)
+  dialog.querySelector('.modal-form').addEventListener('submit', (e) => {
+    if (e.submitter && e.submitter.value === 'cancel') return;  // native dialog cancel
+    const btn = dialog.querySelector('button.primary');
+    setTimeout(() => { if (btn) btn.disabled = true; }, 0);
+  });
 
   const status = document.getElementById('filter-status');
   const filters = document.querySelector('.filters');
+  const SORT_LABELS = { change: 'change', ip: 'IP', ports: 'open ports', status: 'status' };
+  // the sort/pager control the user activated, so focus can return to it after the swap
+  let refocusKey = null;
+  document.body.addEventListener('htmx:beforeRequest', (e) => {
+    const el = e.detail && e.detail.elt;
+    refocusKey = el && el.dataset ? el.dataset.fk || null : null;
+  });
   document.body.addEventListener('htmx:afterSwap', (e) => {
     if (e.target.id !== 'host-table') return;
+    const table = e.target.querySelector('table');
+    // announce something meaningful: a sort says how it's ordered, not just the count
     if (status) {
       const count = e.target.querySelector('.count');
-      status.textContent = count ? count.textContent.trim() : '';
+      const countText = count ? count.textContent.trim() : '';
+      if (refocusKey && refocusKey.startsWith('th-') && table) {
+        const label = SORT_LABELS[table.dataset.sort] || table.dataset.sort || '';
+        const dir = table.dataset.dir === 'desc' ? 'descending' : 'ascending';
+        status.textContent = `Sorted by ${label}, ${dir}. ${countText}`;
+      } else {
+        status.textContent = countText;
+      }
     }
     // header-sort clicks swap only the table; mirror the active sort back into the
     // filter form's hidden inputs so a later filter submit doesn't reset it
-    const table = e.target.querySelector('table');
     if (table && filters) {
-      filters.sort.value = table.dataset.sort || 'ip';
+      filters.sort.value = table.dataset.sort || 'change';
       filters.dir.value = table.dataset.dir || '';
+    }
+    // return keyboard focus to the equivalent control (it was inside the swapped
+    // region, so it no longer exists); fall back so focus never lands on <body>
+    if (refocusKey) {
+      let el = e.target.querySelector('a[data-fk="' + refocusKey + '"]');
+      if (!el) el = e.target.querySelector('.pager-jump-input') || e.target.querySelector('.th-sort');
+      if (el) el.focus();
+      refocusKey = null;
     }
   });
 </script>

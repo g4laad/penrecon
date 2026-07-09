@@ -79,7 +79,7 @@ def index(
     tag: str = "",
     status: str = "",
     change: str = "",  # "" | "new" | "changed" — filter to hosts that moved since last scan
-    sort: str = "ip",
+    sort: str = "change",  # change is the story: new/changed float to the top by default
     dir: str = "",  # sort direction; empty falls back to the column's natural default
     page: str = "1",  # str, tolerate empty/garbage from the URL; parsed + clamped below
     session: Session = Depends(get_session),

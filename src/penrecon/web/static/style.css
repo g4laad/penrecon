@@ -142,6 +142,11 @@ a.pager-btn:hover { border-color:var(--accent); color:var(--accent); }
 a.pager-btn:hover .icon-sm { color:var(--accent); }
 .pager-btn[aria-disabled="true"] { color:var(--mut); border-color:var(--line); cursor:default; opacity:.7; }
 .pager-info { color:var(--mut); font-size:var(--text-sm); font-variant-numeric:tabular-nums; }
+/* jump-to-page: page-number input framed inline between prev/next */
+.pager-jump { display:flex; align-items:center; margin:0; padding:0; border:0; background:none; box-shadow:none; }
+.pager-jump-label { display:inline-flex; align-items:center; gap:.5ch; color:var(--mut); font-size:var(--text-sm); }
+.pager-jump-input { width:6ch; height:32px; min-height:0; text-align:center;
+  font-variant-numeric:tabular-nums; padding:var(--space-1) var(--space-2); }
 
 /* --- filters toolbar: single clean bar, persistent small labels --- */
 .filters, .upload { display:flex; gap:var(--space-3); flex-wrap:wrap; align-items:flex-end;
