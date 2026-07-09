@@ -14,3 +14,7 @@ wheels/
 /scratch_data/
 .mypy_cache/
 .pytest_cache/
+
+# local scan files and installed skill/plugin cache
+/scan*
+/.claude/
