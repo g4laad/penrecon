@@ -26,4 +26,26 @@
 </section>
 
 {% include "_services.html" %}
+
+<section>
+  <h2>Credentials</h2>
+  {% if host_credentials %}
+  <ul class="host-creds">
+    {% for c in host_credentials %}
+    <li>
+      <span class="kind kind-{{ c.kind }}">{{ c.kind }}</span>
+      {%- if c.username %}<span class="mono cred-user">{{ c.username }}</span>{% endif -%}
+      {%- if c.username and c.secret %}<span class="cred-sep">:</span>{% endif -%}
+      {%- if c.secret %}<span class="mono cred-secret">{{ c.secret }}</span>{% endif %}
+      {% if host.id in (c.hosts | map(attribute='host_id') | list) %}<span class="tag">host-wide</span>{% endif %}
+      {% for s in c.services if s.host_id == host.id %}<span class="tag">{{ s.port }}/{{ s.proto }}{% if s.name %} {{ s.name }}{% endif %}</span>{% endfor %}
+      {% if c.notes %}<span class="meta">— {{ c.notes }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No credentials linked to this host yet.</p>
+  {% endif %}
+  <p class="meta"><a href="/credentials">Manage credentials →</a></p>
+</section>
 {% endblock %}

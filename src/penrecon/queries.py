@@ -8,6 +8,7 @@ Scale note: current-state is computed in Python (latest-observation-wins).
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
@@ -15,6 +16,9 @@ from sqlmodel import Session, select
 from penrecon.models import (
     Annotation,
     Attachment,
+    Credential,
+    CredentialHost,
+    CredentialService,
     Host,
     Hostname,
     HostHostname,
@@ -299,6 +303,121 @@ def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[Host
 
 def host_services(session: Session, host_id: int) -> list[ServiceView]:
     return resolved_services(session, host_id)
+
+
+# --- credentials ---------------------------------------------------------------
+
+@dataclass
+class LinkedHost:
+    host_id: int
+    ip: str
+
+
+@dataclass
+class LinkedService:
+    service_id: int
+    host_id: int
+    ip: str
+    port: int
+    proto: str
+    name: str | None  # current display name (manual override or latest observation)
+
+
+@dataclass
+class CredentialView:
+    id: int
+    kind: str
+    username: str
+    secret: str
+    notes: str
+    created_at: str
+    hosts: list[LinkedHost]
+    services: list[LinkedService]
+
+
+def _service_name(session: Session, svc: Service) -> str | None:
+    """Display name for a service: manual override, else the latest observation."""
+    if svc.m_service_name:
+        return svc.m_service_name
+    o = session.exec(
+        select(Observation.service_name)
+        .where(
+            Observation.host_id == svc.host_id,
+            Observation.port == svc.port,
+            Observation.proto == svc.proto,
+        )
+        .order_by(Observation.observed_at.desc())  # type: ignore[attr-defined]
+    ).first()
+    return o
+
+
+def credential_views(session: Session) -> list[CredentialView]:
+    """Every credential with its linked hosts and services (newest first).
+    # ponytail: a couple of queries + in-Python grouping, fine for single-user local."""
+    creds = session.exec(
+        select(Credential).order_by(Credential.created_at.desc())  # type: ignore[attr-defined]
+    ).all()
+
+    hosts_by_cred: dict[int, list[LinkedHost]] = defaultdict(list)
+    for cid, hid, ip in session.exec(
+        select(CredentialHost.credential_id, Host.id, Host.ip)
+        .join(Host, Host.id == CredentialHost.host_id)  # type: ignore[arg-type]
+        .order_by(Host.ip)
+    ).all():
+        if hid is not None:
+            hosts_by_cred[cid].append(LinkedHost(hid, ip))
+
+    services_by_cred: dict[int, list[LinkedService]] = defaultdict(list)
+    for cid, svc, ip in session.exec(
+        select(CredentialService.credential_id, Service, Host.ip)
+        .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
+        .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+        .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
+    ).all():
+        if svc.id is not None:
+            services_by_cred[cid].append(
+                LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
+            )
+
+    return [
+        CredentialView(
+            id=c.id,
+            kind=c.kind,
+            username=c.username,
+            secret=c.secret,
+            notes=c.notes,
+            created_at=c.created_at.strftime("%Y-%m-%d %H:%M"),
+            hosts=hosts_by_cred.get(c.id, []),
+            services=services_by_cred.get(c.id, []),
+        )
+        for c in creds
+        if c.id is not None
+    ]
+
+
+def credentials_for_host(session: Session, host_id: int) -> list[CredentialView]:
+    """Credentials tied to this host directly *or* via one of its services."""
+    return [
+        v
+        for v in credential_views(session)
+        if any(h.host_id == host_id for h in v.hosts)
+        or any(s.host_id == host_id for s in v.services)
+    ]
+
+
+def service_picker(session: Session) -> list[LinkedService]:
+    """All services, labelled with host IP + port/proto + name, for a link dropdown."""
+    rows: list[LinkedService] = []
+    for svc, ip in session.exec(
+        select(Service, Host.ip)
+        .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+        .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
+    ).all():
+        if svc.id is not None:
+            rows.append(
+                LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
+            )
+    return rows
 
 
 # --- diff ----------------------------------------------------------------------

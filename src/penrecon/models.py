@@ -126,3 +126,35 @@ class Attachment(SQLModel, table=True):
     content_type: str | None = None
     size: int = 0
     uploaded_at: datetime = Field(default_factory=_now)
+
+
+class CredKind(StrEnum):
+    password = "password"
+    hash = "hash"
+    key = "key"
+    token = "token"
+    other = "other"
+
+
+class Credential(SQLModel, table=True):
+    """A found secret. Linked M:N to any number of hosts and services (none is
+    fine). Pure user data — like annotations, ingest never touches it."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: CredKind = CredKind.password
+    username: str = ""
+    secret: str = ""  # password / hash / key material / token
+    notes: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class CredentialHost(SQLModel, table=True):
+    __tablename__ = "credential_host"
+    credential_id: int = Field(foreign_key="credential.id", primary_key=True)
+    host_id: int = Field(foreign_key="host.id", primary_key=True)
+
+
+class CredentialService(SQLModel, table=True):
+    __tablename__ = "credential_service"
+    credential_id: int = Field(foreign_key="credential.id", primary_key=True)
+    service_id: int = Field(foreign_key="service.id", primary_key=True)

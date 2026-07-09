@@ -21,6 +21,10 @@ from penrecon.ingest import _upsert_hostname, ingest_scan
 from penrecon.models import (
     Annotation,
     Attachment,
+    CredKind,
+    Credential,
+    CredentialHost,
+    CredentialService,
     Host,
     HostHostname,
     Observation,
@@ -103,6 +107,7 @@ def host_detail(
             },
             "statuses": list(Status),
             "states": list(ObsState),
+            "host_credentials": queries.credentials_for_host(session, host_id),
         },
     )
 
@@ -247,6 +252,14 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
         ann = queries.get_annotation(session, TargetType.service, sid)
         if ann is not None:
             session.delete(ann)
+        for csl in session.exec(
+            select(CredentialService).where(CredentialService.service_id == sid)
+        ).all():
+            session.delete(csl)  # drop credential↔service links (credential itself survives)
+    for chl in session.exec(
+        select(CredentialHost).where(CredentialHost.host_id == host_id)
+    ).all():
+        session.delete(chl)
     host_ann = queries.get_annotation(session, TargetType.host, host_id)
     if host_ann is not None:
         session.delete(host_ann)
@@ -334,6 +347,10 @@ def delete_service(
     ann = queries.get_annotation(session, TargetType.service, service_id)
     if ann is not None:
         session.delete(ann)
+    for csl in session.exec(
+        select(CredentialService).where(CredentialService.service_id == service_id)
+    ).all():
+        session.delete(csl)  # drop credential↔service links (credential itself survives)
     for att in queries.attachments_for(session, TargetType.service, service_id):
         Path(att.stored_path).unlink(missing_ok=True)
         session.delete(att)
@@ -348,6 +365,124 @@ def delete_service(
     session.delete(svc)
     session.commit()
     return _render_services(request, session, host)
+
+
+# --- credentials --------------------------------------------------------------
+
+def _render_credentials(request: Request, session: Session) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "_credentials.html",
+        {
+            "request": request,
+            "credentials": queries.credential_views(session),
+            "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
+            "services": queries.service_picker(session),
+        },
+    )
+
+
+@app.get("/credentials", response_class=HTMLResponse)
+def credentials_page(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "credentials.html",
+        {
+            "request": request,
+            "credentials": queries.credential_views(session),
+            "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
+            "services": queries.service_picker(session),
+            "kinds": list(CredKind),
+        },
+    )
+
+
+@app.post("/credentials", response_class=HTMLResponse)
+def create_credential(
+    request: Request,
+    kind: str = Form("password"),
+    username: str = Form(""),
+    secret: str = Form(""),
+    notes: str = Form(""),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    user, sec = username.strip(), secret.strip()
+    if user or sec:  # a credential must carry at least a username or a secret
+        try:
+            k = CredKind(kind)
+        except ValueError:
+            k = CredKind.password
+        session.add(Credential(kind=k, username=user, secret=sec, notes=notes.strip()))
+        session.commit()
+    return _render_credentials(request, session)
+
+
+@app.post("/credentials/{cred_id}/delete", response_class=HTMLResponse)
+def delete_credential(
+    request: Request, cred_id: int, session: Session = Depends(get_session)
+) -> HTMLResponse:
+    cred = session.get(Credential, cred_id)
+    if cred is not None:
+        for hl in session.exec(
+            select(CredentialHost).where(CredentialHost.credential_id == cred_id)
+        ).all():
+            session.delete(hl)
+        for sl in session.exec(
+            select(CredentialService).where(CredentialService.credential_id == cred_id)
+        ).all():
+            session.delete(sl)
+        session.delete(cred)
+        session.commit()
+    return _render_credentials(request, session)
+
+
+@app.post("/credentials/{cred_id}/link/host", response_class=HTMLResponse)
+def link_cred_host(
+    request: Request, cred_id: int, host_id: str = Form(""), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    hid = int(host_id) if host_id.strip().isdigit() else None
+    valid = hid is not None and session.get(Credential, cred_id) is not None and session.get(Host, hid) is not None
+    if valid and hid is not None and session.get(CredentialHost, (cred_id, hid)) is None:
+        session.add(CredentialHost(credential_id=cred_id, host_id=hid))  # ignore duplicate links
+        session.commit()
+    return _render_credentials(request, session)
+
+
+@app.post("/credentials/{cred_id}/unlink/host/{host_id}", response_class=HTMLResponse)
+def unlink_cred_host(
+    request: Request, cred_id: int, host_id: int, session: Session = Depends(get_session)
+) -> HTMLResponse:
+    link = session.get(CredentialHost, (cred_id, host_id))
+    if link is not None:
+        session.delete(link)
+        session.commit()
+    return _render_credentials(request, session)
+
+
+@app.post("/credentials/{cred_id}/link/service", response_class=HTMLResponse)
+def link_cred_service(
+    request: Request,
+    cred_id: int,
+    service_id: str = Form(""),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    sid = int(service_id) if service_id.strip().isdigit() else None
+    valid = sid is not None and session.get(Credential, cred_id) is not None and session.get(Service, sid) is not None
+    if valid and sid is not None and session.get(CredentialService, (cred_id, sid)) is None:
+        session.add(CredentialService(credential_id=cred_id, service_id=sid))
+        session.commit()
+    return _render_credentials(request, session)
+
+
+@app.post("/credentials/{cred_id}/unlink/service/{service_id}", response_class=HTMLResponse)
+def unlink_cred_service(
+    request: Request, cred_id: int, service_id: int, session: Session = Depends(get_session)
+) -> HTMLResponse:
+    link = session.get(CredentialService, (cred_id, service_id))
+    if link is not None:
+        session.delete(link)
+        session.commit()
+    return _render_credentials(request, session)
 
 
 @app.get("/scans", response_class=HTMLResponse)
