@@ -233,6 +233,7 @@ details.note > summary .note-title { font-weight:600; }
 details.note > summary small { color:var(--mut); font-family:var(--font-sans); margin-left:auto; }
 .note-body, .note-add { display:flex; flex-direction:column; gap:var(--space-3); padding:var(--space-4); }
 .note-add { padding:var(--space-3); background:var(--panel); border-radius:var(--radius); }
+.note-add button { align-self:flex-start; }  /* size to content, don't stretch the column */
 .note-actions { display:flex; gap:var(--space-2); }
 .note-empty { color:var(--mut); padding:0 0 var(--space-2); }
 .svc-notes { margin-top:var(--space-3); }
