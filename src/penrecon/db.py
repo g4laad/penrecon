@@ -46,28 +46,28 @@ def _ensure_columns() -> None:
 
 
 def _migrate_annotation_notes() -> None:
-    """One-time: move legacy single-note Annotation.body_md into the Note table.
-    Idempotent — cleared bodies never re-migrate. The dead column is left in
-    place (SQLite can't drop it without a table rebuild, and it's harmless)."""
+    """One-time: move legacy single-note Annotation.body_md into the Note table,
+    then drop the dead column. The column is NOT NULL with no default, so leaving
+    it breaks every new annotation INSERT — it must go. Idempotent: a DB without
+    the column is skipped (SQLite 3.35+ needed for DROP COLUMN)."""
     from sqlalchemy import text
 
     from penrecon.models import Note, TargetType
 
     with engine.connect() as conn:
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(annotation)"))}
-        if "body_md" not in cols:
-            return
+    if "body_md" not in cols:
+        return
+    with engine.connect() as conn:
         rows = conn.execute(
             text("SELECT target_type, target_id, body_md FROM annotation WHERE body_md != ''")
         ).all()
-    if not rows:
-        return
     with Session(engine) as s:
         for tt, tid, body in rows:
             s.add(Note(target_type=TargetType(tt), target_id=tid, title="Note", body_md=body))
         s.commit()
     with engine.begin() as conn:
-        conn.execute(text("UPDATE annotation SET body_md = '' WHERE body_md != ''"))
+        conn.execute(text("ALTER TABLE annotation DROP COLUMN body_md"))
 
 
 def init_db() -> None:
