@@ -1,5 +1,9 @@
-<div id="services">
-  <h2>Services</h2>
+{% import "_icons.html" as icons %}
+<div id="services" class="panel">
+  <div class="panel-head">
+    <h2>{{ icons.icon('server') }}Services{% if services %} <span class="grp-count">{{ services | length }}</span>{% endif %}</h2>
+  </div>
+
   {% for s in services %}
   <details class="service">
     <summary>
@@ -10,41 +14,60 @@
       {% if s.manual %}<span class="tag manual">manual</span>{% endif %}
       {% if s.annotation and s.annotation.status != 'new' %}<span class="status status-{{ s.annotation.status }}">{{ s.annotation.status }}</span>{% endif %}
       {% if s.annotation %}{% for t in s.annotation.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}
-      {% if s.annotation and s.annotation.body_md %}<span class="note-flag">notes</span>{% endif %}
+      {% if s.annotation and s.annotation.body_md %}<span class="note-flag">{{ icons.icon('note', 'icon-sm') }}notes</span>{% endif %}
       {% if s.last_seen %}<small class="lastseen">seen {{ s.last_seen }}</small>{% endif %}
     </summary>
     <div class="svc-body">
       <form class="svc-edit" hx-post="/services/{{ s.service_id }}/edit" hx-target="#services" hx-swap="outerHTML">
-        <select name="state" aria-label="State">
-          <option value="">— from scan</option>
-          {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if s.state==st.value }}>{{ st.value }}</option>{% endfor %}
-        </select>
-        <input name="service_name" value="{{ s.service_name or '' }}" placeholder="service" aria-label="Service name">
-        <input name="product" value="{{ s.product or '' }}" placeholder="product" aria-label="Product">
-        <input name="version" value="{{ s.version or '' }}" placeholder="version" aria-label="Version">
-        <button type="submit">Save</button>
-        <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
-          hx-target="#services" hx-swap="outerHTML"
-          hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">Delete</button>
+        <div class="svc-edit-row">
+          <label class="field"><span>state</span>
+            <select name="state" aria-label="State">
+              <option value="">— from scan</option>
+              {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if s.state==st.value }}>{{ st.value }}</option>{% endfor %}
+            </select></label>
+          <label class="field"><span>service</span>
+            <input name="service_name" value="{{ s.service_name or '' }}" placeholder="service" aria-label="Service name"></label>
+          <label class="field"><span>product</span>
+            <input name="product" value="{{ s.product or '' }}" placeholder="product" aria-label="Product"></label>
+          <label class="field"><span>version</span>
+            <input name="version" value="{{ s.version or '' }}" placeholder="version" aria-label="Version"></label>
+        </div>
+        <div class="svc-edit-row">
+          <label class="field"><span>status</span>
+            <select name="status" aria-label="Triage status">
+              {% for st in statuses %}<option value="{{ st.value }}" {{ 'selected' if s.annotation and s.annotation.status==st.value }}>{{ st.value }}</option>{% endfor %}
+            </select></label>
+          <label class="field ann-tags"><span>tags</span>
+            <input type="text" name="tags" placeholder="comma,separated" value="{{ (s.annotation.tags | join(', ')) if s.annotation else '' }}"></label>
+        </div>
+        <label class="field"><span>notes (markdown)</span>
+          <textarea name="body_md" rows="3" placeholder="what you found, next steps…">{{ s.annotation.body_md if s.annotation else '' }}</textarea></label>
+        <div class="svc-edit-actions">
+          <button type="submit">Save</button>
+          <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
+            hx-target="#services" hx-swap="outerHTML"
+            hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
+        </div>
       </form>
-      {% with tt="service", tid=s.service_id, ann=s.annotation %}{% include "_annotation.html" %}{% endwith %}
       {% with tt="service", tid=s.service_id, attachments=attachments_by_service[s.service_id] %}{% include "_attachments.html" %}{% endwith %}
     </div>
   </details>
   {% else %}
-  <p class="empty">No services yet.</p>
+  <p class="empty panel-body">No services yet. Add one below, or ingest a scan.</p>
   {% endfor %}
 
-  <form class="svc-add" hx-post="/hosts/{{ host.id }}/services" hx-target="#services" hx-swap="outerHTML">
-    <span class="hn-label">Add service</span>
-    <input name="port" type="number" min="0" max="65535" placeholder="port" required aria-label="New service port">
-    <input name="proto" value="tcp" aria-label="Protocol">
-    <select name="state" aria-label="State">
-      {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if st.value=='open' }}>{{ st.value }}</option>{% endfor %}
-    </select>
-    <input name="service_name" placeholder="service" aria-label="Service name">
-    <input name="product" placeholder="product" aria-label="Product">
-    <input name="version" placeholder="version" aria-label="Version">
-    <button type="submit">Add</button>
-  </form>
+  <details class="add-toggle">
+    <summary>{{ icons.icon('plus', 'icon-sm') }}Add service</summary>
+    <form class="svc-add" hx-post="/hosts/{{ host.id }}/services" hx-target="#services" hx-swap="outerHTML">
+      <input name="port" type="number" min="0" max="65535" placeholder="port" required aria-label="New service port">
+      <input name="proto" value="tcp" aria-label="Protocol">
+      <select name="state" aria-label="State">
+        {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if st.value=='open' }}>{{ st.value }}</option>{% endfor %}
+      </select>
+      <input name="service_name" placeholder="service" aria-label="Service name">
+      <input name="product" placeholder="product" aria-label="Product">
+      <input name="version" placeholder="version" aria-label="Version">
+      <button type="submit">Add</button>
+    </form>
+  </details>
 </div>

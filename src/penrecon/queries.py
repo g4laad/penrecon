@@ -112,6 +112,26 @@ def get_annotation(
     ).first()
 
 
+def upsert_annotation(
+    session: Session,
+    target_type: TargetType,
+    target_id: int,
+    body_md: str,
+    status: Status,
+    tags: list[str],
+) -> Annotation:
+    """Create or update the annotation for an entity and commit."""
+    ann = get_annotation(session, target_type, target_id)
+    if ann is None:
+        ann = Annotation(target_type=target_type, target_id=target_id)
+        session.add(ann)
+    ann.body_md = body_md
+    ann.status = status
+    ann.tags = tags
+    session.commit()
+    return ann
+
+
 def attachments_for(
     session: Session, target_type: TargetType, target_id: int
 ) -> list[Attachment]:

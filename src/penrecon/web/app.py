@@ -22,7 +22,6 @@ from penrecon import queries
 from penrecon.db import ATTACHMENTS_DIR, get_session, init_db
 from penrecon.ingest import _upsert_hostname, ingest_scan
 from penrecon.models import (
-    Annotation,
     Attachment,
     CredKind,
     Credential,
@@ -365,6 +364,9 @@ def edit_service(
     service_name: str = Form(""),
     product: str = Form(""),
     version: str = Form(""),
+    status: Status = Form(Status.new),
+    tags: str = Form(""),
+    body_md: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
@@ -375,6 +377,9 @@ def edit_service(
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
     session.commit()
+    # one Save persists both the scan overrides and the triage annotation
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    queries.upsert_annotation(session, TargetType.service, service_id, body_md, status, tag_list)
     host = session.get(Host, svc.host_id)
     assert host is not None
     return _render_services(request, session, host)
@@ -602,15 +607,8 @@ def annotation_post(
     tags: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
-    ann = queries.get_annotation(session, target_type, target_id)
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    if ann is None:
-        ann = Annotation(target_type=target_type, target_id=target_id)
-        session.add(ann)
-    ann.body_md = body_md
-    ann.status = status
-    ann.tags = tag_list
-    session.commit()
+    queries.upsert_annotation(session, target_type, target_id, body_md, status, tag_list)
     return _render_annotation(request, session, target_type, target_id, saved=True)
 
 
