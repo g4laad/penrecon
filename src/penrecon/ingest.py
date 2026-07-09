@@ -66,6 +66,8 @@ def _upsert_service(session: Session, host_id: int, port: int, proto: str) -> No
     ).first()
     if svc is None:
         session.add(Service(host_id=host_id, port=port, proto=proto))
+    elif svc.hidden:
+        svc.hidden = False  # a re-scan resurrects a manually-deleted service (mistakes happen)
 
 
 def _store_host(session: Session, scan_id: int, hr: HostResult, now: datetime) -> None:

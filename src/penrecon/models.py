@@ -73,7 +73,8 @@ class Service(SQLModel, table=True):
     """Stable service identity. Annotations/attachments point here.
 
     Manual overrides (m_*) win over the latest Observation for display, so a
-    hand-corrected value survives re-scans. `hidden` is a sticky manual delete.
+    hand-corrected value survives re-scans. `hidden` is a manual delete that a
+    re-scan un-hides if the port is seen again (so a mistaken delete is undoable).
     """
 
     __table_args__ = (UniqueConstraint("host_id", "port", "proto"),)

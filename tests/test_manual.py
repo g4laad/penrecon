@@ -33,17 +33,19 @@ def test_manual_override_wins_over_rescan(session: Session) -> None:
     assert view[443].version == "9.9-manual"  # manual wins, not scan's 2.0
 
 
-def test_hidden_service_stays_hidden_across_rescan(session: Session) -> None:
+def test_deleted_service_reappears_on_rescan(session: Session) -> None:
     ingest_scan(session, _scan("10.0.0.2", 22, "1.0", "b.example"), "a.xml", "nmap")
     svc = session.exec(select(Service).where(Service.port == 22)).one()
-    svc.hidden = True
+    svc.hidden = True  # manual delete
     session.commit()
-
-    ingest_scan(session, _scan("10.0.0.2", 22, "1.0", "b.example"), "b.xml", "nmap")  # re-observe
 
     host = session.exec(select(Host).where(Host.ip == "10.0.0.2")).one()
     assert host.id is not None
-    assert 22 not in {s.port for s in resolved_services(session, host.id)}  # sticky delete
+    assert 22 not in {s.port for s in resolved_services(session, host.id)}  # gone while not re-seen
+
+    # a re-scan that observes the port again un-hides it (mistaken delete is undoable)
+    ingest_scan(session, _scan("10.0.0.2", 22, "1.0", "b.example"), "b.xml", "nmap")
+    assert 22 in {s.port for s in resolved_services(session, host.id)}
 
 
 def test_hidden_hostname_stays_hidden_across_rescan(session: Session) -> None:
