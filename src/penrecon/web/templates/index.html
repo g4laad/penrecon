@@ -4,7 +4,7 @@
 <div class="page-head">
   <h1>Hosts</h1>
   <form class="new-host" action="/hosts" method="post">
-    <input name="ip" placeholder="10.0.0.0" required aria-label="New host IP" class="mono">
+    <input name="ip" placeholder="10.0.0.5" required aria-label="New host IP" class="mono">
     <button type="submit">+ New host</button>
   </form>
 </div>
@@ -23,7 +23,7 @@
       {% for s in statuses %}<option value="{{ s.value }}" {{ 'selected' if status==s.value }}>{{ s.value }}</option>{% endfor %}
     </select></label>
   <input type="hidden" name="sort" value="{{ sort }}">
-  <input type="hidden" name="dir" value="{{ direction }}">
+  <input type="hidden" name="dir" value="{{ direction }}">{# hidden so a filter submit keeps the active sort #}
   <button type="submit">Apply</button>
 </form>
 <p id="filter-status" class="visually-hidden" role="status" aria-live="polite"></p>

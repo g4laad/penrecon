@@ -8,6 +8,7 @@
   <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   {% set path = request.url.path %}
   <nav aria-label="Primary">
     <a href="/"{% if path == '/' or path.startswith('/hosts') %} class="active" aria-current="page"{% endif %}>Hosts</a>
@@ -15,6 +16,6 @@
     <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>Diff</a>
     <span class="brand">penrecon</span>
   </nav>
-  <main>{% block content %}{% endblock %}</main>
+  <main id="main">{% block content %}{% endblock %}</main>
 </body>
 </html>

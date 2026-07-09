@@ -156,13 +156,20 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
     return views
 
 
-def host_change(session: Session, host_id: int) -> str:
-    """Scan-delta marker for the hosts list: ``"new"`` if the host has been seen
-    in only one scan (first appearance), ``"changed"`` if its two most-recent
-    scans added or altered a service, else ``""``. Compares the host's own two
-    latest scans (robust to partial scans), mirroring :func:`diff_scans`.
-    Removals are out of scope (they live on /diff); manual data carries no
-    observation and never flags.
+def host_change(
+    session: Session, host_id: int, *, scan_count: int, latest_scan_id: int | None
+) -> str:
+    """Scan-delta marker for the hosts list: ``"new"`` if the host appeared for
+    the first time *in the latest scan* (and a prior baseline exists),
+    ``"changed"`` if its two most-recent scans added or altered a service, else
+    ``""``. Compares the host's own two latest scans (robust to partial scans),
+    mirroring :func:`diff_scans`. Removals are out of scope (they live on
+    /diff); manual data carries no observation and never flags.
+
+    "new" needs a baseline: a single-scan database has nothing to be new
+    *relative to*, so on the first ingest no host flags — a green column where
+    everything is new says nothing. A host seen only in an older scan (absent
+    from the latest) is stale, not new, so it doesn't flag either.
     # ponytail: one observation fetch per host, fine for single-user local.
     """
     obs = session.exec(
@@ -180,7 +187,9 @@ def host_change(session: Session, host_id: int) -> str:
         if o.scan_id not in scan_order:
             scan_order.append(o.scan_id)
     if len(scan_order) == 1:
-        return "new"
+        # first-seen only counts as "new" against a baseline, and only if that
+        # sighting is the current scan (not a host that dropped out of later scans)
+        return "new" if scan_count > 1 and scan_order[0] == latest_scan_id else ""
     latest, prev = scan_order[0], scan_order[1]
     prev_obs = {(o.port, o.proto): o for o in obs if o.scan_id == prev}
     for o in obs:
@@ -193,6 +202,12 @@ def host_change(session: Session, host_id: int) -> str:
 
 
 def host_rows(session: Session) -> list[HostRow]:
+    # scan baseline for the "new" marker: how many scans exist, and which is latest
+    scan_ids = session.exec(
+        select(Scan.id).order_by(Scan.imported_at.desc())  # type: ignore[attr-defined]
+    ).all()
+    scan_count = len(scan_ids)
+    latest_scan_id = scan_ids[0] if scan_ids else None
     rows: list[HostRow] = []
     for host in session.exec(select(Host).order_by(Host.ip)).all():
         assert host.id is not None
@@ -209,7 +224,9 @@ def host_rows(session: Session) -> list[HostRow]:
                 open_ports=sorted(s.port for s in open_s),
                 service_names=sorted({s.service_name for s in open_s if s.service_name}),
                 open_services=sorted((s.port, s.service_name) for s in open_s),
-                change=host_change(session, host.id),
+                change=host_change(
+                    session, host.id, scan_count=scan_count, latest_scan_id=latest_scan_id
+                ),
                 triaged=ann is not None,
             )
         )
