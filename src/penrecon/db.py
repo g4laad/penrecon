@@ -45,6 +45,31 @@ def _ensure_columns() -> None:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {decl}"))
 
 
+def _migrate_annotation_notes() -> None:
+    """One-time: move legacy single-note Annotation.body_md into the Note table.
+    Idempotent — cleared bodies never re-migrate. The dead column is left in
+    place (SQLite can't drop it without a table rebuild, and it's harmless)."""
+    from sqlalchemy import text
+
+    from penrecon.models import Note, TargetType
+
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(annotation)"))}
+        if "body_md" not in cols:
+            return
+        rows = conn.execute(
+            text("SELECT target_type, target_id, body_md FROM annotation WHERE body_md != ''")
+        ).all()
+    if not rows:
+        return
+    with Session(engine) as s:
+        for tt, tid, body in rows:
+            s.add(Note(target_type=TargetType(tt), target_id=tid, title="Note", body_md=body))
+        s.commit()
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE annotation SET body_md = '' WHERE body_md != ''"))
+
+
 def init_db() -> None:
     """Create data dirs and tables, then add any new columns. Idempotent."""
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,6 +79,7 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     _ensure_columns()
+    _migrate_annotation_notes()
 
 
 def get_session() -> Iterator[Session]:

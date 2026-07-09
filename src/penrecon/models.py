@@ -105,15 +105,29 @@ class Observation(SQLModel, table=True):
 
 
 class Annotation(SQLModel, table=True):
-    """User note/status/tags on an entity. Never modified by ingest."""
+    """Triage state (status/tags) on an entity. Never modified by ingest.
+    Freeform notes live in :class:`Note`."""
 
     __table_args__ = (UniqueConstraint("target_type", "target_id"),)
     id: int | None = Field(default=None, primary_key=True)
     target_type: TargetType
     target_id: int
-    body_md: str = ""
     status: Status = Status.new
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class Note(SQLModel, table=True):
+    """A titled freeform note on an entity. Any number per target. Pure user
+    data — like annotations, ingest never touches it; deleting a host/service
+    deletes its notes."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    target_type: TargetType
+    target_id: int
+    title: str
+    body_md: str = ""
+    created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
 

@@ -14,7 +14,8 @@
       {% if s.manual %}<span class="tag manual">manual</span>{% endif %}
       {% if s.annotation and s.annotation.status != 'new' %}<span class="status status-{{ s.annotation.status }}">{{ s.annotation.status }}</span>{% endif %}
       {% if s.annotation %}{% for t in s.annotation.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}
-      {% if s.annotation and s.annotation.body_md %}<span class="note-flag">{{ icons.icon('note', 'icon-sm') }}notes</span>{% endif %}
+      {% set svc_notes = notes_by_service[s.service_id] %}
+      {% if svc_notes %}<span class="note-flag">{{ icons.icon('note', 'icon-sm') }}{{ svc_notes | length }} note{{ '' if svc_notes | length == 1 else 's' }}</span>{% endif %}
       {% if s.last_seen %}<small class="lastseen">seen {{ s.last_seen }}</small>{% endif %}
     </summary>
     <div class="svc-body">
@@ -40,8 +41,6 @@
           <label class="field ann-tags"><span>tags</span>
             <input type="text" name="tags" placeholder="comma,separated" value="{{ (s.annotation.tags | join(', ')) if s.annotation else '' }}"></label>
         </div>
-        <label class="field"><span>notes (markdown)</span>
-          <textarea name="body_md" rows="3" placeholder="what you found, next steps…">{{ s.annotation.body_md if s.annotation else '' }}</textarea></label>
         <div class="svc-edit-actions">
           <button type="submit">Save</button>
           <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
@@ -49,6 +48,10 @@
             hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
         </div>
       </form>
+      <div class="svc-notes">
+        <span class="field-label">Notes</span>
+        {% with tt="service", tid=s.service_id, notes=svc_notes %}{% include "_notes.html" %}{% endwith %}
+      </div>
       {% with tt="service", tid=s.service_id, attachments=attachments_by_service[s.service_id] %}{% include "_attachments.html" %}{% endwith %}
     </div>
   </details>

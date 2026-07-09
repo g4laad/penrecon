@@ -1,0 +1,39 @@
+{% import "_icons.html" as icons %}
+<div id="notes-{{ tt }}-{{ tid }}" class="notes">
+  {% for n in notes %}
+  <details class="note">
+    <summary>
+      <span class="note-title">{{ n.title }}</span>
+      <small>{{ n.updated_at.strftime("%Y-%m-%d %H:%M") }}</small>
+    </summary>
+    <form class="note-body" hx-post="/notes/{{ n.id }}/edit"
+          hx-target="#notes-{{ tt }}-{{ tid }}" hx-swap="outerHTML">
+      <label class="field"><span>title</span>
+        <input name="title" value="{{ n.title }}" required aria-label="Note title"></label>
+      <label class="field"><span>note (markdown)</span>
+        <textarea name="body_md" rows="6" placeholder="what you found, next steps…">{{ n.body_md }}</textarea></label>
+      <div class="note-actions">
+        <button type="submit">Save</button>
+        <button type="button" class="danger" hx-post="/notes/{{ n.id }}/delete"
+          hx-target="#notes-{{ tt }}-{{ tid }}" hx-swap="outerHTML"
+          hx-confirm="Delete note “{{ n.title }}”?">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
+      </div>
+    </form>
+  </details>
+  {% else %}
+  <p class="empty note-empty">No notes yet.</p>
+  {% endfor %}
+
+  <details class="add-toggle">
+    <summary>{{ icons.icon('plus', 'icon-sm') }}Add note</summary>
+    <form class="note-add" hx-post="/notes" hx-target="#notes-{{ tt }}-{{ tid }}" hx-swap="outerHTML">
+      <input type="hidden" name="target_type" value="{{ tt }}">
+      <input type="hidden" name="target_id" value="{{ tid }}">
+      <label class="field"><span>title</span>
+        <input name="title" placeholder="note title" required aria-label="New note title"></label>
+      <label class="field"><span>note (markdown)</span>
+        <textarea name="body_md" rows="4" placeholder="what you found, next steps…"></textarea></label>
+      <button type="submit">{{ icons.icon('plus', 'icon-sm') }}Add note</button>
+    </form>
+  </details>
+</div>

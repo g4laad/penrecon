@@ -29,6 +29,7 @@ from penrecon.models import (
     CredentialService,
     Host,
     HostHostname,
+    Note,
     Observation,
     ObsState,
     Scan,
@@ -148,9 +149,14 @@ def host_detail(
             "hostnames": queries.host_hostnames(session, host_id),
             "services": services,
             "host_ann": queries.get_annotation(session, TargetType.host, host_id),
+            "host_notes": queries.notes_for(session, TargetType.host, host_id),
             "host_attachments": queries.attachments_for(session, TargetType.host, host_id),
             "attachments_by_service": {
                 s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
+                for s in services
+            },
+            "notes_by_service": {
+                s.service_id: queries.notes_for(session, TargetType.service, s.service_id)
                 for s in services
             },
             "statuses": list(Status),
@@ -182,6 +188,10 @@ def _render_services(request: Request, session: Session, host: Host) -> HTMLResp
             "services": services,
             "attachments_by_service": {
                 s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
+                for s in services
+            },
+            "notes_by_service": {
+                s.service_id: queries.notes_for(session, TargetType.service, s.service_id)
                 for s in services
             },
             "statuses": list(Status),
@@ -301,6 +311,8 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
         ann = queries.get_annotation(session, TargetType.service, sid)
         if ann is not None:
             session.delete(ann)
+        for note in queries.notes_for(session, TargetType.service, sid):
+            session.delete(note)
         for csl in session.exec(
             select(CredentialService).where(CredentialService.service_id == sid)
         ).all():
@@ -312,6 +324,8 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
     host_ann = queries.get_annotation(session, TargetType.host, host_id)
     if host_ann is not None:
         session.delete(host_ann)
+    for note in queries.notes_for(session, TargetType.host, host_id):
+        session.delete(note)
     for row in session.exec(select(Observation).where(Observation.host_id == host_id)).all():
         session.delete(row)
     for svc in session.exec(select(Service).where(Service.host_id == host_id)).all():
@@ -369,7 +383,6 @@ def edit_service(
     version: str = Form(""),
     status: Status = Form(Status.new),
     tags: str = Form(""),
-    body_md: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
@@ -382,7 +395,7 @@ def edit_service(
     session.commit()
     # one Save persists both the scan overrides and the triage annotation
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, TargetType.service, service_id, body_md, status, tag_list)
+    queries.upsert_annotation(session, TargetType.service, service_id, status, tag_list)
     host = session.get(Host, svc.host_id)
     assert host is not None
     return _render_services(request, session, host)
@@ -402,6 +415,8 @@ def delete_service(
     ann = queries.get_annotation(session, TargetType.service, service_id)
     if ann is not None:
         session.delete(ann)
+    for note in queries.notes_for(session, TargetType.service, service_id):
+        session.delete(note)
     for csl in session.exec(
         select(CredentialService).where(CredentialService.service_id == service_id)
     ).all():
@@ -651,14 +666,76 @@ def annotation_post(
     request: Request,
     target_type: TargetType = Form(...),
     target_id: int = Form(...),
-    body_md: str = Form(""),
     status: Status = Form(Status.new),
     tags: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, target_type, target_id, body_md, status, tag_list)
+    queries.upsert_annotation(session, target_type, target_id, status, tag_list)
     return _render_annotation(request, session, target_type, target_id, saved=True)
+
+
+# --- notes: any number of titled notes per entity -----------------------------
+
+def _render_notes(request: Request, session: Session, tt: TargetType, tid: int) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "_notes.html",
+        {
+            "request": request,
+            "tt": tt.value,
+            "tid": tid,
+            "notes": queries.notes_for(session, tt, tid),
+        },
+    )
+
+
+@app.post("/notes", response_class=HTMLResponse)
+def note_create(
+    request: Request,
+    target_type: TargetType = Form(...),
+    target_id: int = Form(...),
+    title: str = Form(""),
+    body_md: str = Form(""),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    clean_title = title.strip() or "Untitled"  # a note always has a title
+    session.add(
+        Note(target_type=target_type, target_id=target_id, title=clean_title, body_md=body_md)
+    )
+    session.commit()
+    return _render_notes(request, session, target_type, target_id)
+
+
+@app.post("/notes/{note_id}/edit", response_class=HTMLResponse)
+def note_edit(
+    request: Request,
+    note_id: int,
+    title: str = Form(""),
+    body_md: str = Form(""),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    note = session.get(Note, note_id)
+    if note is None:
+        return HTMLResponse("note not found", status_code=404)
+    note.title = title.strip() or "Untitled"
+    note.body_md = body_md
+    note.updated_at = datetime.now(UTC)
+    session.commit()
+    return _render_notes(request, session, note.target_type, note.target_id)
+
+
+@app.post("/notes/{note_id}/delete", response_class=HTMLResponse)
+def note_delete(
+    request: Request, note_id: int, session: Session = Depends(get_session)
+) -> HTMLResponse:
+    note = session.get(Note, note_id)
+    if note is None:
+        return HTMLResponse("note not found", status_code=404)
+    tt, tid = note.target_type, note.target_id
+    session.delete(note)
+    session.commit()
+    return _render_notes(request, session, tt, tid)
 
 
 @app.post("/attachment", response_class=HTMLResponse)

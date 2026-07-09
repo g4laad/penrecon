@@ -53,8 +53,7 @@ full, so you can find a host by what you wrote about it, not just by what a scan
       <div class="hit-head">
         <span class="hit-kind">{{ n.kind }}</span>
         <a class="hit-target" href="{{ n.href }}"><span class="mono">{{ n.where }}</span></a>
-        <span class="status status-{{ n.status }}">{{ n.status }}</span>
-        {% for t in n.tags %}<span class="tag">{{ t | highlight(q) }}</span>{% endfor %}
+        <span class="note-title">{{ n.title | highlight(q) }}</span>
       </div>
       {% if n.preview %}<p class="hit-preview">{{ n.preview | highlight(q) }}</p>{% endif %}
     </li>

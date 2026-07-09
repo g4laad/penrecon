@@ -8,6 +8,7 @@ from penrecon.models import (
     Credential,
     CredentialHost,
     Host,
+    Note,
     Status,
     TargetType,
 )
@@ -38,9 +39,16 @@ def _seed(session: Session) -> int:
         Annotation(
             target_type=TargetType.host,
             target_id=hid,
-            body_md="weak postgres creds; pivot candidate",
             status=Status.interesting,
-            tags=["pivot"],
+            tags=["pivot"],  # triage tag — findable via host search
+        )
+    )
+    session.add(
+        Note(
+            target_type=TargetType.host,
+            target_id=hid,
+            title="Postgres",
+            body_md="weak postgres creds; reuse candidate",
         )
     )
     cred = Credential(kind="password", username="postgres", notes="reused on corp hosts")
@@ -67,19 +75,20 @@ def test_matches_across_all_three_sources(session: Session) -> None:
     assert r.total == 3
 
 
-def test_hostname_and_note_tag_and_cred_notes(session: Session) -> None:
+def test_hostname_and_tag_and_cred_notes(session: Session) -> None:
     _seed(session)
     assert len(search(session, "corp").hosts) == 1  # hostname db.corp.local
     assert len(search(session, "corp").credentials) == 1  # "reused on corp hosts"
-    tag_hit = search(session, "pivot")  # matches the note by tag only, not the body word
-    assert len(tag_hit.notes) == 1 and not tag_hit.hosts
+    tag_hit = search(session, "pivot")  # a triage tag surfaces its host, not a note
+    assert len(tag_hit.hosts) == 1 and not tag_hit.notes
 
 
 def test_note_hit_links_back_to_host(session: Session) -> None:
     hid = _seed(session)
-    note = search(session, "pivot").notes[0]
+    note = search(session, "candidate").notes[0]  # matched on note body
     assert note.href == f"/hosts/{hid}"
     assert note.kind == "host"
+    assert note.title == "Postgres"
     assert "10.0.0.5" in note.where
 
 
@@ -87,7 +96,7 @@ def test_note_whose_target_is_gone_is_skipped(session: Session) -> None:
     _seed(session)
     # a service note pointing at a service id that never existed must not crash search
     session.add(
-        Annotation(target_type=TargetType.service, target_id=99999, body_md="postgres ghost")
+        Note(target_type=TargetType.service, target_id=99999, title="ghost", body_md="postgres ghost")
     )
     session.commit()
     assert len(search(session, "postgres").notes) == 1  # only the real host note survives

@@ -50,7 +50,14 @@
 
 <section class="panel">
   <div class="panel-head">
-    <h2>{{ icons.icon('note') }}Notes</h2>
+    <h2>{{ icons.icon('note') }}Notes{% if host_notes %} <span class="grp-count">{{ host_notes | length }}</span>{% endif %}</h2>
+  </div>
+  {% with tt="host", tid=host.id, notes=host_notes %}{% include "_notes.html" %}{% endwith %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{ icons.icon('edit') }}Triage &amp; files</h2>
   </div>
   <div class="panel-body">
     {% with tt="host", tid=host.id, ann=host_ann %}{% include "_annotation.html" %}{% endwith %}

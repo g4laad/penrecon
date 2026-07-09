@@ -10,8 +10,6 @@
     <label class="field ann-tags"><span>tags</span>
       <input type="text" name="tags" placeholder="comma,separated" value="{{ (ann.tags | join(', ')) if ann else '' }}"></label>
   </div>
-  <label class="field"><span>notes (markdown)</span>
-    <textarea name="body_md" rows="3" placeholder="what you found, next steps…">{{ ann.body_md if ann else '' }}</textarea></label>
   <div class="ann-actions">
     <button type="submit">Save</button>
     {% if saved %}<span class="saved">{{ icons.icon('new', 'icon-sm') }}saved</span>{% endif %}

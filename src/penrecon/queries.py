@@ -22,6 +22,7 @@ from penrecon.models import (
     Host,
     Hostname,
     HostHostname,
+    Note,
     Observation,
     Scan,
     Service,
@@ -78,13 +79,12 @@ class DiffResult:
 
 @dataclass
 class NoteHit:
-    """One annotation matched by a global search, with a link back to its target."""
+    """One note matched by a global search, with a link back to its target."""
 
     href: str
     where: str  # human label of the annotated entity (IP, IP·port/proto, hostname)
     kind: str  # "host" | "service" | "hostname"
-    status: str
-    tags: list[str]
+    title: str
     preview: str
 
 
@@ -116,20 +116,29 @@ def upsert_annotation(
     session: Session,
     target_type: TargetType,
     target_id: int,
-    body_md: str,
     status: Status,
     tags: list[str],
 ) -> Annotation:
-    """Create or update the annotation for an entity and commit."""
+    """Create or update the triage annotation (status/tags) for an entity."""
     ann = get_annotation(session, target_type, target_id)
     if ann is None:
         ann = Annotation(target_type=target_type, target_id=target_id)
         session.add(ann)
-    ann.body_md = body_md
     ann.status = status
     ann.tags = tags
     session.commit()
     return ann
+
+
+def notes_for(session: Session, target_type: TargetType, target_id: int) -> list[Note]:
+    """All notes on an entity, oldest first."""
+    return list(
+        session.exec(
+            select(Note)
+            .where(Note.target_type == target_type, Note.target_id == target_id)
+            .order_by(Note.created_at)  # type: ignore[arg-type]
+        ).all()
+    )
 
 
 def attachments_for(
@@ -298,6 +307,7 @@ def filter_hosts(
             if ql in r.ip.lower()
             or any(ql in h.lower() for h in r.hostnames)
             or any(ql in s.lower() for s in r.service_names)
+            or any(ql in t.lower() for t in r.tags)
         ]
     if port is not None:
         out = [r for r in out if port in r.open_ports]
@@ -532,42 +542,44 @@ def _note_preview(body: str, ql: str, width: int = 200) -> str:
     return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
 
 
-def _note_location(session: Session, ann: Annotation) -> tuple[str, str, str] | None:
+def _note_location(
+    session: Session, target_type: TargetType, target_id: int
+) -> tuple[str, str, str] | None:
     """(href, where-label, kind) for a note's target, or None if the target is gone."""
-    if ann.target_type == TargetType.host:
-        h = session.get(Host, ann.target_id)
+    if target_type == TargetType.host:
+        h = session.get(Host, target_id)
         return (f"/hosts/{h.id}", h.ip, "host") if h else None
-    if ann.target_type == TargetType.service:
-        svc = session.get(Service, ann.target_id)
+    if target_type == TargetType.service:
+        svc = session.get(Service, target_id)
         if svc is None:
             return None
         h = session.get(Host, svc.host_id)
         return (f"/hosts/{h.id}", f"{h.ip} · {svc.port}/{svc.proto}", "service") if h else None
-    if ann.target_type == TargetType.hostname:
-        hn = session.get(Hostname, ann.target_id)
+    if target_type == TargetType.hostname:
+        hn = session.get(Hostname, target_id)
         if hn is None:
             return None
         link = session.exec(
-            select(HostHostname).where(HostHostname.hostname_id == ann.target_id)
+            select(HostHostname).where(HostHostname.hostname_id == target_id)
         ).first()
         return (f"/hosts/{link.host_id}" if link else "/", hn.name, "hostname")
     return None
 
 
 def search_notes(session: Session, ql: str) -> list[NoteHit]:
-    """Annotations whose body or any tag contains ``ql`` (already lowercased)."""
+    """Notes whose title or body contains ``ql`` (already lowercased)."""
     hits: list[NoteHit] = []
-    for ann in session.exec(select(Annotation)).all():
-        if ql not in ann.body_md.lower() and not any(ql in t.lower() for t in ann.tags):
+    for note in session.exec(select(Note)).all():
+        if ql not in note.title.lower() and ql not in note.body_md.lower():
             continue
-        loc = _note_location(session, ann)
+        loc = _note_location(session, note.target_type, note.target_id)
         if loc is None:  # target was deleted out from under the note
             continue
         href, where, kind = loc
         hits.append(
             NoteHit(
-                href=href, where=where, kind=kind, status=ann.status.value,
-                tags=ann.tags, preview=_note_preview(ann.body_md, ql),
+                href=href, where=where, kind=kind,
+                title=note.title, preview=_note_preview(note.body_md, ql),
             )
         )
     return hits

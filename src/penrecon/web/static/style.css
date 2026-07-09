@@ -207,6 +207,28 @@ details.service > summary .port { font-weight:600; }
 details.service > summary small { color:var(--mut); font-family:var(--font-sans); }
 .svc-body { padding:var(--space-4); }
 .note-flag { color:var(--mut); font-size:var(--text-xs); }
+
+/* --- note rows: same collapsible shell as service rows, title-only summary --- */
+.notes { padding:0; }  /* rows sit edge-to-edge in the panel, like the services list */
+details.note { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  margin:var(--space-2) 0; box-shadow:var(--shadow-sm); }
+details.note > summary {
+  list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:baseline;
+  gap:var(--space-2); padding:var(--space-3) var(--space-4); border-radius:var(--radius);
+}
+details.note > summary::-webkit-details-marker { display:none; }
+details.note > summary::before { content:"▸"; color:var(--mut); }
+details.note[open] > summary::before { content:"▾"; }
+details.note[open] > summary { border-bottom:1px solid var(--line); border-radius:var(--radius) var(--radius) 0 0; }
+details.note > summary:hover { background:var(--row-hover); }
+details.note > summary .note-title { font-weight:600; }
+details.note > summary small { color:var(--mut); font-family:var(--font-sans); margin-left:auto; }
+.note-body, .note-add { display:flex; flex-direction:column; gap:var(--space-3); padding:var(--space-4); }
+.note-add { padding:var(--space-3); background:var(--panel); border-radius:var(--radius); }
+.note-actions { display:flex; gap:var(--space-2); }
+.note-empty { color:var(--mut); padding:0 0 var(--space-2); }
+.svc-notes { margin-top:var(--space-3); }
+.svc-notes .notes { padding:var(--space-2) 0 0; }
 .lastseen { margin-left:auto; color:var(--mut); }
 .back { display:inline-flex; align-items:center; gap:var(--space-1); color:var(--mut); text-decoration:none;
   font-size:var(--text-sm); margin-bottom:var(--space-3); }
