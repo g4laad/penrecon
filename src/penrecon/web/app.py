@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from sqlmodel import Session, select
 
 from penrecon import queries
@@ -38,6 +39,24 @@ from penrecon.parsers import PARSERS
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+
+
+def _highlight(text: str, q: str) -> Markup:
+    """Escape ``text`` and wrap each case-insensitive occurrence of ``q`` in
+    <mark>. Returns Markup so Jinja doesn't re-escape the tags we added."""
+    q = q.strip()
+    if not q:
+        return Markup(escape(text))
+    lo, ql, out, i = text.lower(), q.lower(), [], 0
+    while (j := lo.find(ql, i)) >= 0:
+        out.append(escape(text[i:j]))
+        out.append(Markup("<mark>") + escape(text[j : j + len(ql)]) + Markup("</mark>"))
+        i = j + len(ql)
+    out.append(escape(text[i:]))
+    return Markup("").join(out)
+
+
+templates.env.filters["highlight"] = _highlight
 
 app = FastAPI(title="penrecon")
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
@@ -81,6 +100,17 @@ def index(
            "sort": sort, "direction": direction, "statuses": list(Status)}
     tpl = "_host_table.html" if _is_htmx(request) else "index.html"
     return templates.TemplateResponse(request, tpl, ctx)
+
+
+@app.get("/search", response_class=HTMLResponse)
+def search_page(
+    request: Request, q: str = "", session: Session = Depends(get_session)
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "search.html",
+        {"request": request, "q": q.strip(), "results": queries.search(session, q)},
+    )
 
 
 @app.get("/hosts/{host_id}", response_class=HTMLResponse)

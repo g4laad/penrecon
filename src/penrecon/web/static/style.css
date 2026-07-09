@@ -301,6 +301,36 @@ details.service > summary small { color:var(--mut); font-family:var(--font-sans)
 .diff-added td { color:var(--diff-add); } .diff-removed td { color:var(--diff-del); } .diff-changed td { color:var(--diff-chg); }
 .meta { color:var(--mut); }
 
+/* --- global search ----------------------------------------------------------- */
+/* matched substring: the one accent, tinted — not the browser's default yellow */
+mark { background:var(--accent-weak); color:#1d4ed8; border-radius:var(--radius-sm); padding:0 1px; }
+
+.search-form .search-field { flex:1 1 34ch; }
+.search-form .search-field .input-icon, .search-form .search-field input { width:100%; }
+.search-hint { color:var(--mut); max-width:var(--measure); }
+
+.results { margin-top:var(--space-6); }
+.results h2 { display:flex; align-items:baseline; gap:.6ch; margin-bottom:var(--space-3); }
+.grp-count { font-size:var(--text-xs); font-weight:600; color:var(--mut);
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-sm); padding:1px var(--space-2); }
+
+/* note + credential hits: a framed white list, one row per match */
+.hits { list-style:none; margin:0; padding:0; background:var(--surface);
+  border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); overflow:hidden; }
+.hits > li { padding:var(--space-3) var(--space-4); border-bottom:1px solid var(--line); }
+.hits > li:last-child { border-bottom:0; }
+.hit-head { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.hit-kind { font-size:var(--text-xs); font-weight:600; letter-spacing:.03em; text-transform:uppercase;
+  color:var(--mut); }
+.hit-target { font-weight:600; text-decoration:none; }
+.hit-target:hover { text-decoration:underline; }
+.hit-manage { margin-left:auto; display:inline-flex; align-items:center; color:var(--mut);
+  font-size:var(--text-sm); text-decoration:none; }
+.hit-manage:hover { color:var(--accent); }
+.hit-preview { margin:var(--space-1) 0 0; color:var(--mut); max-width:var(--measure);
+  white-space:pre-wrap; overflow-wrap:anywhere; }
+.hit-links { display:flex; flex-wrap:wrap; gap:var(--space-1) var(--space-2); margin-top:var(--space-2); }
+
 /* filter swap: brief crossfade (fallback for no View-Transitions browsers) */
 #host-table.htmx-swapping { opacity:.4; transition:opacity 120ms cubic-bezier(0.22,1,0.36,1); }
 

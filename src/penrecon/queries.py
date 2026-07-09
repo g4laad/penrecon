@@ -76,6 +76,30 @@ class DiffResult:
     entries: list[DiffEntry] = field(default_factory=list)
 
 
+@dataclass
+class NoteHit:
+    """One annotation matched by a global search, with a link back to its target."""
+
+    href: str
+    where: str  # human label of the annotated entity (IP, IP·port/proto, hostname)
+    kind: str  # "host" | "service" | "hostname"
+    status: str
+    tags: list[str]
+    preview: str
+
+
+@dataclass
+class SearchResults:
+    q: str
+    hosts: list[HostRow] = field(default_factory=list)
+    notes: list[NoteHit] = field(default_factory=list)
+    credentials: list[CredentialView] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.hosts) + len(self.notes) + len(self.credentials)
+
+
 # --- annotations / attachments -------------------------------------------------
 
 def get_annotation(
@@ -468,3 +492,80 @@ def diff_scans(session: Session, scan_a_id: int, scan_b_id: int) -> DiffResult:
             ip, port, proto = key
             result.entries.append(DiffEntry(ip, port, proto, "changed", before=sa, after=sb))
     return result
+
+
+# --- global search -------------------------------------------------------------
+# ponytail: in-Python substring match over already-loaded rows, same as
+# filter_hosts. Single-user local scale; swap to SQLite FTS5 only if a project
+# ever holds enough notes that a full-table scan is felt.
+
+def _note_preview(body: str, ql: str, width: int = 200) -> str:
+    """A short excerpt of the note body, windowed around the first match of ``ql``."""
+    body = body.strip()
+    if not body:
+        return ""
+    i = body.lower().find(ql)
+    if i < 0:  # matched on a tag, not the body — show the body's opening
+        return body[:width] + ("…" if len(body) > width else "")
+    start = max(0, i - 60)
+    end = min(len(body), i + len(ql) + 140)
+    return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
+
+
+def _note_location(session: Session, ann: Annotation) -> tuple[str, str, str] | None:
+    """(href, where-label, kind) for a note's target, or None if the target is gone."""
+    if ann.target_type == TargetType.host:
+        h = session.get(Host, ann.target_id)
+        return (f"/hosts/{h.id}", h.ip, "host") if h else None
+    if ann.target_type == TargetType.service:
+        svc = session.get(Service, ann.target_id)
+        if svc is None:
+            return None
+        h = session.get(Host, svc.host_id)
+        return (f"/hosts/{h.id}", f"{h.ip} · {svc.port}/{svc.proto}", "service") if h else None
+    if ann.target_type == TargetType.hostname:
+        hn = session.get(Hostname, ann.target_id)
+        if hn is None:
+            return None
+        link = session.exec(
+            select(HostHostname).where(HostHostname.hostname_id == ann.target_id)
+        ).first()
+        return (f"/hosts/{link.host_id}" if link else "/", hn.name, "hostname")
+    return None
+
+
+def search_notes(session: Session, ql: str) -> list[NoteHit]:
+    """Annotations whose body or any tag contains ``ql`` (already lowercased)."""
+    hits: list[NoteHit] = []
+    for ann in session.exec(select(Annotation)).all():
+        if ql not in ann.body_md.lower() and not any(ql in t.lower() for t in ann.tags):
+            continue
+        loc = _note_location(session, ann)
+        if loc is None:  # target was deleted out from under the note
+            continue
+        href, where, kind = loc
+        hits.append(
+            NoteHit(
+                href=href, where=where, kind=kind, status=ann.status.value,
+                tags=ann.tags, preview=_note_preview(ann.body_md, ql),
+            )
+        )
+    return hits
+
+
+def search(session: Session, q: str) -> SearchResults:
+    """Global search across hosts/hostnames/services, note bodies + tags, and
+    credentials. Empty query returns nothing (the page shows a hint instead)."""
+    ql = q.strip().lower()
+    if not ql:
+        return SearchResults(q="")
+    creds = [
+        c for c in credential_views(session)
+        if ql in c.username.lower() or ql in c.notes.lower()
+    ]
+    return SearchResults(
+        q=q.strip(),
+        hosts=filter_hosts(host_rows(session), q=ql),
+        notes=search_notes(session, ql),
+        credentials=creds,
+    )

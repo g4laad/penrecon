@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Search — penrecon{% endblock %}
+{% block content %}
+<h1>Search</h1>
+<form action="/search" method="get" class="filters search-form" role="search">
+  <label class="field search-field"><span>query</span>
+    <span class="input-icon">{{ icons.icon('search') }}<input type="search" name="q" value="{{ q }}"
+      placeholder="ip · hostname · service · note text · tag · credential" autocomplete="off" autofocus></span></label>
+  <button type="submit">{{ icons.icon('search') }}Search</button>
+</form>
+
+{% if not q %}
+<p class="search-hint">Search everything at once — host IPs and hostnames, service names and
+versions, your note bodies and tags, and saved credentials. Notes and tags are matched in
+full, so you can find a host by what you wrote about it, not just by what a scan reported.</p>
+
+{% elif results.total == 0 %}
+<p class="count">No matches for “{{ q }}”.</p>
+
+{% else %}
+<p class="count">{{ results.total }} result{{ '' if results.total == 1 else 's' }} for “{{ q }}”</p>
+
+{% if results.hosts %}
+<section class="results">
+  <h2>Hosts <span class="grp-count">{{ results.hosts | length }}</span></h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th class="col-chg">Change</th><th>IP</th><th>Hostnames</th><th>Open ports</th><th>Status</th><th>Tags</th></tr></thead>
+    <tbody>
+    {% for r in results.hosts %}
+      <tr>
+        <td class="chg-cell">{% if r.change == 'new' %}<span class="chg chg-new">{{ icons.icon('new', 'icon-sm') }}new<span class="visually-hidden"> — first seen in the latest scan</span></span>{% elif r.change == 'changed' %}<span class="chg chg-mod">{{ icons.icon('changed', 'icon-sm') }}chg<span class="visually-hidden"> — changed since the previous scan</span></span>{% endif %}</td>
+        <td class="ip"><a href="/hosts/{{ r.id }}">{{ r.ip | highlight(q) }}</a></td>
+        <td>{% for h in r.hostnames %}{{ h | highlight(q) }}{{ ", " if not loop.last }}{% endfor %}</td>
+        <td>{% if r.open_services %}<div class="ports">{% for port, svc in r.open_services[:12] %}<span class="port"><b>{{ port }}</b>{% if svc %}<i>{{ svc | highlight(q) }}</i>{% endif %}</span>{% endfor %}{% if r.open_services | length > 12 %}<span class="more">+{{ r.open_services | length - 12 }}</span>{% endif %}</div>{% else %}<span class="none">—</span>{% endif %}</td>
+        <td>{% if r.triaged %}<span class="status status-{{ r.status }}">{{ r.status }}</span>{% else %}<span class="none">—</span>{% endif %}</td>
+        <td>{% for t in r.tags %}<span class="tag">{{ t | highlight(q) }}</span>{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{% if results.notes %}
+<section class="results">
+  <h2>Notes <span class="grp-count">{{ results.notes | length }}</span></h2>
+  <ul class="hits">
+  {% for n in results.notes %}
+    <li>
+      <div class="hit-head">
+        <span class="hit-kind">{{ n.kind }}</span>
+        <a class="hit-target" href="{{ n.href }}"><span class="mono">{{ n.where }}</span></a>
+        <span class="status status-{{ n.status }}">{{ n.status }}</span>
+        {% for t in n.tags %}<span class="tag">{{ t | highlight(q) }}</span>{% endfor %}
+      </div>
+      {% if n.preview %}<p class="hit-preview">{{ n.preview | highlight(q) }}</p>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if results.credentials %}
+<section class="results">
+  <h2>Credentials <span class="grp-count">{{ results.credentials | length }}</span></h2>
+  <ul class="hits">
+  {% for c in results.credentials %}
+    <li>
+      <div class="hit-head">
+        <span class="hit-kind">{{ c.kind }}</span>
+        <span class="mono">{{ (c.username or '—') | highlight(q) }}</span>
+        <a class="hit-manage" href="/credentials">manage {{ icons.icon('chevron-right', 'icon-sm') }}</a>
+      </div>
+      {% if c.notes %}<p class="hit-preview">{{ c.notes | highlight(q) }}</p>{% endif %}
+      {% if c.hosts or c.services %}
+      <div class="hit-links">
+        {% for h in c.hosts %}<a class="tag" href="/hosts/{{ h.host_id }}">{{ h.ip }}</a>{% endfor %}
+        {% for s in c.services %}<a class="tag" href="/hosts/{{ s.host_id }}">{{ s.ip }}:{{ s.port }}</a>{% endfor %}
+      </div>
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% endif %}
+{% endblock %}

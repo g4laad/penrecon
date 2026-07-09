@@ -13,6 +13,7 @@
   {% set path = request.url.path %}
   <nav aria-label="Primary">
     <a href="/"{% if path == '/' or path.startswith('/hosts') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('server') }}<span>Hosts</span></a>
+    <a href="/search"{% if path.startswith('/search') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('search') }}<span>Search</span></a>
     <a href="/credentials"{% if path.startswith('/credentials') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('key') }}<span>Credentials</span></a>
     <a href="/scans"{% if path.startswith('/scans') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('scan') }}<span>Scans</span></a>
     <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('diff') }}<span>Diff</span></a>
