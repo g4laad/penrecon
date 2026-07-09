@@ -50,13 +50,16 @@ def _is_htmx(request: Request) -> bool:
 def index(
     request: Request,
     q: str = "",
-    port: int | None = None,
+    port: str = "",  # str, not int|None: the form submits an empty port= which 422s an int
     tag: str = "",
     status: str = "",
     sort: str = "ip",
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
-    rows = queries.filter_hosts(queries.host_rows(session), q=q, port=port, tag=tag, status=status)
+    port_val = int(port) if port.strip().isdigit() else None
+    rows = queries.filter_hosts(
+        queries.host_rows(session), q=q, port=port_val, tag=tag, status=status
+    )
     rows = queries.sort_hosts(rows, sort)
     ctx = {"request": request, "rows": rows, "q": q, "port": port, "tag": tag, "status": status,
            "sort": sort, "statuses": list(Status)}
