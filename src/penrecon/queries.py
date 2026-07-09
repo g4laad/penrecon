@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import TypeVar
 
 from sqlmodel import Session, select
 
@@ -312,11 +313,14 @@ def filter_hosts(
 
 
 HOSTS_PER_PAGE = 50
+SERVICES_PER_PAGE = 20
+
+_Row = TypeVar("_Row")
 
 
 def paginate(
-    rows: list[HostRow], page: int, per_page: int = HOSTS_PER_PAGE
-) -> tuple[list[HostRow], int, int]:
+    rows: list[_Row], page: int, per_page: int = HOSTS_PER_PAGE
+) -> tuple[list[_Row], int, int]:
     """Slice ``rows`` to one page. Returns ``(page_rows, page, pages)`` with
     ``page`` clamped into ``[1, pages]`` so an out-of-range or filtered-away
     page lands on the last real page rather than an empty table."""
@@ -347,6 +351,47 @@ def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[Host
 
 def host_services(session: Session, host_id: int) -> list[ServiceView]:
     return resolved_services(session, host_id)
+
+
+def filter_services(
+    services: list[ServiceView], port: str = "", state: str = "",
+    service: str = "", status: str = "",
+) -> list[ServiceView]:
+    """Per-column filter: port/service match as substrings, state/status exact."""
+    port = port.strip()
+    service = service.strip().lower()
+
+    def keep(s: ServiceView) -> bool:
+        if port and port not in str(s.port):
+            return False
+        if state and s.state != state:
+            return False
+        if status and (s.annotation.status if s.annotation else "") != status:
+            return False
+        if service:
+            hay = " ".join(x for x in (s.service_name, s.product, s.version) if x).lower()
+            if service not in hay:
+                return False
+        return True
+
+    return [s for s in services if keep(s)]
+
+
+SERVICE_SORT_DEFAULT_DIR = {"port": "asc", "state": "asc", "service": "asc", "status": "asc"}
+
+
+def sort_services(
+    services: list[ServiceView], sort: str, direction: str = ""
+) -> list[ServiceView]:
+    """Sort a host's services by one column; ties fall back to port order."""
+    reverse = direction == "desc"
+    if sort == "state":
+        return sorted(services, key=lambda s: (s.state, s.port), reverse=reverse)
+    if sort == "service":
+        return sorted(services, key=lambda s: ((s.service_name or "").lower(), s.port), reverse=reverse)
+    if sort == "status":
+        return sorted(services, key=lambda s: (s.annotation.status if s.annotation else "", s.port), reverse=reverse)
+    return sorted(services, key=lambda s: s.port, reverse=reverse)
 
 
 # --- credentials ---------------------------------------------------------------

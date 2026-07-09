@@ -192,21 +192,21 @@ a.button { display:inline-flex; align-items:center; gap:var(--space-2); font-wei
 a.button:hover { border-color:var(--accent); background:var(--panel); }
 .page-head-actions { display:flex; align-items:center; gap:var(--space-2); }
 
-/* --- service rows (host detail): compact summary, editor revealed on expand --- */
-details.service { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
-  margin:var(--space-2) 0; box-shadow:var(--shadow-sm); }
-details.service > summary {
-  list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:baseline;
-  gap:var(--space-2); padding:var(--space-3) var(--space-4); border-radius:var(--radius);
-}
-details.service > summary::-webkit-details-marker { display:none; }
-details.service > summary::before { content:"▸"; color:var(--mut); }
-details.service[open] > summary::before { content:"▾"; }
-details.service[open] > summary { border-bottom:1px solid var(--line); border-radius:var(--radius) var(--radius) 0 0; }
-details.service > summary:hover { background:var(--row-hover); }
-details.service > summary .port { font-weight:600; }
-details.service > summary small { color:var(--mut); font-family:var(--font-sans); }
-.svc-body { padding:var(--space-4); }
+/* --- services table (host detail): server-sorted columns, per-row detail modal --- */
+.svc-table td.svc-port { font-weight:600; }
+.svc-table td.svc-port .proto { color:var(--mut); font-weight:400; }  /* port/proto merged, proto recedes */
+.svc-table .svc-name { font-weight:500; }
+.svc-table small { color:var(--mut); font-family:var(--font-sans); margin-left:.4ch; }
+.svc-table .status { margin-right:var(--space-1); }
+.svc-th-actions { width:1%; white-space:nowrap; text-align:right; }
+/* per-column filter row: compact controls sit under each sortable header */
+.svc-filter-row th { padding:var(--space-2) var(--space-3); background:var(--panel); border-bottom:1px solid var(--line); text-transform:none; }
+.svc-filter-ctl { width:100%; height:32px; min-height:0; padding:var(--space-1) var(--space-2); font-size:var(--text-sm); }
+.icon-btn { display:inline-flex; align-items:center; justify-content:center; padding:var(--space-1);
+  min-height:0; background:none; border:1px solid transparent; box-shadow:none; color:var(--mut);
+  border-radius:var(--radius-sm); cursor:pointer; }
+.icon-btn:hover { color:var(--accent); border-color:var(--line-strong); }
+.svc-dialog-meta { margin:0; color:var(--mut); font-size:var(--text-sm); }
 .note-flag { color:var(--mut); font-size:var(--text-xs); }
 
 /* --- note rows: same collapsible shell as service rows, title-only summary --- */
@@ -314,13 +314,6 @@ p.panel-body.empty { color:var(--mut); }
 }
 /* jumps land below both sticky bars */
 #services, #credentials, #notes { scroll-margin-top:calc(var(--nav-h,48px) + var(--subnav-h,44px) + var(--space-3)); }
-
-/* --- service filter --- */
-.svc-filter { display:flex; align-items:center; gap:var(--space-3); margin:0 0 var(--space-3); }
-.svc-filter-field { flex:1 1 auto; max-width:52ch; }
-.svc-filter-field input { width:100%; }
-.svc-match { color:var(--mut); font-size:var(--text-sm); font-variant-numeric:tabular-nums; white-space:nowrap; }
-.svc-no-match { margin:var(--space-2) 0 0; }
 
 /* add-service: collapsed by default; summary reads as a secondary button */
 .add-toggle { margin-top:var(--space-3); }

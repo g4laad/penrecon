@@ -1,76 +1,147 @@
 {% import "_icons.html" as icons %}
-<div id="services" class="panel">
+{%- macro sort_th(label, col, default_dir, fqs) -%}
+  {%- set active = sort == col -%}
+  {%- set next_dir = ('asc' if active and direction == 'desc' else ('desc' if active and direction == 'asc' else default_dir)) -%}
+  {%- set url = "/hosts/" ~ host.id ~ "?sort=" ~ col ~ "&dir=" ~ next_dir ~ "&page=1" ~ fqs -%}
+  <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}">
+    <a class="th-sort" href="{{ url }}" hx-get="{{ url }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true">{{ label }}{% if active %}{{ icons.icon('chevron-up' if direction == 'asc' else 'chevron-down', 'icon-sm') }}{% endif %}</a>
+  </th>
+{%- endmacro -%}
+{%- set any_filter = f_port or f_state or f_service or f_status -%}
+{%- set fqs = "&f_port=" ~ (f_port | urlencode) ~ "&f_state=" ~ (f_state | urlencode) ~ "&f_service=" ~ (f_service | urlencode) ~ "&f_status=" ~ (f_status | urlencode) -%}
+{%- set furl = "/hosts/" ~ host.id -%}
+<div id="services" class="panel" data-total="{{ svc_total }}">
   <div class="panel-head">
-    <h2>{{ icons.icon('server') }}Services{% if services %} <span class="grp-count">{{ services | length }}</span>{% endif %}</h2>
+    <h2>{{ icons.icon('server') }}Services{% if svc_total or any_filter %} <span class="grp-count">{{ svc_total }}</span>{% endif %}</h2>
+    {% if any_filter %}<a class="clear" href="{{ furl }}" hx-get="{{ furl }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true">clear filters</a>{% endif %}
   </div>
 
-  {% if services %}
-  <div class="svc-filter">
-    <label class="input-icon svc-filter-field">{{ icons.icon('filter', 'icon-sm') }}
-      <input type="search" id="svc-filter" hx-preserve="true" autocomplete="off"
-             placeholder="filter — port, service, product, version, tag, status"
-             aria-label="Filter services" aria-controls="services">
-    </label>
-    <span class="svc-match" aria-live="polite"></span>
+  {% if services or any_filter %}
+  <div class="table-wrap">
+    <table class="svc-table" data-sort="{{ sort }}" data-dir="{{ direction }}">
+      <thead>
+        <tr>
+          {{ sort_th('Port', 'port', 'asc', fqs) }}
+          {{ sort_th('State', 'state', 'asc', fqs) }}
+          {{ sort_th('Service', 'service', 'asc', fqs) }}
+          {{ sort_th('Status', 'status', 'asc', fqs) }}
+          <th class="svc-th-actions"><span class="visually-hidden">Details</span></th>
+        </tr>
+        <tr class="svc-filter-row">
+          <th><input type="search" id="f_port" class="svc-filter-ctl" name="f_port" value="{{ f_port }}"
+                placeholder="filter" aria-label="Filter by port" autocomplete="off" hx-preserve="true"
+                hx-get="{{ furl }}" hx-include=".svc-filter-ctl" hx-target="#services" hx-swap="outerHTML" hx-push-url="true"
+                hx-trigger="keyup changed delay:300ms, search"></th>
+          <th><select class="svc-filter-ctl" name="f_state" aria-label="Filter by state"
+                hx-get="{{ furl }}" hx-include=".svc-filter-ctl" hx-target="#services" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+              <option value="">all</option>
+              {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if f_state==st.value }}>{{ st.value }}</option>{% endfor %}
+            </select></th>
+          <th><input type="search" id="f_service" class="svc-filter-ctl" name="f_service" value="{{ f_service }}"
+                placeholder="filter" aria-label="Filter by service" autocomplete="off" hx-preserve="true"
+                hx-get="{{ furl }}" hx-include=".svc-filter-ctl" hx-target="#services" hx-swap="outerHTML" hx-push-url="true"
+                hx-trigger="keyup changed delay:300ms, search"></th>
+          <th><select class="svc-filter-ctl" name="f_status" aria-label="Filter by status"
+                hx-get="{{ furl }}" hx-include=".svc-filter-ctl" hx-target="#services" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+              <option value="">all</option>
+              {% for st in statuses %}<option value="{{ st.value }}" {{ 'selected' if f_status==st.value }}>{{ st.value }}</option>{% endfor %}
+            </select></th>
+          <th class="svc-th-actions">
+            <input type="hidden" class="svc-filter-ctl" name="sort" value="{{ sort }}">
+            <input type="hidden" class="svc-filter-ctl" name="dir" value="{{ direction }}">
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in services %}
+        <tr class="service">
+          <td class="mono svc-port">{{ s.port }}<span class="proto">/{{ s.proto }}</span></td>
+          <td><span class="status status-{{ s.state }}">{{ s.state }}</span></td>
+          <td>
+            {% if s.service_name %}<span class="svc-name">{{ s.service_name }}</span>{% endif %}
+            {% if s.product or s.version %}<small>{{ s.product or "" }} {{ s.version or "" }}</small>{% endif %}
+            {% if s.manual %}<span class="tag manual">manual</span>{% endif %}
+            {% if s.annotation %}{% for t in s.annotation.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}
+            {% if not s.service_name and not s.product and not s.version %}<span class="none">—</span>{% endif %}
+          </td>
+          <td>{% if s.annotation and s.annotation.status != 'new' %}<span class="status status-{{ s.annotation.status }}">{{ s.annotation.status }}</span>{% elif s.annotation %}<span class="status status-new">new</span>{% else %}<span class="none">—</span>{% endif %}</td>
+          <td class="svc-th-actions">
+            <button type="button" class="icon-btn svc-detail-btn" data-dialog="svc-dialog-{{ s.service_id }}"
+              aria-label="Details for {{ s.port }}/{{ s.proto }}">{{ icons.icon('edit', 'icon-sm') }}</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">No services match these filters. <a class="clear" href="{{ furl }}" hx-get="{{ furl }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true">Clear</a>.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
+
+  {% if pages > 1 %}
+  <nav class="pager svc-pager" aria-label="Service pages">
+    {% if page > 1 %}{% set prev = "/hosts/" ~ host.id ~ "?sort=" ~ sort ~ "&dir=" ~ direction ~ "&page=" ~ (page - 1) ~ fqs %}<a class="pager-btn" href="{{ prev }}" hx-get="{{ prev }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true" rel="prev">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</a>{% else %}<span class="pager-btn" aria-disabled="true">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</span>{% endif %}
+    <span class="pager-info">Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}{% set next = "/hosts/" ~ host.id ~ "?sort=" ~ sort ~ "&dir=" ~ direction ~ "&page=" ~ (page + 1) ~ fqs %}<a class="pager-btn" href="{{ next }}" hx-get="{{ next }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true" rel="next">Next{{ icons.icon('chevron-right', 'icon-sm') }}</a>{% else %}<span class="pager-btn" aria-disabled="true">Next{{ icons.icon('chevron-right', 'icon-sm') }}</span>{% endif %}
+  </nav>
   {% endif %}
 
   {% for s in services %}
-  {% set fstatus = s.annotation.status if s.annotation else '' %}
-  {% set ftags = (s.annotation.tags | join(' ')) if s.annotation else '' %}
-  <details class="service" data-state="{{ s.state }}"
-    data-filter="{{ (s.port ~ '/' ~ s.proto ~ ' ' ~ s.state ~ ' ' ~ (s.service_name or '') ~ ' ' ~ (s.product or '') ~ ' ' ~ (s.version or '') ~ (' manual' if s.manual else '') ~ ' ' ~ fstatus ~ ' ' ~ ftags) | lower }}">
-    <summary>
-      <span class="mono port">{{ s.port }}/{{ s.proto }}</span>
-      <span class="status status-{{ s.state }}">{{ s.state }}</span>
-      {% if s.service_name %}<span class="svc-name">{{ s.service_name }}</span>{% endif %}
-      {% if s.product or s.version %}<small>{{ s.product or "" }} {{ s.version or "" }}</small>{% endif %}
-      {% if s.manual %}<span class="tag manual">manual</span>{% endif %}
-      {% if s.annotation and s.annotation.status != 'new' %}<span class="status status-{{ s.annotation.status }}">{{ s.annotation.status }}</span>{% endif %}
-      {% if s.annotation %}{% for t in s.annotation.tags %}<span class="tag">{{ t }}</span>{% endfor %}{% endif %}
-      {% if s.last_seen %}<small class="lastseen">seen {{ s.last_seen }}</small>{% endif %}
-    </summary>
-    <div class="svc-body">
-      <form class="svc-edit" hx-post="/services/{{ s.service_id }}/edit" hx-target="#services" hx-swap="outerHTML">
-        <div class="svc-edit-row">
-          <label class="field"><span>state</span>
-            <select name="state" aria-label="State">
-              <option value="">— from scan</option>
-              {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if s.state==st.value }}>{{ st.value }}</option>{% endfor %}
-            </select></label>
-          <label class="field"><span>service</span>
-            <input name="service_name" value="{{ s.service_name or '' }}" placeholder="service" aria-label="Service name"></label>
-          <label class="field"><span>product</span>
-            <input name="product" value="{{ s.product or '' }}" placeholder="product" aria-label="Product"></label>
-          <label class="field"><span>version</span>
-            <input name="version" value="{{ s.version or '' }}" placeholder="version" aria-label="Version"></label>
-        </div>
-        <div class="svc-edit-row">
-          <label class="field"><span>status</span>
-            <select name="status" aria-label="Triage status">
-              {% for st in statuses %}<option value="{{ st.value }}" {{ 'selected' if s.annotation and s.annotation.status==st.value }}>{{ st.value }}</option>{% endfor %}
-            </select></label>
-          <label class="field ann-tags"><span>tags</span>
-            <input type="text" name="tags" placeholder="comma,separated" value="{{ (s.annotation.tags | join(', ')) if s.annotation else '' }}"></label>
-        </div>
-        <div class="svc-edit-actions">
-          <button type="submit">Save</button>
-          <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
-            hx-target="#services" hx-swap="outerHTML"
-            hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
-        </div>
-      </form>
-    </div>
-  </details>
+  <dialog id="svc-dialog-{{ s.service_id }}" class="modal" aria-labelledby="svc-dialog-{{ s.service_id }}-title">
+    <form class="modal-form svc-edit" hx-post="/services/{{ s.service_id }}/edit" hx-target="#services" hx-swap="outerHTML">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="dir" value="{{ direction }}">
+      <input type="hidden" name="page" value="{{ page }}">
+      <input type="hidden" name="f_port" value="{{ f_port }}">
+      <input type="hidden" name="f_state" value="{{ f_state }}">
+      <input type="hidden" name="f_service" value="{{ f_service }}">
+      <input type="hidden" name="f_status" value="{{ f_status }}">
+      <h2 id="svc-dialog-{{ s.service_id }}-title" class="mono">{{ s.port }}/{{ s.proto }}
+        {% if s.manual %}<span class="tag manual">manual</span>{% endif %}</h2>
+      {% if s.last_seen %}<p class="svc-dialog-meta">seen {{ s.last_seen }}</p>{% endif %}
+      <div class="svc-edit-row">
+        <label class="field"><span>state</span>
+          <select name="state" aria-label="State">
+            {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if s.state==st.value }}>{{ st.value }}</option>{% endfor %}
+          </select></label>
+        <label class="field"><span>service</span>
+          <input name="service_name" value="{{ s.service_name or '' }}" placeholder="service" aria-label="Service name"></label>
+        <label class="field"><span>product</span>
+          <input name="product" value="{{ s.product or '' }}" placeholder="product" aria-label="Product"></label>
+        <label class="field"><span>version</span>
+          <input name="version" value="{{ s.version or '' }}" placeholder="version" aria-label="Version"></label>
+      </div>
+      <div class="svc-edit-row">
+        <label class="field"><span>status</span>
+          <select name="status" aria-label="Triage status">
+            {% for st in statuses %}<option value="{{ st.value }}" {{ 'selected' if s.annotation and s.annotation.status==st.value }}>{{ st.value }}</option>{% endfor %}
+          </select></label>
+        <label class="field ann-tags"><span>tags</span>
+          <input type="text" name="tags" placeholder="comma,separated" value="{{ (s.annotation.tags | join(', ')) if s.annotation else '' }}"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
+          hx-target="#services" hx-swap="outerHTML"
+          hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
+        <button type="button" class="modal-cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+  {% endfor %}
   {% else %}
   <p class="empty panel-body">No services yet. Add one below, or ingest a scan.</p>
-  {% endfor %}
-
-  <p class="empty svc-no-match" hidden>No services match the filter.</p>
+  {% endif %}
 
   <details class="add-toggle">
     <summary>{{ icons.icon('plus', 'icon-sm') }}Add service</summary>
     <form class="svc-add" hx-post="/hosts/{{ host.id }}/services" hx-target="#services" hx-swap="outerHTML">
+      <input type="hidden" name="sort" value="{{ sort }}">
+      <input type="hidden" name="dir" value="{{ direction }}">
+      <input type="hidden" name="page" value="{{ page }}">
+      <input type="hidden" name="f_port" value="{{ f_port }}">
+      <input type="hidden" name="f_state" value="{{ f_state }}">
+      <input type="hidden" name="f_service" value="{{ f_service }}">
+      <input type="hidden" name="f_status" value="{{ f_status }}">
       <input name="port" type="number" min="0" max="65535" placeholder="port" required aria-label="New service port">
       <input name="proto" value="tcp" aria-label="Protocol">
       <select name="state" aria-label="State">

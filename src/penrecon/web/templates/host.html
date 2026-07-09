@@ -39,7 +39,7 @@
 </div>
 
 <nav class="host-subnav" aria-label="On this host">
-  <a href="#services">{{ icons.icon('server', 'icon-sm') }}Services <span class="subnav-count" data-count="services">{{ services | length }}</span></a>
+  <a href="#services">{{ icons.icon('server', 'icon-sm') }}Services <span class="subnav-count" data-count="services">{{ svc_total }}</span></a>
   <a href="#credentials">{{ icons.icon('key', 'icon-sm') }}Credentials <span class="subnav-count" data-count="creds">{{ host_credentials | length }}</span></a>
   <a href="#notes">{{ icons.icon('note', 'icon-sm') }}Notes <span class="subnav-count" data-count="notes">{{ host_notes | length }}</span></a>
 </nav>
@@ -93,41 +93,32 @@
   measure();
   addEventListener('resize', measure);
 
-  // Subnav counts derived from the DOM so they stay correct after an HTMX edit
-  // (add/delete of a service, credential, or note swaps only its own fragment).
-  const counters = {
-    services: '#services .service',
-    creds: '#credentials .cred-item',
-    notes: '#notes .note',
-  };
+  // Subnav counts: creds/notes counted from the DOM (their fragments swap in
+  // place); services reads #services data-total, since the table is paginated
+  // server-side and the visible rows are only the current page.
+  const counters = { creds: '#credentials .cred-item', notes: '#notes .note' };
   const recount = () => {
     for (const [key, sel] of Object.entries(counters)) {
       const el = document.querySelector(`.subnav-count[data-count="${key}"]`);
       if (el) el.textContent = document.querySelectorAll(sel).length;
     }
+    const svc = document.querySelector('.subnav-count[data-count="services"]');
+    const panel = document.getElementById('services');
+    if (svc && panel) svc.textContent = panel.dataset.total || '0';
   };
 
-  // Service filter: each row carries a lowercased data-filter; every
-  // space-separated term must be a substring. Instant, local, no round-trip.
-  const applyFilter = () => {
-    const input = document.getElementById('svc-filter');
-    const rows = document.querySelectorAll('#services .service');
-    const terms = (input ? input.value : '').toLowerCase().split(/\s+/).filter(Boolean);
-    let shown = 0;
-    rows.forEach((row) => {
-      const hit = terms.every((t) => (row.dataset.filter || '').includes(t));
-      row.hidden = !hit;
-      if (hit) shown++;
-    });
-    const match = document.querySelector('.svc-match');
-    if (match) match.textContent = terms.length ? `${shown} of ${rows.length}` : '';
-    const none = document.querySelector('.svc-no-match');
-    if (none) none.hidden = !(terms.length && shown === 0);
-  };
+  // Service detail modal: native <dialog> (Esc + focus-trap free). Sortable
+  // headers and the pager are plain HTMX links that re-render #services.
+  document.addEventListener('click', (e) => {
+    const det = e.target.closest('.svc-detail-btn');
+    if (det) { const d = document.getElementById(det.dataset.dialog); if (d) d.showModal(); return; }
+    const cancel = e.target.closest('.modal-cancel');
+    if (cancel) { cancel.closest('dialog').close(); return; }
+    // backdrop click closes the service modal
+    if (e.target.tagName === 'DIALOG' && e.target.classList.contains('modal')) e.target.close();
+  });
 
-  document.addEventListener('input', (e) => { if (e.target.id === 'svc-filter') applyFilter(); });
-  document.body.addEventListener('htmx:afterSwap', () => { recount(); applyFilter(); measure(); });
+  document.body.addEventListener('htmx:afterSwap', () => { recount(); measure(); });
   recount();
-  applyFilter();
 </script>
 {% endblock %}

@@ -128,28 +128,56 @@ def export_hosts_csv(session: Session = Depends(get_session)) -> Response:
     )
 
 
+def _services_ctx(
+    session: Session, host: Host, sort: str, dir: str, page: str,
+    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "",
+) -> dict[str, object]:
+    """Filtered + sorted + server-paginated service context, shared by the full
+    page and the HTMX fragment. `svc_total` is the matched (pre-page) count."""
+    assert host.id is not None
+    services = queries.host_services(session, host.id)
+    services = queries.filter_services(services, f_port, f_state, f_service, f_status)
+    direction = dir if dir in ("asc", "desc") else queries.SERVICE_SORT_DEFAULT_DIR.get(sort, "asc")
+    services = queries.sort_services(services, sort, direction)
+    total = len(services)
+    page_no = int(page) if page.strip().isdigit() else 1
+    page_services, page_no, pages = queries.paginate(services, page_no, queries.SERVICES_PER_PAGE)
+    return {"host": host, "services": page_services, "svc_total": total,
+            "page": page_no, "pages": pages, "sort": sort, "direction": direction,
+            "f_port": f_port, "f_state": f_state, "f_service": f_service, "f_status": f_status,
+            "statuses": list(Status), "states": list(ObsState)}
+
+
 @app.get("/hosts/{host_id}", response_class=HTMLResponse)
 def host_detail(
-    request: Request, host_id: int, session: Session = Depends(get_session)
+    request: Request,
+    host_id: int,
+    sort: str = "port",
+    dir: str = "",
+    page: str = "1",
+    f_port: str = "",
+    f_state: str = "",
+    f_service: str = "",
+    f_status: str = "",
+    session: Session = Depends(get_session),
 ) -> HTMLResponse:
     host = session.get(Host, host_id)
     if host is None:
         return HTMLResponse("host not found", status_code=404)
-    services = queries.host_services(session, host_id)
+    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status)
+    if _is_htmx(request):  # sort/pager clicks swap just the services panel
+        return templates.TemplateResponse(request, "_services.html", {"request": request, **svc_ctx})
     return templates.TemplateResponse(
         request,
         "host.html",
         {
             "request": request,
-            "host": host,
             "hostnames": queries.host_hostnames(session, host_id),
-            "services": services,
             "host_ann": queries.get_annotation(session, host_id=host_id),
             "host_notes": queries.notes_for(session, host_id),
-            "statuses": list(Status),
-            "states": list(ObsState),
             "host_credentials": queries.credentials_for_host(session, host_id),
             "kinds": list(CredKind),
+            **svc_ctx,
         },
     )
 
@@ -163,19 +191,14 @@ def _render_hostnames(request: Request, session: Session, host: Host) -> HTMLRes
     )
 
 
-def _render_services(request: Request, session: Session, host: Host) -> HTMLResponse:
-    assert host.id is not None
-    services = queries.host_services(session, host.id)
+def _render_services(
+    request: Request, session: Session, host: Host,
+    sort: str = "port", dir: str = "", page: str = "1",
+    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "",
+) -> HTMLResponse:
     return templates.TemplateResponse(
-        request,
-        "_services.html",
-        {
-            "request": request,
-            "host": host,
-            "services": services,
-            "statuses": list(Status),
-            "states": list(ObsState),
-        },
+        request, "_services.html",
+        {"request": request, **_services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status)},
     )
 
 
@@ -301,6 +324,13 @@ def add_service(
     service_name: str = Form(""),
     product: str = Form(""),
     version: str = Form(""),
+    sort: str = Form("port"),
+    dir: str = Form(""),
+    page: str = Form("1"),
+    f_port: str = Form(""),
+    f_state: str = Form(""),
+    f_service: str = Form(""),
+    f_status: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     host = session.get(Host, host_id)
@@ -319,7 +349,7 @@ def add_service(
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
     session.commit()
-    return _render_services(request, session, host)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
 
 
 @app.post("/services/{service_id}/edit", response_class=HTMLResponse)
@@ -332,6 +362,13 @@ def edit_service(
     version: str = Form(""),
     status: Status = Form(Status.new),
     tags: str = Form(""),
+    sort: str = Form("port"),
+    dir: str = Form(""),
+    page: str = Form("1"),
+    f_port: str = Form(""),
+    f_state: str = Form(""),
+    f_service: str = Form(""),
+    f_status: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
@@ -347,12 +384,21 @@ def edit_service(
     queries.upsert_annotation(session, status, tag_list, service_id=service_id)
     host = session.get(Host, svc.host_id)
     assert host is not None
-    return _render_services(request, session, host)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
 
 
 @app.post("/services/{service_id}/delete", response_class=HTMLResponse)
 def delete_service(
-    request: Request, service_id: int, session: Session = Depends(get_session)
+    request: Request,
+    service_id: int,
+    sort: str = Form("port"),
+    dir: str = Form(""),
+    page: str = Form("1"),
+    f_port: str = Form(""),
+    f_state: str = Form(""),
+    f_service: str = Form(""),
+    f_status: str = Form(""),
+    session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
     if svc is None:
@@ -373,7 +419,7 @@ def delete_service(
         session.delete(obs)
     session.delete(svc)
     session.commit()
-    return _render_services(request, session, host)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
 
 
 # --- credentials --------------------------------------------------------------
