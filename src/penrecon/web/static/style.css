@@ -2,6 +2,7 @@
   /* palette (unchanged identity) */
   --bg:#0f1115; --panel:#181b22; --fg:#d7dce3; --mut:#8b93a1; --accent:#5aa9e6;
   --line:#262b34; --row-hover:#161a20;
+  --diff-add:#8fd88f; --diff-chg:#e7cf8f; --diff-del:#e79a9a;  /* scan-delta + diff vocabulary */
 
   --font-sans: ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -64,9 +65,9 @@ th { color:var(--mut); font-weight:600; font-size:var(--text-xs); letter-spacing
 tbody tr:hover td { background:var(--row-hover); }
 td.ip a { font-weight:500; }
 /* scan-delta marker: fixed slot keeps IPs column-aligned; text+glyph, never color-only */
-.chg { display:inline-block; width:5.5ch; font-family:var(--font-mono); font-size:var(--text-xs); white-space:nowrap; text-decoration:none; border:0; }
-.chg-new { color:var(--accent); }
-.chg-mod { color:#e7cf8f; }
+.chg { display:inline-block; width:6ch; font-family:var(--font-mono); font-size:var(--text-xs); white-space:nowrap; }
+.chg-new { color:var(--diff-add); }  /* green (added), not the blue IP link */
+.chg-mod { color:var(--diff-chg); }  /* amber (changed), matching /diff */
 .num { text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); width:1%; white-space:nowrap; }
 .empty { color:var(--mut); }
 
@@ -98,6 +99,7 @@ textarea { width:100%; max-width:var(--measure); resize:vertical; min-height:aut
 /* persistent field labels: the hint stays put after you type (no placeholder-only labels) */
 .field { display:flex; flex-direction:column; gap:var(--space-1); }
 .field > span { font-size:var(--text-xs); color:var(--mut); letter-spacing:.02em; }
+.field kbd { font-family:var(--font-mono); font-size:.75em; color:var(--mut); border:1px solid var(--line); border-radius:var(--radius-sm); padding:0 .35em; }
 button { cursor:pointer; } button:hover { border-color:var(--accent); }
 
 /* service rows (host detail): compact summary, editor revealed on expand */
@@ -128,8 +130,6 @@ details.service > summary small { color:var(--mut); font-family:var(--font-sans)
 .status-exploited { background:#622; color:#fbb; }
 .status-new { background:#334; color:#bcd; }
 .status-reviewed { background:#345; color:#cde; }
-/* default (un-triaged) status recedes to flat muted text so real triage pills pop */
-.status.untriaged { background:none; color:var(--mut); padding:0; }
 
 .hostnames { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); margin:0 0 var(--space-3); }
 .hostnames .hn-label, .svc-add .hn-label { color:var(--mut); font-size:var(--text-sm); }
@@ -156,7 +156,7 @@ button.danger { color:#fbb; }
 button.danger:hover { border-color:#c66; }
 
 .attachments ul { margin:var(--space-1) 0; padding-left:var(--space-4); }
-.diff-added td { color:#8fd88f; } .diff-removed td { color:#e79a9a; } .diff-changed td { color:#e7cf8f; }
+.diff-added td { color:var(--diff-add); } .diff-removed td { color:var(--diff-del); } .diff-changed td { color:var(--diff-chg); }
 .meta { color:var(--mut); }
 
 /* filter swap: brief crossfade (fallback for no View-Transitions browsers) */

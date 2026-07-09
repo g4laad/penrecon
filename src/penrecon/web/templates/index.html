@@ -10,8 +10,8 @@
 </div>
 <form class="filters" role="search" hx-get="/" hx-target="#host-table" hx-push-url="true"
       hx-swap="innerHTML transition:true swap:120ms"
-      hx-trigger="submit, change from:.filters select">
-  <label class="field"><span>search</span>
+      hx-trigger="submit">
+  <label class="field"><span>search <kbd>/</kbd></span>
     <input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service"></label>
   <label class="field"><span>port</span>
     <input type="number" name="port" value="{{ port or '' }}" placeholder="any"></label>

@@ -17,6 +17,9 @@ colors:
   status-danger-ink: "#ffbbbb"
   tag-bg: "#224433"
   tag-ink: "#bbffee"
+  diff-add: "#8fd88f"
+  diff-chg: "#e7cf8f"
+  diff-del: "#e79a9a"
 typography:
   heading:
     fontFamily: "ui-sans-serif, system-ui, sans-serif"
