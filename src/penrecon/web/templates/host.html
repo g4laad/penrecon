@@ -42,7 +42,7 @@
 
 <section class="panel">
   <div class="panel-head">
-    <h2>{{ icons.icon('key') }}Credentials</h2>
+    <h2>{{ icons.icon('key') }}Credentials{% if host_credentials %} <span class="grp-count">{{ host_credentials | length }}</span>{% endif %}</h2>
     <a class="button" href="/credentials">{{ icons.icon('link', 'icon-sm') }}Manage links</a>
   </div>
   {% include "_host_credentials.html" %}
