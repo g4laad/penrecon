@@ -155,10 +155,6 @@ def host_detail(
                 s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
                 for s in services
             },
-            "notes_by_service": {
-                s.service_id: queries.notes_for(session, TargetType.service, s.service_id)
-                for s in services
-            },
             "statuses": list(Status),
             "states": list(ObsState),
             "host_credentials": queries.credentials_for_host(session, host_id),
@@ -188,10 +184,6 @@ def _render_services(request: Request, session: Session, host: Host) -> HTMLResp
             "services": services,
             "attachments_by_service": {
                 s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
-                for s in services
-            },
-            "notes_by_service": {
-                s.service_id: queries.notes_for(session, TargetType.service, s.service_id)
                 for s in services
             },
             "statuses": list(Status),
@@ -311,8 +303,6 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
         ann = queries.get_annotation(session, TargetType.service, sid)
         if ann is not None:
             session.delete(ann)
-        for note in queries.notes_for(session, TargetType.service, sid):
-            session.delete(note)
         for csl in session.exec(
             select(CredentialService).where(CredentialService.service_id == sid)
         ).all():
@@ -415,8 +405,6 @@ def delete_service(
     ann = queries.get_annotation(session, TargetType.service, service_id)
     if ann is not None:
         session.delete(ann)
-    for note in queries.notes_for(session, TargetType.service, service_id):
-        session.delete(note)
     for csl in session.exec(
         select(CredentialService).where(CredentialService.service_id == service_id)
     ).all():
