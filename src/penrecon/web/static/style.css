@@ -109,6 +109,30 @@ button { cursor:pointer; } button:hover { border-color:var(--accent); }
 .status-new { background:#334; color:#bcd; }
 .status-reviewed { background:#345; color:#cde; }
 
+.hostnames { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); margin:0 0 var(--space-3); }
+.hostnames .hn-label, .svc-add .hn-label { color:var(--mut); font-size:var(--text-sm); }
+.add-hostname { display:flex; gap:var(--space-2); }
+.add-hostname input { width:20ch; height:30px; }
+.add-hostname button { height:30px; }
+.tag.removable { display:inline-flex; align-items:center; gap:.3ch; }
+.tag.removable .x { background:none; border:0; color:var(--mut); cursor:pointer; padding:0; font-size:1.1em; line-height:1; }
+.tag.removable .x:hover { color:var(--accent); }
+.tag.manual { background:#334; color:#bcd; }
+
+/* host + service manual editing */
+.page-head { display:flex; align-items:baseline; justify-content:space-between; gap:var(--space-3); flex-wrap:wrap; }
+.new-host { display:flex; gap:var(--space-2); }
+.new-host input { width:16ch; height:36px; }
+.host-actions { display:flex; gap:var(--space-3); flex-wrap:wrap; margin:0 0 var(--space-4); }
+.edit-ip { display:flex; gap:var(--space-2); }
+.edit-ip input { width:18ch; }
+.svc-edit, .svc-add { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:center; margin:var(--space-2) 0; }
+.svc-edit input, .svc-add input { height:32px; }
+.svc-add input[name="port"] { width:9ch; }
+.svc-add input[name="proto"] { width:7ch; }
+button.danger { color:#fbb; }
+button.danger:hover { border-color:#c66; }
+
 .attachments ul { margin:var(--space-1) 0; padding-left:var(--space-4); }
 .diff-added td { color:#8fd88f; } .diff-removed td { color:#e79a9a; } .diff-changed td { color:#e7cf8f; }
 .meta { color:var(--mut); }

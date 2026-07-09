@@ -1,0 +1,13 @@
+<div id="hostnames" class="hostnames">
+  <span class="hn-label">Hostnames</span>
+  {% for hid, name in hostnames %}
+  <span class="tag removable">{{ name }}<button type="button" class="x"
+    hx-post="/hosts/{{ host.id }}/hostnames/{{ hid }}/delete" hx-target="#hostnames" hx-swap="outerHTML"
+    aria-label="Delete hostname {{ name }}">×</button></span>
+  {% endfor %}
+  {% if not hostnames %}<span class="empty">none yet</span>{% endif %}
+  <form class="add-hostname" hx-post="/hosts/{{ host.id }}/hostnames" hx-target="#hostnames" hx-swap="outerHTML">
+    <input name="name" placeholder="add hostname" aria-label="Add hostname for this host" required>
+    <button type="submit">Add</button>
+  </form>
+</div>

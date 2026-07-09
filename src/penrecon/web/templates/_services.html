@@ -1,0 +1,45 @@
+<div id="services">
+  <h2>Services</h2>
+  {% for s in services %}
+  <section class="service">
+    <h3>
+      <span class="mono">{{ s.port }}/{{ s.proto }}</span>
+      <span class="status status-{{ s.state }}">{{ s.state }}</span>
+      {% if s.service_name %}{{ s.service_name }}{% endif %}
+      {% if s.product or s.version %}<small>{{ s.product or "" }} {{ s.version or "" }}</small>{% endif %}
+      {% if s.manual %}<span class="tag manual">manual</span>{% endif %}
+      {% if s.last_seen %}<small class="lastseen">seen {{ s.last_seen }}</small>{% endif %}
+    </h3>
+    <form class="svc-edit" hx-post="/services/{{ s.service_id }}/edit" hx-target="#services" hx-swap="outerHTML">
+      <select name="state" aria-label="State">
+        <option value="">— from scan</option>
+        {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if s.state==st.value }}>{{ st.value }}</option>{% endfor %}
+      </select>
+      <input name="service_name" value="{{ s.service_name or '' }}" placeholder="service" aria-label="Service name">
+      <input name="product" value="{{ s.product or '' }}" placeholder="product" aria-label="Product">
+      <input name="version" value="{{ s.version or '' }}" placeholder="version" aria-label="Version">
+      <button type="submit">Save</button>
+      <button type="button" class="danger" hx-post="/services/{{ s.service_id }}/delete"
+        hx-target="#services" hx-swap="outerHTML"
+        hx-confirm="Delete {{ s.port }}/{{ s.proto }}? Stays deleted across re-scans.">Delete</button>
+    </form>
+    {% with tt="service", tid=s.service_id, ann=s.annotation %}{% include "_annotation.html" %}{% endwith %}
+    {% with tt="service", tid=s.service_id, attachments=attachments_by_service[s.service_id] %}{% include "_attachments.html" %}{% endwith %}
+  </section>
+  {% else %}
+  <p class="empty">No services yet.</p>
+  {% endfor %}
+
+  <form class="svc-add" hx-post="/hosts/{{ host.id }}/services" hx-target="#services" hx-swap="outerHTML">
+    <span class="hn-label">Add service</span>
+    <input name="port" type="number" min="0" max="65535" placeholder="port" required aria-label="New service port">
+    <input name="proto" value="tcp" aria-label="Protocol">
+    <select name="state" aria-label="State">
+      {% for st in states %}<option value="{{ st.value }}" {{ 'selected' if st.value=='open' }}>{{ st.value }}</option>{% endfor %}
+    </select>
+    <input name="service_name" placeholder="service" aria-label="Service name">
+    <input name="product" placeholder="product" aria-label="Product">
+    <input name="version" placeholder="version" aria-label="Version">
+    <button type="submit">Add</button>
+  </form>
+</div>

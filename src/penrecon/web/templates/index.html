@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Hosts — penrecon{% endblock %}
 {% block content %}
-<h1>Hosts</h1>
+<div class="page-head">
+  <h1>Hosts</h1>
+  <form class="new-host" action="/hosts" method="post">
+    <input name="ip" placeholder="10.0.0.0" required aria-label="New host IP" class="mono">
+    <button type="submit">+ New host</button>
+  </form>
+</div>
 <form class="filters" role="search" hx-get="/" hx-target="#host-table" hx-push-url="true"
       hx-swap="innerHTML transition:true swap:120ms"
       hx-trigger="submit, keyup delay:400ms from:input[name=q], change">
