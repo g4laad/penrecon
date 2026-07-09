@@ -73,8 +73,8 @@ class Service(SQLModel, table=True):
     """Stable service identity. Annotations/attachments point here.
 
     Manual overrides (m_*) win over the latest Observation for display, so a
-    hand-corrected value survives re-scans. `hidden` is a manual delete that a
-    re-scan un-hides if the port is seen again (so a mistaken delete is undoable).
+    hand-corrected value survives re-scans. Deleting a service is a real delete
+    (row + its notes/attachments); a later scan re-creates it fresh.
     """
 
     __table_args__ = (UniqueConstraint("host_id", "port", "proto"),)
@@ -82,7 +82,6 @@ class Service(SQLModel, table=True):
     host_id: int = Field(foreign_key="host.id", index=True)
     port: int
     proto: str
-    hidden: bool = False
     m_state: ObsState | None = None
     m_service_name: str | None = None
     m_product: str | None = None

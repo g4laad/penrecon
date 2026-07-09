@@ -244,7 +244,6 @@ def add_service(
     if svc is None:
         svc = Service(host_id=host_id, port=port, proto=proto.strip().lower())
         session.add(svc)
-    svc.hidden = False  # (re-)adding restores a previously hidden service
     svc.m_state = ObsState(state) if state else ObsState.open
     svc.m_service_name = _clean(service_name)
     svc.m_product = _clean(product)
@@ -283,10 +282,26 @@ def delete_service(
     svc = session.get(Service, service_id)
     if svc is None:
         return HTMLResponse("service not found", status_code=404)
-    svc.hidden = True  # sticky manual delete
-    session.commit()
     host = session.get(Host, svc.host_id)
     assert host is not None
+    # hard delete: the service and everything tied to it. A later scan that sees
+    # this port re-creates it fresh, as if it had never been deleted.
+    ann = queries.get_annotation(session, TargetType.service, service_id)
+    if ann is not None:
+        session.delete(ann)
+    for att in queries.attachments_for(session, TargetType.service, service_id):
+        Path(att.stored_path).unlink(missing_ok=True)
+        session.delete(att)
+    for obs in session.exec(
+        select(Observation).where(
+            Observation.host_id == svc.host_id,
+            Observation.port == svc.port,
+            Observation.proto == svc.proto,
+        )
+    ).all():
+        session.delete(obs)
+    session.delete(svc)
+    session.commit()
     return _render_services(request, session, host)
 
 

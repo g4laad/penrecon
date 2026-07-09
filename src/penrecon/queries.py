@@ -131,9 +131,7 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
     latest = latest_observations(session, host_id)
     views: list[ServiceView] = []
     for svc in session.exec(
-        select(Service)
-        .where(Service.host_id == host_id, Service.hidden == False)  # noqa: E712
-        .order_by(Service.port)  # type: ignore[arg-type]
+        select(Service).where(Service.host_id == host_id).order_by(Service.port)  # type: ignore[arg-type]
     ).all():
         assert svc.id is not None
         o = latest.get((svc.port, svc.proto))

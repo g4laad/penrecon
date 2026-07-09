@@ -24,7 +24,6 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 # only if migrations get non-trivial.
 _ADDED_COLUMNS: dict[str, list[tuple[str, str]]] = {
     "service": [
-        ("hidden", "INTEGER NOT NULL DEFAULT 0"),
         ("m_state", "VARCHAR"),
         ("m_service_name", "VARCHAR"),
         ("m_product", "VARCHAR"),
