@@ -85,7 +85,7 @@ def test_upload_scan_then_host_appears(client: TestClient) -> None:
 
 
 def test_edit_host_rejects_duplicate_ip(client: TestClient) -> None:
-    a = client.post("/hosts", data={"ip": "10.0.0.10"}, follow_redirects=False)
+    client.post("/hosts", data={"ip": "10.0.0.10"}, follow_redirects=False)
     b = client.post("/hosts", data={"ip": "10.0.0.11"}, follow_redirects=False)
     b_id = b.headers["location"].rsplit("/", 1)[1]
     # try to rename host B onto host A's IP
