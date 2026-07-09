@@ -5,9 +5,9 @@
   {%- set active = sort == col -%}
   {%- set next_dir = ('asc' if active and direction == 'desc' else ('desc' if active and direction == 'asc' else default_dir)) -%}
   {%- set url = "/?" ~ base ~ "&sort=" ~ col ~ "&dir=" ~ next_dir -%}
-  <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}"{{ ' class="sorted"' if active }}>
+  <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}">
     <a class="th-sort" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true"
-       hx-swap="innerHTML transition:true swap:120ms">{{ label }}<span class="caret" aria-hidden="true">{{ ('▲' if direction == 'asc' else '▼') if active else '' }}</span></a>
+       hx-swap="innerHTML transition:true swap:120ms">{{ label }}<span class="caret" aria-hidden="true">{{ ('▴' if direction == 'asc' else '▾') if active else '' }}</span></a>
   </th>
 {%- endmacro %}
 <p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}{% if q or port or tag or status %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
