@@ -1,0 +1,13 @@
+<form class="annotation" hx-post="/annotation" hx-target="this" hx-swap="outerHTML">
+  <input type="hidden" name="target_type" value="{{ tt }}">
+  <input type="hidden" name="target_id" value="{{ tid }}">
+  <div class="ann-row">
+    <select name="status">
+      {% for s in statuses %}<option value="{{ s.value }}" {{ 'selected' if ann and ann.status==s.value }}>{{ s.value }}</option>{% endfor %}
+    </select>
+    <input type="text" name="tags" placeholder="tags,comma,separated" value="{{ (ann.tags | join(', ')) if ann else '' }}">
+    <button type="submit">Save</button>
+    {% if saved %}<span class="saved">✓ saved</span>{% endif %}
+  </div>
+  <textarea name="body_md" rows="3" placeholder="markdown notes…">{{ ann.body_md if ann else '' }}</textarea>
+</form>

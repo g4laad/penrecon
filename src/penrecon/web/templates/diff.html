@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Diff — penrecon{% endblock %}
+{% block content %}
+<h1>Diff scans</h1>
+<form action="/diff" method="get" class="filters">
+  <label>A <select name="a">
+    {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if a==s.id }}>#{{ s.id }} {{ s.filename }} ({{ s.imported_at.strftime("%m-%d %H:%M") }})</option>{% endfor %}
+  </select></label>
+  <label>B <select name="b">
+    {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if b==s.id }}>#{{ s.id }} {{ s.filename }} ({{ s.imported_at.strftime("%m-%d %H:%M") }})</option>{% endfor %}
+  </select></label>
+  <button type="submit">Compare</button>
+</form>
+
+{% if result %}
+<h2>#{{ result.scan_a.id }} → #{{ result.scan_b.id }}</h2>
+<table>
+  <thead><tr><th>Change</th><th>Host</th><th>Port</th><th>Before</th><th>After</th></tr></thead>
+  <tbody>
+  {% for e in result.entries %}
+    <tr class="diff-{{ e.kind }}">
+      <td>{{ e.kind }}</td><td>{{ e.ip }}</td><td>{{ e.port }}/{{ e.proto }}</td>
+      <td>{{ e.before or "" }}</td><td>{{ e.after or "" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No differences.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

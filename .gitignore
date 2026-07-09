@@ -1,0 +1,16 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# penrecon runtime data (sqlite db + uploaded attachments)
+/data/
+/scratch_data/
+.mypy_cache/
+.pytest_cache/

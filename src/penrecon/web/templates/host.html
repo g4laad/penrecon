@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ host.ip }} — penrecon{% endblock %}
+{% block content %}
+<h1>{{ host.ip }}</h1>
+<p class="meta">
+  {% if hostnames %}Hostnames: {{ hostnames | join(", ") }}<br>{% endif %}
+  First seen {{ host.first_seen.strftime("%Y-%m-%d %H:%M") }} · Last seen {{ host.last_seen.strftime("%Y-%m-%d %H:%M") }}
+</p>
+
+<section>
+  <h2>Host notes</h2>
+  {% with tt="host", tid=host.id, ann=host_ann %}{% include "_annotation.html" %}{% endwith %}
+  {% with tt="host", tid=host.id, attachments=host_attachments %}{% include "_attachments.html" %}{% endwith %}
+</section>
+
+<h2>Services</h2>
+{% for s in services %}
+<section class="service">
+  <h3>{{ s.port }}/{{ s.proto }}
+    <span class="status status-{{ s.state }}">{{ s.state }}</span>
+    {{ s.service_name or "" }}
+    {% if s.product or s.version %}<small>{{ s.product or "" }} {{ s.version or "" }}</small>{% endif %}
+    <small class="lastseen">seen {{ s.last_seen }}</small>
+  </h3>
+  {% with tt="service", tid=s.service_id, ann=s.annotation %}{% include "_annotation.html" %}{% endwith %}
+  {% with tt="service", tid=s.service_id, attachments=attachments_by_service[s.service_id] %}{% include "_attachments.html" %}{% endwith %}
+</section>
+{% else %}
+<p class="empty">No services observed for this host.</p>
+{% endfor %}
+{% endblock %}

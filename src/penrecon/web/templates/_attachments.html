@@ -1,0 +1,15 @@
+<div class="attachments">
+  <ul>
+    {% for a in attachments %}
+    <li><a href="/attachment/{{ a.id }}">{{ a.filename }}</a> <small>({{ a.size }} bytes)</small></li>
+    {% else %}
+    <li class="empty">no attachments</li>
+    {% endfor %}
+  </ul>
+  <form hx-post="/attachment" hx-target="closest .attachments" hx-swap="outerHTML" hx-encoding="multipart/form-data">
+    <input type="hidden" name="target_type" value="{{ tt }}">
+    <input type="hidden" name="target_id" value="{{ tid }}">
+    <input type="file" name="file" required>
+    <button type="submit">Upload</button>
+  </form>
+</div>

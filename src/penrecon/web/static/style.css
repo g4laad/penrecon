@@ -1,0 +1,33 @@
+:root { --bg:#0f1115; --panel:#181b22; --fg:#d7dce3; --mut:#8b93a1; --accent:#5aa9e6; --line:#262b34; }
+* { box-sizing: border-box; }
+body { margin:0; font:15px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--fg); }
+nav { display:flex; gap:1rem; align-items:center; padding:.7rem 1rem; background:var(--panel); border-bottom:1px solid var(--line); }
+nav a { color:var(--fg); text-decoration:none; }
+nav a:hover { color:var(--accent); }
+nav .brand { margin-left:auto; color:var(--mut); font-weight:600; }
+main { max-width:1000px; margin:0 auto; padding:1.5rem 1rem; }
+h1 { font-size:1.4rem; } h2 { font-size:1.15rem; margin-top:1.6rem; } h3 { font-size:1rem; }
+a { color:var(--accent); }
+table { width:100%; border-collapse:collapse; margin-top:.6rem; }
+th,td { text-align:left; padding:.4rem .5rem; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mut); font-weight:600; }
+.empty { color:var(--mut); }
+.filters,.upload { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; margin:.6rem 0; }
+input,select,textarea,button { font:inherit; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:.35rem .5rem; }
+textarea { width:100%; resize:vertical; }
+button { cursor:pointer; } button:hover { border-color:var(--accent); }
+.service { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:.6rem .8rem; margin:.6rem 0; }
+.service h3 small { color:var(--mut); font-weight:400; }
+.lastseen { margin-left:.4rem; }
+.annotation .ann-row { display:flex; gap:.5rem; margin-bottom:.4rem; align-items:center; }
+.saved { color:#6bd06b; }
+.tag { display:inline-block; background:#243; color:#bfe; border-radius:4px; padding:0 .4rem; margin-right:.25rem; font-size:.8rem; }
+.status { border-radius:4px; padding:0 .4rem; font-size:.82rem; }
+.status-open,.status-interesting { background:#264; color:#bfe; }
+.status-closed,.status-filtered { background:#432; color:#fda; }
+.status-exploited { background:#622; color:#fbb; }
+.status-new { background:#334; color:#bcd; }
+.status-reviewed { background:#345; color:#cde; }
+.attachments ul { margin:.3rem 0; padding-left:1.1rem; }
+.diff-added td { color:#8fd88f; } .diff-removed td { color:#e79a9a; } .diff-changed td { color:#e7cf8f; }
+.meta { color:var(--mut); }

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Hosts — penrecon{% endblock %}
+{% block content %}
+<h1>Hosts</h1>
+<form class="filters" hx-get="/" hx-target="#host-table" hx-trigger="submit, keyup delay:400ms from:input[name=q]">
+  <input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service">
+  <input type="number" name="port" value="{{ port or '' }}" placeholder="port">
+  <input type="text" name="tag" value="{{ tag }}" placeholder="tag">
+  <select name="status">
+    <option value="">any status</option>
+    {% for s in statuses %}<option value="{{ s.value }}" {{ 'selected' if status==s.value }}>{{ s.value }}</option>{% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+</form>
+<div id="host-table">
+  {% include "_host_table.html" %}
+</div>
+{% endblock %}

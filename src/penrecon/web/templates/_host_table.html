@@ -1,0 +1,18 @@
+<table>
+  <thead>
+    <tr><th>IP</th><th>Hostnames</th><th>Open</th><th>Status</th><th>Tags</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td><a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
+      <td>{{ r.hostnames | join(", ") }}</td>
+      <td>{{ r.open_count }}</td>
+      <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+      <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No hosts. Upload a scan on the <a href="/scans">Scans</a> page.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Scans — penrecon{% endblock %}
+{% block content %}
+<h1>Scans</h1>
+<form action="/scans" method="post" enctype="multipart/form-data" class="upload">
+  <select name="tool">
+    {% for t in tools %}<option value="{{ t }}" {{ 'selected' if t=='nmap' }}>{{ t }}</option>{% endfor %}
+  </select>
+  <input type="file" name="file" required>
+  <button type="submit">Upload &amp; ingest</button>
+</form>
+<table>
+  <thead><tr><th>ID</th><th>File</th><th>Tool</th><th>Hosts</th><th>Imported</th></tr></thead>
+  <tbody>
+  {% for s in scans %}
+    <tr><td>{{ s.id }}</td><td>{{ s.filename }}</td><td>{{ s.tool }}</td><td>{{ s.host_count }}</td>
+        <td>{{ s.imported_at.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">No scans yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
