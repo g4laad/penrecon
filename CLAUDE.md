@@ -15,6 +15,9 @@ uv run mypy src/penrecon
 
 Data (SQLite + attachments) lives under `./data` (override `PENRECON_DATA`).
 
+**Testing:** port 8000 is the user's own dev server — never bind it. Spin up
+test/preview servers on another port, e.g. `uv run penrecon serve --port 8765`.
+
 ## Layout
 
 - `src/penrecon/models.py` — SQLModel tables (Host/Hostname/Service/Observation
