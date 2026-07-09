@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from penrecon.queries import HostRow, sort_hosts
+from penrecon.queries import HostRow, filter_hosts, sort_hosts
 
 
-def _row(ip: str, open_count: int = 0, status: str = "new") -> HostRow:
+def _row(ip: str, open_count: int = 0, status: str = "new", change: str = "") -> HostRow:
     return HostRow(
         id=0, ip=ip, hostnames=[], open_count=open_count, status=status,
-        tags=[], open_ports=[], service_names=[], open_services=[],
+        tags=[], open_ports=[], service_names=[], open_services=[], change=change,
     )
 
 
@@ -21,3 +21,11 @@ def test_ports_sort_direction() -> None:
     rows = [_row("a", 1), _row("b", 9), _row("c", 3)]
     assert [r.open_count for r in sort_hosts(rows, "ports", "desc")] == [9, 3, 1]
     assert [r.open_count for r in sort_hosts(rows, "ports", "asc")] == [1, 3, 9]
+
+
+def test_filter_by_change() -> None:
+    rows = [_row("10.0.0.1", change="new"), _row("10.0.0.2", change="changed"),
+            _row("10.0.0.3", change="")]
+    assert [r.ip for r in filter_hosts(rows, change="new")] == ["10.0.0.1"]
+    assert [r.ip for r in filter_hosts(rows, change="changed")] == ["10.0.0.2"]
+    assert len(filter_hosts(rows, change="")) == 3  # "any" is a no-op

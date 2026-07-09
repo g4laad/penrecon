@@ -239,6 +239,7 @@ def filter_hosts(
     port: int | None = None,
     tag: str = "",
     status: str = "",
+    change: str = "",
 ) -> list[HostRow]:
     out = rows
     if q:
@@ -256,6 +257,8 @@ def filter_hosts(
         out = [r for r in out if tag in r.tags]
     if status:
         out = [r for r in out if r.status == status]
+    if change:  # "new" | "changed" — isolate what moved since the last scan
+        out = [r for r in out if r.change == change]
     return out
 
 

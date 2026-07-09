@@ -1,5 +1,6 @@
 {% set n = rows | length %}
-{% set filtered = (q or port or tag or status) and n != total %}
+{% set any_filter = q or port or tag or status or change %}
+{% set filtered = any_filter and n != total %}
 {%- set base = "q=" ~ (q|urlencode) ~ "&port=" ~ (port|urlencode) ~ "&tag=" ~ (tag|urlencode) ~ "&status=" ~ (status|urlencode) -%}
 {% macro sort_th(label, col, default_dir) -%}
   {%- set active = sort == col -%}
@@ -10,7 +11,7 @@
        hx-swap="innerHTML transition:true swap:120ms">{{ label }}<span class="caret" aria-hidden="true">{{ ('▴' if direction == 'asc' else '▾') if active else '' }}</span></a>
   </th>
 {%- endmacro %}
-<p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}{% if q or port or tag or status %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
+<p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}{% if any_filter %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
 <table data-sort="{{ sort }}" data-dir="{{ direction }}">
   <thead>
     <tr>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
@@ -36,7 +37,7 @@
       <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
     </tr>
     {% else %}
-    {% if q or port or tag or status %}
+    {% if any_filter %}
     <tr><td colspan="5" class="empty">No hosts match these filters. <a href="/">Clear filters</a>.</td></tr>
     {% else %}
     <tr><td colspan="5" class="empty">No hosts yet. Upload a scan on the <a href="/scans">Scans</a> page to get started.</td></tr>

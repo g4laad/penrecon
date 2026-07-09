@@ -22,6 +22,12 @@
       <option value="">any</option>
       {% for s in statuses %}<option value="{{ s.value }}" {{ 'selected' if status==s.value }}>{{ s.value }}</option>{% endfor %}
     </select></label>
+  <label class="field"><span>change</span>
+    <select name="change">
+      <option value="">any</option>
+      <option value="new" {{ 'selected' if change=='new' }}>new</option>
+      <option value="changed" {{ 'selected' if change=='changed' }}>changed</option>
+    </select></label>
   <input type="hidden" name="sort" value="{{ sort }}">
   <input type="hidden" name="dir" value="{{ direction }}">{# hidden so a filter submit keeps the active sort #}
   <button type="submit">Apply</button>
