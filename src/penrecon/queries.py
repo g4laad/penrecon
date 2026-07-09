@@ -51,6 +51,7 @@ class HostRow:
     open_ports: list[int]
     service_names: list[str]
     open_services: list[tuple[int, str | None]]  # (port, service_name), port-sorted
+    change: str = ""  # "new" | "changed" | "" — scan-delta marker
 
 
 @dataclass
@@ -154,6 +155,42 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
     return views
 
 
+def host_change(session: Session, host_id: int) -> str:
+    """Scan-delta marker for the hosts list: ``"new"`` if the host has been seen
+    in only one scan (first appearance), ``"changed"`` if its two most-recent
+    scans added or altered a service, else ``""``. Compares the host's own two
+    latest scans (robust to partial scans), mirroring :func:`diff_scans`.
+    Removals are out of scope (they live on /diff); manual data carries no
+    observation and never flags.
+    # ponytail: one observation fetch per host, fine for single-user local.
+    """
+    obs = session.exec(
+        select(Observation)
+        .where(Observation.host_id == host_id)
+        .order_by(
+            Observation.observed_at.desc(),  # type: ignore[attr-defined]
+            Observation.scan_id.desc(),  # type: ignore[attr-defined]
+        )
+    ).all()
+    if not obs:
+        return ""
+    scan_order: list[int] = []
+    for o in obs:
+        if o.scan_id not in scan_order:
+            scan_order.append(o.scan_id)
+    if len(scan_order) == 1:
+        return "new"
+    latest, prev = scan_order[0], scan_order[1]
+    prev_obs = {(o.port, o.proto): o for o in obs if o.scan_id == prev}
+    for o in obs:
+        if o.scan_id != latest:
+            continue
+        po = prev_obs.get((o.port, o.proto))
+        if po is None or _summary(o) != _summary(po):  # added or changed
+            return "changed"
+    return ""
+
+
 def host_rows(session: Session) -> list[HostRow]:
     rows: list[HostRow] = []
     for host in session.exec(select(Host).order_by(Host.ip)).all():
@@ -171,6 +208,7 @@ def host_rows(session: Session) -> list[HostRow]:
                 open_ports=sorted(s.port for s in open_s),
                 service_names=sorted({s.service_name for s in open_s if s.service_name}),
                 open_services=sorted((s.port, s.service_name) for s in open_s),
+                change=host_change(session, host.id),
             )
         )
     return rows

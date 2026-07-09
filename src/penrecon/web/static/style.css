@@ -63,6 +63,10 @@ th, td { text-align:left; padding:var(--space-2) var(--space-3); border-bottom:1
 th { color:var(--mut); font-weight:600; font-size:var(--text-xs); letter-spacing:.02em; }
 tbody tr:hover td { background:var(--row-hover); }
 td.ip a { font-weight:500; }
+/* scan-delta marker: fixed slot keeps IPs column-aligned; text+glyph, never color-only */
+.chg { display:inline-block; width:5.5ch; font-family:var(--font-mono); font-size:var(--text-xs); white-space:nowrap; text-decoration:none; border:0; }
+.chg-new { color:var(--accent); }
+.chg-mod { color:#e7cf8f; }
 .num { text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); width:1%; white-space:nowrap; }
 .empty { color:var(--mut); }
 

@@ -6,7 +6,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td class="ip"><a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
+      <td class="ip">{% if r.change == 'new' %}<abbr class="chg chg-new" title="First seen in the latest scan">▲ new</abbr>{% elif r.change == 'changed' %}<abbr class="chg chg-mod" title="Changed since the previous scan">Δ chg</abbr>{% else %}<span class="chg" aria-hidden="true"></span>{% endif %}<a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
       <td>{{ r.hostnames | join(", ") }}</td>
       <td>
         {% if r.open_services %}
