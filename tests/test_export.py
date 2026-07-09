@@ -45,6 +45,14 @@ def test_host_status_and_tags_included(session: Session) -> None:
     assert r["status"] == "interesting" and r["tags"] == "prod pivot"
 
 
+def test_export_neutralizes_formula_injection(session: Session) -> None:
+    # a target advertises a formula-shaped service banner
+    ingest_scan(session, _scan("10.0.0.7", "h.local", "=HYPERLINK(1)", 8080), "x.xml", "nmap")
+    r = export_rows(session)[0]
+    assert r["service"].startswith("'=")          # neutralized, not executable
+    assert r["service"] == "'=HYPERLINK(1)"
+
+
 def test_rows_are_valid_csv(session: Session) -> None:
     ingest_scan(session, _scan("10.0.0.5", "db.corp.local", "postgresql", 5432), "a.xml", "nmap")
     buf = io.StringIO()

@@ -624,6 +624,17 @@ EXPORT_COLUMNS = [
     "service", "product", "version", "status", "tags",
 ]
 
+# characters that make a spreadsheet treat a cell as a formula (CSV injection)
+_CSV_RISKY_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: str) -> str:
+    """Neutralize spreadsheet formula injection. Scan-derived fields (service
+    banners, hostnames) are attacker-controlled; a leading =/+/-/@ makes Excel
+    or Calc execute the cell as a formula. Prefix such values with a quote so
+    they open as literal text. CSV export only — never for HTML display."""
+    return "'" + value if value.startswith(_CSV_RISKY_PREFIXES) else value
+
 
 def export_rows(session: Session) -> list[dict[str, str]]:
     """One flat row per service across all hosts, for CSV export. A host with no
@@ -635,10 +646,10 @@ def export_rows(session: Session) -> list[dict[str, str]]:
         assert host.id is not None
         ann = get_annotation(session, host_id=host.id)
         base = {
-            "ip": host.ip,
-            "hostnames": " ".join(_hostnames_for(session, host.id)),
+            "ip": _csv_safe(host.ip),
+            "hostnames": _csv_safe(" ".join(_hostnames_for(session, host.id))),
             "status": ann.status.value if ann else Status.new.value,
-            "tags": " ".join(ann.tags) if ann else "",
+            "tags": _csv_safe(" ".join(ann.tags) if ann else ""),
         }
         services = resolved_services(session, host.id)
         if not services:
@@ -647,9 +658,11 @@ def export_rows(session: Session) -> list[dict[str, str]]:
             continue
         for s in services:
             rows.append({
-                **base, "port": str(s.port), "proto": s.proto, "state": s.state,
-                "service": s.service_name or "", "product": s.product or "",
-                "version": s.version or "",
+                **base, "port": str(s.port), "proto": _csv_safe(s.proto),
+                "state": _csv_safe(s.state),
+                "service": _csv_safe(s.service_name or ""),
+                "product": _csv_safe(s.product or ""),
+                "version": _csv_safe(s.version or ""),
             })
     return rows
 
