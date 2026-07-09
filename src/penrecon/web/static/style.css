@@ -282,7 +282,8 @@ details.note > summary small { color:var(--mut); font-family:var(--font-sans); m
 .host-strip .hostnames { margin-bottom:0; }
 .host-meta { display:flex; flex-wrap:wrap; gap:var(--space-2) var(--space-5); margin:0; }
 .host-meta > div { display:flex; align-items:baseline; gap:.5ch; }
-.host-meta dt { display:inline-flex; align-items:center; gap:.4ch; margin:0; color:var(--mut); font-size:var(--text-sm); }
+.host-meta dt { margin:0; color:var(--mut); font-size:var(--text-sm); }
+.host-meta dt .icon-sm { margin-right:.4ch; }
 .host-meta dt .icon-sm, .host-meta dt .icon { color:var(--mut); }
 .host-meta dd { margin:0; color:var(--fg); font-size:var(--text-sm); }
 
