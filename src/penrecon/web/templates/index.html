@@ -10,7 +10,7 @@
 </div>
 <form class="filters" role="search" hx-get="/" hx-target="#host-table" hx-push-url="true"
       hx-swap="innerHTML transition:true swap:120ms"
-      hx-trigger="submit, keyup delay:400ms from:input[name=q], change">
+      hx-trigger="submit, keyup delay:400ms from:input[name=q]">
   <input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service" aria-label="Search by IP, hostname, or service">
   <input type="number" name="port" value="{{ port or '' }}" placeholder="port" aria-label="Filter by open port">
   <input type="text" name="tag" value="{{ tag }}" placeholder="tag" aria-label="Filter by tag">
