@@ -4,8 +4,22 @@
     <h2>{{ icons.icon('server') }}Services{% if services %} <span class="grp-count">{{ services | length }}</span>{% endif %}</h2>
   </div>
 
+  {% if services %}
+  <div class="svc-filter">
+    <label class="input-icon svc-filter-field">{{ icons.icon('filter', 'icon-sm') }}
+      <input type="search" id="svc-filter" hx-preserve="true" autocomplete="off"
+             placeholder="filter — port, service, product, version, tag, status"
+             aria-label="Filter services" aria-controls="services">
+    </label>
+    <span class="svc-match" aria-live="polite"></span>
+  </div>
+  {% endif %}
+
   {% for s in services %}
-  <details class="service">
+  {% set fstatus = s.annotation.status if s.annotation else '' %}
+  {% set ftags = (s.annotation.tags | join(' ')) if s.annotation else '' %}
+  <details class="service" data-state="{{ s.state }}"
+    data-filter="{{ (s.port ~ '/' ~ s.proto ~ ' ' ~ s.state ~ ' ' ~ (s.service_name or '') ~ ' ' ~ (s.product or '') ~ ' ' ~ (s.version or '') ~ (' manual' if s.manual else '') ~ ' ' ~ fstatus ~ ' ' ~ ftags) | lower }}">
     <summary>
       <span class="mono port">{{ s.port }}/{{ s.proto }}</span>
       <span class="status status-{{ s.state }}">{{ s.state }}</span>
@@ -51,6 +65,8 @@
   {% else %}
   <p class="empty panel-body">No services yet. Add one below, or ingest a scan.</p>
   {% endfor %}
+
+  <p class="empty svc-no-match" hidden>No services match the filter.</p>
 
   <details class="add-toggle">
     <summary>{{ icons.icon('plus', 'icon-sm') }}Add service</summary>

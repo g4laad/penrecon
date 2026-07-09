@@ -38,9 +38,15 @@
   {% include "_hostnames.html" %}
 </div>
 
+<nav class="host-subnav" aria-label="On this host">
+  <a href="#services">{{ icons.icon('server', 'icon-sm') }}Services <span class="subnav-count" data-count="services">{{ services | length }}</span></a>
+  <a href="#credentials">{{ icons.icon('key', 'icon-sm') }}Credentials <span class="subnav-count" data-count="creds">{{ host_credentials | length }}</span></a>
+  <a href="#notes">{{ icons.icon('note', 'icon-sm') }}Notes <span class="subnav-count" data-count="notes">{{ host_notes | length }}</span></a>
+</nav>
+
 {% include "_services.html" %}
 
-<section class="panel">
+<section id="credentials" class="panel">
   <div class="panel-head">
     <h2>{{ icons.icon('key') }}Credentials{% if host_credentials %} <span class="grp-count">{{ host_credentials | length }}</span>{% endif %}</h2>
     <a class="button" href="/credentials">{{ icons.icon('link', 'icon-sm') }}Manage links</a>
@@ -48,7 +54,7 @@
   {% include "_host_credentials.html" %}
 </section>
 
-<section class="panel">
+<section id="notes" class="panel">
   <div class="panel-head">
     <h2>{{ icons.icon('note') }}Notes{% if host_notes %} <span class="grp-count">{{ host_notes | length }}</span>{% endif %}</h2>
   </div>
@@ -72,5 +78,56 @@
     dialog.showModal();
   });
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
+</script>
+
+<script>
+  // Pin the host subnav right under the site header, and let #anchor jumps
+  // clear both bars — measured, so it survives zoom and the mobile breakpoint.
+  const root = document.documentElement;
+  const primaryNav = document.querySelector('nav[aria-label="Primary"]');
+  const subnav = document.querySelector('.host-subnav');
+  const measure = () => {
+    root.style.setProperty('--nav-h', primaryNav.offsetHeight + 'px');
+    root.style.setProperty('--subnav-h', subnav.offsetHeight + 'px');
+  };
+  measure();
+  addEventListener('resize', measure);
+
+  // Subnav counts derived from the DOM so they stay correct after an HTMX edit
+  // (add/delete of a service, credential, or note swaps only its own fragment).
+  const counters = {
+    services: '#services .service',
+    creds: '#credentials .cred-item',
+    notes: '#notes .note',
+  };
+  const recount = () => {
+    for (const [key, sel] of Object.entries(counters)) {
+      const el = document.querySelector(`.subnav-count[data-count="${key}"]`);
+      if (el) el.textContent = document.querySelectorAll(sel).length;
+    }
+  };
+
+  // Service filter: each row carries a lowercased data-filter; every
+  // space-separated term must be a substring. Instant, local, no round-trip.
+  const applyFilter = () => {
+    const input = document.getElementById('svc-filter');
+    const rows = document.querySelectorAll('#services .service');
+    const terms = (input ? input.value : '').toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    rows.forEach((row) => {
+      const hit = terms.every((t) => (row.dataset.filter || '').includes(t));
+      row.hidden = !hit;
+      if (hit) shown++;
+    });
+    const match = document.querySelector('.svc-match');
+    if (match) match.textContent = terms.length ? `${shown} of ${rows.length}` : '';
+    const none = document.querySelector('.svc-no-match');
+    if (none) none.hidden = !(terms.length && shown === 0);
+  };
+
+  document.addEventListener('input', (e) => { if (e.target.id === 'svc-filter') applyFilter(); });
+  document.body.addEventListener('htmx:afterSwap', () => { recount(); applyFilter(); measure(); });
+  recount();
+  applyFilter();
 </script>
 {% endblock %}
