@@ -19,7 +19,7 @@
   <tbody>
   {% for e in result.entries %}
     <tr class="diff-{{ e.kind }}">
-      <td>{{ e.kind }}</td><td>{{ e.ip }}</td><td>{{ e.port }}/{{ e.proto }}</td>
+      <td>{{ e.kind }}</td><td class="ip">{{ e.ip }}</td><td class="mono">{{ e.port }}/{{ e.proto }}</td>
       <td>{{ e.before or "" }}</td><td>{{ e.after or "" }}</td>
     </tr>
   {% else %}

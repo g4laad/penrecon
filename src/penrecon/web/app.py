@@ -41,11 +41,13 @@ def index(
     port: int | None = None,
     tag: str = "",
     status: str = "",
+    sort: str = "ip",
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     rows = queries.filter_hosts(queries.host_rows(session), q=q, port=port, tag=tag, status=status)
+    rows = queries.sort_hosts(rows, sort)
     ctx = {"request": request, "rows": rows, "q": q, "port": port, "tag": tag, "status": status,
-           "statuses": list(Status)}
+           "sort": sort, "statuses": list(Status)}
     tpl = "_host_table.html" if _is_htmx(request) else "index.html"
     return templates.TemplateResponse(request, tpl, ctx)
 

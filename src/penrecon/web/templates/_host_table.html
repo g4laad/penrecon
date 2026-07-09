@@ -1,18 +1,34 @@
+<p class="count">{{ rows | length }} host{{ '' if rows | length == 1 else 's' }}</p>
 <table>
   <thead>
-    <tr><th>IP</th><th>Hostnames</th><th>Open</th><th>Status</th><th>Tags</th></tr>
+    <tr><th>IP</th><th>Hostnames</th><th>Open ports</th><th>Status</th><th>Tags</th></tr>
   </thead>
   <tbody>
     {% for r in rows %}
     <tr>
-      <td><a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
+      <td class="ip"><a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
       <td>{{ r.hostnames | join(", ") }}</td>
-      <td>{{ r.open_count }}</td>
+      <td>
+        {% if r.open_services %}
+        <div class="ports">
+          {% for port, svc in r.open_services[:12] %}
+          <span class="port"><b>{{ port }}</b>{% if svc %}<i>{{ svc }}</i>{% endif %}</span>
+          {% endfor %}
+          {% if r.open_services | length > 12 %}<span class="more">+{{ r.open_services | length - 12 }}</span>{% endif %}
+        </div>
+        {% else %}
+        <span class="none">—</span>
+        {% endif %}
+      </td>
       <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
       <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
     </tr>
     {% else %}
-    <tr><td colspan="5" class="empty">No hosts. Upload a scan on the <a href="/scans">Scans</a> page.</td></tr>
+    {% if q or port or tag or status %}
+    <tr><td colspan="5" class="empty">No hosts match these filters. <a href="/">Clear filters</a>.</td></tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No hosts yet. Upload a scan on the <a href="/scans">Scans</a> page to get started.</td></tr>
+    {% endif %}
     {% endfor %}
   </tbody>
 </table>

@@ -18,3 +18,4 @@ wheels/
 # local scan files and installed skill/plugin cache
 /scan*
 /.claude/
+/.impeccable/

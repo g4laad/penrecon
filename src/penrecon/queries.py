@@ -49,6 +49,7 @@ class HostRow:
     tags: list[str]
     open_ports: list[int]
     service_names: list[str]
+    open_services: list[tuple[int, str | None]]  # (port, service_name), port-sorted
 
 
 @dataclass
@@ -134,6 +135,7 @@ def host_rows(session: Session) -> list[HostRow]:
                 tags=(ann.tags if ann else []),
                 open_ports=sorted(o.port for o in open_obs),
                 service_names=sorted({o.service_name for o in open_obs if o.service_name}),
+                open_services=sorted((o.port, o.service_name) for o in open_obs),
             )
         )
     return rows
@@ -163,6 +165,21 @@ def filter_hosts(
     if status:
         out = [r for r in out if r.status == status]
     return out
+
+
+def sort_hosts(rows: list[HostRow], sort: str) -> list[HostRow]:
+    if sort == "ports":
+        return sorted(rows, key=lambda r: r.open_count, reverse=True)
+    if sort == "status":
+        return sorted(rows, key=lambda r: r.status)
+
+    def ip_key(r: HostRow) -> tuple[int, ...]:
+        parts = r.ip.split(".")
+        if len(parts) == 4 and all(p.isdigit() for p in parts):
+            return tuple(int(p) for p in parts)
+        return (999, 999, 999, 999)  # non-IPv4 sorts last
+
+    return sorted(rows, key=ip_key)
 
 
 def host_services(session: Session, host_id: int) -> list[ServiceView]:

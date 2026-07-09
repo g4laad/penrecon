@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}penrecon{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="/static/htmx.min.js"></script>
+  <script src="/static/htmx.min.js" defer></script>
 </head>
 <body>
-  <nav>
-    <a href="/">Hosts</a>
-    <a href="/scans">Scans</a>
-    <a href="/diff">Diff</a>
+  {% set path = request.url.path %}
+  <nav aria-label="Primary">
+    <a href="/"{% if path == '/' %} class="active" aria-current="page"{% endif %}>Hosts</a>
+    <a href="/scans"{% if path.startswith('/scans') %} class="active" aria-current="page"{% endif %}>Scans</a>
+    <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>Diff</a>
     <span class="brand">penrecon</span>
   </nav>
   <main>{% block content %}{% endblock %}</main>
