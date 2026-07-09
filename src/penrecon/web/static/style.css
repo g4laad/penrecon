@@ -184,6 +184,12 @@ button[type="submit"] .icon, button.primary .icon { color:var(--accent-ink); }
 button[type="submit"]:hover, button.primary:hover { background:#1d4fd0; border-color:#1d4fd0; }
 button.danger { background:var(--surface); color:var(--diff-del); border-color:var(--line-strong); }
 button.danger:hover { border-color:var(--diff-del); background:#fdecec; }
+/* a.button: a link that reads as a secondary (outline) button — box copied from the input/button base */
+a.button { display:inline-flex; align-items:center; gap:var(--space-2); font-weight:500; text-decoration:none;
+  background:var(--surface); color:var(--fg); border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+  padding:var(--space-2) var(--space-3); min-height:36px; white-space:nowrap; transition:border-color 90ms ease; }
+a.button:hover { border-color:var(--accent); background:var(--panel); }
+.page-head-actions { display:flex; align-items:center; gap:var(--space-2); }
 
 /* --- service rows (host detail): compact summary, editor revealed on expand --- */
 details.service { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);

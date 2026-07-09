@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import html
+import io
 import ipaddress
 import shutil
 import uuid
@@ -110,6 +112,21 @@ def search_page(
         request,
         "search.html",
         {"request": request, "q": q.strip(), "results": queries.search(session, q)},
+    )
+
+
+@app.get("/export/hosts.csv")
+def export_hosts_csv(session: Session = Depends(get_session)) -> Response:
+    """Full host/service inventory as CSV — one row per service."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=queries.EXPORT_COLUMNS)
+    writer.writeheader()
+    writer.writerows(queries.export_rows(session))
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="penrecon-hosts-{stamp}.csv"'},
     )
 
 

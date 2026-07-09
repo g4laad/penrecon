@@ -553,6 +553,43 @@ def search_notes(session: Session, ql: str) -> list[NoteHit]:
     return hits
 
 
+# --- export --------------------------------------------------------------------
+
+EXPORT_COLUMNS = [
+    "ip", "hostnames", "port", "proto", "state",
+    "service", "product", "version", "status", "tags",
+]
+
+
+def export_rows(session: Session) -> list[dict[str, str]]:
+    """One flat row per service across all hosts, for CSV export. A host with no
+    services still yields one row (empty service columns) so nothing is dropped.
+    Reflects current merged state — manual overrides win over observations,
+    exactly like the host detail view."""
+    rows: list[dict[str, str]] = []
+    for host in session.exec(select(Host).order_by(Host.ip)).all():
+        assert host.id is not None
+        ann = get_annotation(session, TargetType.host, host.id)
+        base = {
+            "ip": host.ip,
+            "hostnames": " ".join(_hostnames_for(session, host.id)),
+            "status": ann.status.value if ann else Status.new.value,
+            "tags": " ".join(ann.tags) if ann else "",
+        }
+        services = resolved_services(session, host.id)
+        if not services:
+            rows.append({**base, "port": "", "proto": "", "state": "",
+                         "service": "", "product": "", "version": ""})
+            continue
+        for s in services:
+            rows.append({
+                **base, "port": str(s.port), "proto": s.proto, "state": s.state,
+                "service": s.service_name or "", "product": s.product or "",
+                "version": s.version or "",
+            })
+    return rows
+
+
 def search(session: Session, q: str) -> SearchResults:
     """Global search across hosts/hostnames/services, note bodies + tags, and
     credentials. Empty query returns nothing (the page shows a hint instead)."""

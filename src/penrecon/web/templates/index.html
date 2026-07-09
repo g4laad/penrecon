@@ -4,7 +4,10 @@
 {% block content %}
 <div class="page-head">
   <h1>Hosts</h1>
-  <button type="button" class="primary" id="new-host-open">{{ icons.icon('plus') }}New host</button>
+  <div class="page-head-actions">
+    <a class="button" href="/export/hosts.csv" download>{{ icons.icon('download') }}Export CSV</a>
+    <button type="button" class="primary" id="new-host-open">{{ icons.icon('plus') }}New host</button>
+  </div>
 </div>
 <dialog id="new-host-dialog" class="modal" aria-labelledby="new-host-title">
   <form action="/hosts" method="post" class="modal-form">
