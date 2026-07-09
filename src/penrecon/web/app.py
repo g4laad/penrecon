@@ -40,6 +40,8 @@ from penrecon.parsers import PARSERS
 
 _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+# cache-bust /static assets by mtime so CSS/JS edits show up on refresh, no hard-reload needed
+templates.env.globals["asset_ver"] = lambda name: int((_HERE / "static" / name).stat().st_mtime)
 
 
 def _highlight(text: str, q: str) -> Markup:
