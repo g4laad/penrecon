@@ -26,7 +26,6 @@ from penrecon.models import (
     Scan,
     Service,
     Status,
-    TargetType,
 )
 
 
@@ -102,26 +101,31 @@ class SearchResults:
 # --- annotations ---------------------------------------------------------------
 
 def get_annotation(
-    session: Session, target_type: TargetType, target_id: int
+    session: Session, *, host_id: int | None = None, service_id: int | None = None
 ) -> Annotation | None:
+    """The triage annotation for a host or service. Pass exactly one id."""
+    assert (host_id is None) != (service_id is None), "pass exactly one target id"
+    if host_id is not None:
+        return session.exec(
+            select(Annotation).where(Annotation.host_id == host_id)
+        ).first()
     return session.exec(
-        select(Annotation).where(
-            Annotation.target_type == target_type, Annotation.target_id == target_id
-        )
+        select(Annotation).where(Annotation.service_id == service_id)
     ).first()
 
 
 def upsert_annotation(
     session: Session,
-    target_type: TargetType,
-    target_id: int,
     status: Status,
     tags: list[str],
+    *,
+    host_id: int | None = None,
+    service_id: int | None = None,
 ) -> Annotation:
-    """Create or update the triage annotation (status/tags) for an entity."""
-    ann = get_annotation(session, target_type, target_id)
+    """Create or update the triage annotation (status/tags) for a host or service."""
+    ann = get_annotation(session, host_id=host_id, service_id=service_id)
     if ann is None:
-        ann = Annotation(target_type=target_type, target_id=target_id)
+        ann = Annotation(host_id=host_id, service_id=service_id)
         session.add(ann)
     ann.status = status
     ann.tags = tags
@@ -129,12 +133,12 @@ def upsert_annotation(
     return ann
 
 
-def notes_for(session: Session, target_type: TargetType, target_id: int) -> list[Note]:
-    """All notes on an entity, oldest first."""
+def notes_for(session: Session, host_id: int) -> list[Note]:
+    """All notes on a host, oldest first."""
     return list(
         session.exec(
             select(Note)
-            .where(Note.target_type == target_type, Note.target_id == target_id)
+            .where(Note.host_id == host_id)
             .order_by(Note.created_at)  # type: ignore[arg-type]
         ).all()
     )
@@ -191,7 +195,7 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
                 product=svc.m_product or (o.product if o else None),
                 version=svc.m_version or (o.version if o else None),
                 last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
-                annotation=get_annotation(session, TargetType.service, svc.id),
+                annotation=get_annotation(session, service_id=svc.id),
                 manual=o is None
                 or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
             )
@@ -255,7 +259,7 @@ def host_rows(session: Session) -> list[HostRow]:
     for host in session.exec(select(Host).order_by(Host.ip)).all():
         assert host.id is not None
         open_s = [s for s in resolved_services(session, host.id) if s.state == "open"]
-        ann = get_annotation(session, TargetType.host, host.id)
+        ann = get_annotation(session, host_id=host.id)
         rows.append(
             HostRow(
                 id=host.id,
@@ -528,37 +532,20 @@ def _note_preview(body: str, ql: str, width: int = 200) -> str:
     return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
 
 
-def _note_location(
-    session: Session, target_type: TargetType, target_id: int
-) -> tuple[str, str, str] | None:
-    """(href, where-label, kind) for a note's target, or None if the target is gone."""
-    if target_type == TargetType.host:
-        h = session.get(Host, target_id)
-        return (f"/hosts/{h.id}", h.ip, "host") if h else None
-    if target_type == TargetType.hostname:
-        hn = session.get(Hostname, target_id)
-        if hn is None:
-            return None
-        link = session.exec(
-            select(HostHostname).where(HostHostname.hostname_id == target_id)
-        ).first()
-        return (f"/hosts/{link.host_id}" if link else "/", hn.name, "hostname")
-    return None
-
-
 def search_notes(session: Session, ql: str) -> list[NoteHit]:
-    """Notes whose title or body contains ``ql`` (already lowercased)."""
+    """Notes whose title or body contains ``ql`` (already lowercased). Notes live
+    only on hosts, and the FK cascade drops them with the host, so the host
+    always exists (the None guard is just for the type checker)."""
     hits: list[NoteHit] = []
     for note in session.exec(select(Note)).all():
         if ql not in note.title.lower() and ql not in note.body_md.lower():
             continue
-        loc = _note_location(session, note.target_type, note.target_id)
-        if loc is None:  # target was deleted out from under the note
+        host = session.get(Host, note.host_id)
+        if host is None:  # ponytail: unreachable under FK, keeps mypy happy
             continue
-        href, where, kind = loc
         hits.append(
             NoteHit(
-                href=href, where=where, kind=kind,
+                href=f"/hosts/{host.id}", where=host.ip, kind="host",
                 title=note.title, preview=_note_preview(note.body_md, ql),
             )
         )
@@ -581,7 +568,7 @@ def export_rows(session: Session) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     for host in session.exec(select(Host).order_by(Host.ip)).all():
         assert host.id is not None
-        ann = get_annotation(session, TargetType.host, host.id)
+        ann = get_annotation(session, host_id=host.id)
         base = {
             "ip": host.ip,
             "hostnames": " ".join(_hostnames_for(session, host.id)),

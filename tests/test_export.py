@@ -6,7 +6,7 @@ import io
 from sqlmodel import Session
 
 from penrecon.ingest import ingest_scan
-from penrecon.models import Annotation, Host, Status, TargetType
+from penrecon.models import Annotation, Host, Status
 from penrecon.queries import EXPORT_COLUMNS, export_rows
 
 
@@ -38,7 +38,7 @@ def test_host_status_and_tags_included(session: Session) -> None:
     ingest_scan(session, _scan("10.0.0.5", "h", "ssh", 22), "a.xml", "nmap")
     host = session.exec(__import__("sqlmodel").select(Host).where(Host.ip == "10.0.0.5")).one()
     assert host.id is not None
-    session.add(Annotation(target_type=TargetType.host, target_id=host.id,
+    session.add(Annotation(host_id=host.id,
                            status=Status.interesting, tags=["prod", "pivot"]))
     session.commit()
     r = export_rows(session)[0]

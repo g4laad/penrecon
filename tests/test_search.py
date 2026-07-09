@@ -10,7 +10,6 @@ from penrecon.models import (
     Host,
     Note,
     Status,
-    TargetType,
 )
 from penrecon.queries import search
 
@@ -37,16 +36,14 @@ def _seed(session: Session) -> int:
     hid = _host_id(session, "10.0.0.5")
     session.add(
         Annotation(
-            target_type=TargetType.host,
-            target_id=hid,
+            host_id=hid,
             status=Status.interesting,
             tags=["pivot"],  # triage tag — findable via host search
         )
     )
     session.add(
         Note(
-            target_type=TargetType.host,
-            target_id=hid,
+            host_id=hid,
             title="Postgres",
             body_md="weak postgres creds; reuse candidate",
         )
@@ -92,11 +89,11 @@ def test_note_hit_links_back_to_host(session: Session) -> None:
     assert "10.0.0.5" in note.where
 
 
-def test_note_whose_target_is_gone_is_skipped(session: Session) -> None:
-    _seed(session)
-    # a service note pointing at a service id that never existed must not crash search
-    session.add(
-        Note(target_type=TargetType.service, target_id=99999, title="ghost", body_md="postgres ghost")
-    )
+def test_deleting_host_cascades_its_note_out_of_search(session: Session) -> None:
+    hid = _seed(session)
+    assert len(search(session, "postgres").notes) == 1
+    host = session.get(Host, hid)
+    assert host is not None
+    session.delete(host)  # FK ON DELETE CASCADE drops the note with the host
     session.commit()
-    assert len(search(session, "postgres").notes) == 1  # only the real host note survives
+    assert search(session, "postgres").notes == []

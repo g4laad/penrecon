@@ -32,7 +32,6 @@ from penrecon.models import (
     Scan,
     Service,
     Status,
-    TargetType,
 )
 from penrecon.parsers import PARSERS
 
@@ -145,8 +144,8 @@ def host_detail(
             "host": host,
             "hostnames": queries.host_hostnames(session, host_id),
             "services": services,
-            "host_ann": queries.get_annotation(session, TargetType.host, host_id),
-            "host_notes": queries.notes_for(session, TargetType.host, host_id),
+            "host_ann": queries.get_annotation(session, host_id=host_id),
+            "host_notes": queries.notes_for(session, host_id),
             "statuses": list(Status),
             "states": list(ObsState),
             "host_credentials": queries.credentials_for_host(session, host_id),
@@ -280,32 +279,8 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
     host = session.get(Host, host_id)
     if host is None:
         return RedirectResponse("/", status_code=303)
-    svc_ids = [s.id for s in session.exec(select(Service).where(Service.host_id == host_id)).all()]
-    for sid in svc_ids:
-        if sid is None:
-            continue
-        ann = queries.get_annotation(session, TargetType.service, sid)
-        if ann is not None:
-            session.delete(ann)
-        for csl in session.exec(
-            select(CredentialService).where(CredentialService.service_id == sid)
-        ).all():
-            session.delete(csl)  # drop credential↔service links (credential itself survives)
-    for chl in session.exec(
-        select(CredentialHost).where(CredentialHost.host_id == host_id)
-    ).all():
-        session.delete(chl)
-    host_ann = queries.get_annotation(session, TargetType.host, host_id)
-    if host_ann is not None:
-        session.delete(host_ann)
-    for note in queries.notes_for(session, TargetType.host, host_id):
-        session.delete(note)
-    for row in session.exec(select(Observation).where(Observation.host_id == host_id)).all():
-        session.delete(row)
-    for svc in session.exec(select(Service).where(Service.host_id == host_id)).all():
-        session.delete(svc)
-    for link in session.exec(select(HostHostname).where(HostHostname.host_id == host_id)).all():
-        session.delete(link)
+    # ON DELETE CASCADE (FKs on) sweeps services, observations, hostname links,
+    # notes, annotations and credential links; credentials themselves survive.
     session.delete(host)
     session.commit()
     return RedirectResponse("/", status_code=303)
@@ -369,7 +344,7 @@ def edit_service(
     session.commit()
     # one Save persists both the scan overrides and the triage annotation
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, TargetType.service, service_id, status, tag_list)
+    queries.upsert_annotation(session, status, tag_list, service_id=service_id)
     host = session.get(Host, svc.host_id)
     assert host is not None
     return _render_services(request, session, host)
@@ -385,14 +360,9 @@ def delete_service(
     host = session.get(Host, svc.host_id)
     assert host is not None
     # hard delete: the service and everything tied to it. A later scan that sees
-    # this port re-creates it fresh, as if it had never been deleted.
-    ann = queries.get_annotation(session, TargetType.service, service_id)
-    if ann is not None:
-        session.delete(ann)
-    for csl in session.exec(
-        select(CredentialService).where(CredentialService.service_id == service_id)
-    ).all():
-        session.delete(csl)  # drop credential↔service links (credential itself survives)
+    # this port re-creates it fresh, as if it had never been deleted. The FK
+    # cascade drops the annotation and credential links; observations key off
+    # (host, port, proto) rather than service_id, so clear them by hand.
     for obs in session.exec(
         select(Observation).where(
             Observation.host_id == svc.host_id,
@@ -506,15 +476,7 @@ def delete_credential(
 ) -> HTMLResponse:
     cred = session.get(Credential, cred_id)
     if cred is not None:
-        for hl in session.exec(
-            select(CredentialHost).where(CredentialHost.credential_id == cred_id)
-        ).all():
-            session.delete(hl)
-        for sl in session.exec(
-            select(CredentialService).where(CredentialService.credential_id == cred_id)
-        ).all():
-            session.delete(sl)
-        session.delete(cred)
+        session.delete(cred)  # FK cascade drops its host/service link rows
         session.commit()
     if host_id is not None:  # deleted from a host panel — re-render just that panel
         return _render_host_credentials(request, session, host_id)
@@ -604,16 +566,15 @@ def diff(
 
 
 def _render_annotation(
-    request: Request, session: Session, tt: TargetType, tid: int, saved: bool = False
+    request: Request, session: Session, host_id: int, saved: bool = False
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_annotation.html",
         {
             "request": request,
-            "tt": tt.value,
-            "tid": tid,
-            "ann": queries.get_annotation(session, tt, tid),
+            "host_id": host_id,
+            "ann": queries.get_annotation(session, host_id=host_id),
             "statuses": list(Status),
             "saved": saved,
         },
@@ -623,38 +584,35 @@ def _render_annotation(
 @app.get("/annotation", response_class=HTMLResponse)
 def annotation_get(
     request: Request,
-    target_type: TargetType,
-    target_id: int,
+    host_id: int,
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
-    return _render_annotation(request, session, target_type, target_id)
+    return _render_annotation(request, session, host_id)
 
 
 @app.post("/annotation", response_class=HTMLResponse)
 def annotation_post(
     request: Request,
-    target_type: TargetType = Form(...),
-    target_id: int = Form(...),
+    host_id: int = Form(...),
     status: Status = Form(Status.new),
     tags: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, target_type, target_id, status, tag_list)
-    return _render_annotation(request, session, target_type, target_id, saved=True)
+    queries.upsert_annotation(session, status, tag_list, host_id=host_id)
+    return _render_annotation(request, session, host_id, saved=True)
 
 
-# --- notes: any number of titled notes per entity -----------------------------
+# --- notes: any number of titled notes per host -------------------------------
 
-def _render_notes(request: Request, session: Session, tt: TargetType, tid: int) -> HTMLResponse:
+def _render_notes(request: Request, session: Session, host_id: int) -> HTMLResponse:
     return templates.TemplateResponse(
         request,
         "_notes.html",
         {
             "request": request,
-            "tt": tt.value,
-            "tid": tid,
-            "notes": queries.notes_for(session, tt, tid),
+            "host_id": host_id,
+            "notes": queries.notes_for(session, host_id),
         },
     )
 
@@ -662,20 +620,15 @@ def _render_notes(request: Request, session: Session, tt: TargetType, tid: int) 
 @app.post("/notes", response_class=HTMLResponse)
 def note_create(
     request: Request,
-    target_type: TargetType = Form(...),
-    target_id: int = Form(...),
+    host_id: int = Form(...),
     title: str = Form(""),
     body_md: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
-    if target_type != TargetType.host:  # notes live only on hosts
-        return HTMLResponse("notes are only supported on hosts", status_code=400)
     clean_title = title.strip() or "Untitled"  # a note always has a title
-    session.add(
-        Note(target_type=target_type, target_id=target_id, title=clean_title, body_md=body_md)
-    )
+    session.add(Note(host_id=host_id, title=clean_title, body_md=body_md))
     session.commit()
-    return _render_notes(request, session, target_type, target_id)
+    return _render_notes(request, session, host_id)
 
 
 @app.post("/notes/{note_id}/edit", response_class=HTMLResponse)
@@ -693,7 +646,7 @@ def note_edit(
     note.body_md = body_md
     note.updated_at = datetime.now(UTC)
     session.commit()
-    return _render_notes(request, session, note.target_type, note.target_id)
+    return _render_notes(request, session, note.host_id)
 
 
 @app.post("/notes/{note_id}/delete", response_class=HTMLResponse)
@@ -703,7 +656,7 @@ def note_delete(
     note = session.get(Note, note_id)
     if note is None:
         return HTMLResponse("note not found", status_code=404)
-    tt, tid = note.target_type, note.target_id
+    host_id = note.host_id
     session.delete(note)
     session.commit()
-    return _render_notes(request, session, tt, tid)
+    return _render_notes(request, session, host_id)
