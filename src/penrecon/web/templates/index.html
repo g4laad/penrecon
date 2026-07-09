@@ -41,10 +41,19 @@
     }
   });
   const status = document.getElementById('filter-status');
+  const filters = document.querySelector('.filters');
   document.body.addEventListener('htmx:afterSwap', (e) => {
-    if (e.target.id === 'host-table' && status) {
+    if (e.target.id !== 'host-table') return;
+    if (status) {
       const count = e.target.querySelector('.count');
       status.textContent = count ? count.textContent.trim() : '';
+    }
+    // header-sort clicks swap only the table; mirror the active sort back into the
+    // filter form's hidden inputs so a later filter submit doesn't reset it
+    const table = e.target.querySelector('table');
+    if (table && filters) {
+      filters.sort.value = table.dataset.sort || 'ip';
+      filters.dir.value = table.dataset.dir || '';
     }
   });
 </script>

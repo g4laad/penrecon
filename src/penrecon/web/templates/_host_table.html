@@ -11,7 +11,7 @@
   </th>
 {%- endmacro %}
 <p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}{% if q or port or tag or status %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
-<table>
+<table data-sort="{{ sort }}" data-dir="{{ direction }}">
   <thead>
     <tr>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
   </thead>
