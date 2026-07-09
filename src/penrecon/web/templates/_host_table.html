@@ -1,25 +1,29 @@
+{% import "_icons.html" as icons %}
 {% set n = rows | length %}
 {% set any_filter = q or port or tag or status or change %}
-{% set filtered = any_filter and n != total %}
-{%- set base = "q=" ~ (q|urlencode) ~ "&port=" ~ (port|urlencode) ~ "&tag=" ~ (tag|urlencode) ~ "&status=" ~ (status|urlencode) -%}
+{%- set base = "q=" ~ (q|urlencode) ~ "&port=" ~ (port|urlencode) ~ "&tag=" ~ (tag|urlencode) ~ "&status=" ~ (status|urlencode) ~ "&change=" ~ (change|urlencode) -%}
+{%- set start = (page - 1) * per_page + 1 -%}
+{%- set end = start + n - 1 -%}
 {% macro sort_th(label, col, default_dir) -%}
   {%- set active = sort == col -%}
   {%- set next_dir = ('asc' if active and direction == 'desc' else ('desc' if active and direction == 'asc' else default_dir)) -%}
   {%- set url = "/?" ~ base ~ "&sort=" ~ col ~ "&dir=" ~ next_dir -%}
   <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}">
     <a class="th-sort" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true"
-       hx-swap="innerHTML transition:true swap:120ms">{{ label }}<span class="caret" aria-hidden="true">{{ ('▴' if direction == 'asc' else '▾') if active else '' }}</span></a>
+       hx-swap="innerHTML transition:true swap:120ms">{{ label }}{% if active %}{{ icons.icon('chevron-up' if direction == 'asc' else 'chevron-down', 'icon-sm') }}{% endif %}</a>
   </th>
 {%- endmacro %}
-<p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}{% if any_filter %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
+<p class="count">{% if matched == 0 %}0 hosts{% elif pages > 1 %}{{ start }}–{{ end }} of {{ matched }} hosts{% else %}{{ matched }} host{{ '' if matched == 1 else 's' }}{% endif %}{% if any_filter %} · <a class="clear" href="/?sort={{ sort }}&amp;dir={{ direction }}">clear filters</a>{% endif %}</p>
+<div class="table-wrap">
 <table data-sort="{{ sort }}" data-dir="{{ direction }}">
   <thead>
-    <tr>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
+    <tr><th class="col-chg">Change</th>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
   </thead>
   <tbody>
     {% for r in rows %}
     <tr>
-      <td class="ip">{% if r.change == 'new' %}<span class="chg chg-new"><span aria-hidden="true">▲</span> new<span class="visually-hidden"> — first seen in the latest scan</span></span>{% elif r.change == 'changed' %}<span class="chg chg-mod"><span aria-hidden="true">Δ</span> chg<span class="visually-hidden"> — changed since the previous scan</span></span>{% else %}<span class="chg" aria-hidden="true"></span>{% endif %}<a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
+      <td class="chg-cell">{% if r.change == 'new' %}<span class="chg chg-new">{{ icons.icon('new', 'icon-sm') }}new<span class="visually-hidden"> — first seen in the latest scan</span></span>{% elif r.change == 'changed' %}<span class="chg chg-mod">{{ icons.icon('changed', 'icon-sm') }}chg<span class="visually-hidden"> — changed since the previous scan</span></span>{% endif %}</td>
+      <td class="ip"><a href="/hosts/{{ r.id }}">{{ r.ip }}</a></td>
       <td>{{ r.hostnames | join(", ") }}</td>
       <td>
         {% if r.open_services %}
@@ -38,10 +42,19 @@
     </tr>
     {% else %}
     {% if any_filter %}
-    <tr><td colspan="5" class="empty">No hosts match these filters. <a href="/">Clear filters</a>.</td></tr>
+    <tr><td colspan="6" class="empty">No hosts match these filters. <a href="/">Clear filters</a>.</td></tr>
     {% else %}
-    <tr><td colspan="5" class="empty">No hosts yet. Upload a scan on the <a href="/scans">Scans</a> page to get started.</td></tr>
+    <tr><td colspan="6" class="empty">No hosts yet. Upload a scan on the <a href="/scans">Scans</a> page to get started.</td></tr>
     {% endif %}
     {% endfor %}
   </tbody>
 </table>
+</div>
+{% if pages > 1 %}
+{%- set qs = base ~ "&sort=" ~ sort ~ "&dir=" ~ direction -%}
+<nav class="pager" aria-label="Host list pages">
+  {% if page > 1 %}{% set prev = "/?" ~ qs ~ "&page=" ~ (page - 1) %}<a class="pager-btn" href="{{ prev }}" hx-get="{{ prev }}" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms" rel="prev">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</a>{% else %}<span class="pager-btn" aria-disabled="true">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</span>{% endif %}
+  <span class="pager-info">Page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}{% set next = "/?" ~ qs ~ "&page=" ~ (page + 1) %}<a class="pager-btn" href="{{ next }}" hx-get="{{ next }}" hx-target="#host-table" hx-push-url="true" hx-swap="innerHTML transition:true swap:120ms" rel="next">Next{{ icons.icon('chevron-right', 'icon-sm') }}</a>{% else %}<span class="pager-btn" aria-disabled="true">Next{{ icons.icon('chevron-right', 'icon-sm') }}</span>{% endif %}
+</nav>
+{% endif %}

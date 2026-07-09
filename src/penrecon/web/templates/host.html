@@ -10,7 +10,7 @@
 
 <div class="host-actions">
   <form class="edit-ip" action="/hosts/{{ host.id }}/edit" method="post">
-    <input name="ip" value="{{ host.ip }}" aria-label="Host IP" class="mono">
+    <input name="ip" value="{{ host.ip }}" aria-label="Host IP" class="mono" data-ip required>
     <button type="submit">Rename IP</button>
   </form>
   <form action="/hosts/{{ host.id }}/delete" method="post"

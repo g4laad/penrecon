@@ -1,18 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Hosts — penrecon{% endblock %}
+{% import "_icons.html" as icons %}
 {% block content %}
 <div class="page-head">
   <h1>Hosts</h1>
-  <form class="new-host" action="/hosts" method="post">
-    <input name="ip" placeholder="10.0.0.5" required aria-label="New host IP" class="mono">
-    <button type="submit">+ New host</button>
-  </form>
+  <button type="button" class="primary" id="new-host-open">{{ icons.icon('plus') }}New host</button>
 </div>
+<dialog id="new-host-dialog" class="modal" aria-labelledby="new-host-title">
+  <form action="/hosts" method="post" class="modal-form">
+    <h2 id="new-host-title">New host</h2>
+    <label class="field"><span>IP address</span>
+      <input name="ip" placeholder="10.0.0.5" required aria-label="New host IP" class="mono" autocomplete="off" data-ip></label>
+    <div class="modal-actions">
+      <button type="submit" formmethod="dialog" formnovalidate value="cancel" class="modal-cancel">Cancel</button>
+      <button type="submit" class="primary">{{ icons.icon('plus') }}Add host</button>
+    </div>
+  </form>
+</dialog>
 <form class="filters" role="search" hx-get="/" hx-target="#host-table" hx-push-url="true"
       hx-swap="innerHTML transition:true swap:120ms"
       hx-trigger="submit">
-  <label class="field"><span>search <kbd>/</kbd></span>
-    <input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service"></label>
+  <label class="field"><span>search</span>
+    <span class="input-icon">{{ icons.icon('search') }}<input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service"></span></label>
   <label class="field"><span>port</span>
     <input type="number" name="port" value="{{ port or '' }}" placeholder="any"></label>
   <label class="field"><span>tag</span>
@@ -27,10 +36,11 @@
       <option value="">any</option>
       <option value="new" {{ 'selected' if change=='new' }}>new</option>
       <option value="changed" {{ 'selected' if change=='changed' }}>changed</option>
+      <option value="unchanged" {{ 'selected' if change=='unchanged' }}>unchanged</option>
     </select></label>
   <input type="hidden" name="sort" value="{{ sort }}">
   <input type="hidden" name="dir" value="{{ direction }}">{# hidden so a filter submit keeps the active sort #}
-  <button type="submit">Apply</button>
+  <button type="submit">{{ icons.icon('filter') }}Apply</button>
 </form>
 <p id="filter-status" class="visually-hidden" role="status" aria-live="polite"></p>
 <div id="host-table">
@@ -46,6 +56,19 @@
       if (search) search.focus();
     }
   });
+  // new-host modal: native <dialog>. showModal() gives focus-trap + Esc + backdrop.
+  // Cancel closes natively via formmethod="dialog"; here we add open + click-outside.
+  const dialog = document.getElementById('new-host-dialog');
+  document.getElementById('new-host-open').addEventListener('click', () => {
+    const ip = dialog.querySelector('input[name="ip"]');
+    ip.value = '';                                  // fresh each open
+    ip.dispatchEvent(new Event('input'));           // clear any stale validity
+    dialog.showModal();
+  });
+  dialog.addEventListener('click', (e) => {          // click on the backdrop (outside the form) closes
+    if (e.target === dialog) dialog.close();
+  });
+
   const status = document.getElementById('filter-status');
   const filters = document.querySelector('.filters');
   document.body.addEventListener('htmx:afterSwap', (e) => {

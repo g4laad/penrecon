@@ -257,9 +257,25 @@ def filter_hosts(
         out = [r for r in out if tag in r.tags]
     if status:
         out = [r for r in out if r.status == status]
-    if change:  # "new" | "changed" — isolate what moved since the last scan
-        out = [r for r in out if r.change == change]
+    if change:  # "new" | "changed" | "unchanged" — isolate by scan-delta state
+        want = "" if change == "unchanged" else change  # "" is the internal no-change marker
+        out = [r for r in out if r.change == want]
     return out
+
+
+HOSTS_PER_PAGE = 50
+
+
+def paginate(
+    rows: list[HostRow], page: int, per_page: int = HOSTS_PER_PAGE
+) -> tuple[list[HostRow], int, int]:
+    """Slice ``rows`` to one page. Returns ``(page_rows, page, pages)`` with
+    ``page`` clamped into ``[1, pages]`` so an out-of-range or filtered-away
+    page lands on the last real page rather than an empty table."""
+    pages = max(1, -(-len(rows) // per_page))  # ceil division
+    page = max(1, min(page, pages))
+    start = (page - 1) * per_page
+    return rows[start : start + per_page], page, pages
 
 
 SORT_DEFAULT_DIR = {"ports": "desc", "ip": "asc", "status": "asc"}

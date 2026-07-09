@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import html
+import ipaddress
 import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -56,16 +58,21 @@ def index(
     change: str = "",  # "" | "new" | "changed" — filter to hosts that moved since last scan
     sort: str = "ip",
     dir: str = "",  # sort direction; empty falls back to the column's natural default
+    page: str = "1",  # str, tolerate empty/garbage from the URL; parsed + clamped below
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     port_val = int(port) if port.strip().isdigit() else None
     direction = dir if dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
+    page_no = int(page) if page.strip().isdigit() else 1
     all_rows = queries.host_rows(session)
     rows = queries.filter_hosts(
         all_rows, q=q, port=port_val, tag=tag, status=status, change=change
     )
     rows = queries.sort_hosts(rows, sort, direction)
-    ctx = {"request": request, "rows": rows, "total": len(all_rows),
+    matched = len(rows)
+    page_rows, page_no, pages = queries.paginate(rows, page_no)
+    ctx = {"request": request, "rows": page_rows, "total": len(all_rows), "matched": matched,
+           "page": page_no, "pages": pages, "per_page": queries.HOSTS_PER_PAGE,
            "q": q, "port": port, "tag": tag, "status": status, "change": change,
            "sort": sort, "direction": direction, "statuses": list(Status)}
     tpl = "_host_table.html" if _is_htmx(request) else "index.html"
@@ -162,16 +169,41 @@ def delete_hostname(
 
 # --- manual host + service CRUD -----------------------------------------------
 
+def _normalize_ip(raw: str) -> str | None:
+    """Canonical IP string if ``raw`` is a valid IPv4/IPv6 address, else ``None``.
+    ``ipaddress`` is the trust-boundary authority — the client is never trusted to
+    have validated. Canonicalizing (e.g. ``2001:0DB8::1`` → ``2001:db8::1``) keeps
+    the unique-IP dedupe consistent regardless of how the operator typed it."""
+    try:
+        return str(ipaddress.ip_address(raw.strip()))
+    except ValueError:
+        return None
+
+
+def _invalid_ip_response(raw: str, back: str) -> HTMLResponse:
+    safe = html.escape(raw)
+    return HTMLResponse(
+        f'<p>"{safe}" is not a valid IPv4 or IPv6 address.</p>'
+        f'<p><a href="{html.escape(back)}">Back</a></p>',
+        status_code=400,
+    )
+
+
 @app.post("/hosts")
-def create_host(ip: str = Form(...), session: Session = Depends(get_session)) -> RedirectResponse:
+def create_host(
+    ip: str = Form(...), session: Session = Depends(get_session)
+) -> Response:
     clean = ip.strip()
-    existing = session.exec(select(Host).where(Host.ip == clean)).first() if clean else None
-    if existing is not None:
-        return RedirectResponse(f"/hosts/{existing.id}", status_code=303)
     if not clean:
         return RedirectResponse("/", status_code=303)
+    norm = _normalize_ip(clean)
+    if norm is None:
+        return _invalid_ip_response(clean, "/")
+    existing = session.exec(select(Host).where(Host.ip == norm)).first()
+    if existing is not None:
+        return RedirectResponse(f"/hosts/{existing.id}", status_code=303)
     now = datetime.now(UTC)
-    host = Host(ip=clean, first_seen=now, last_seen=now)
+    host = Host(ip=norm, first_seen=now, last_seen=now)
     session.add(host)
     session.commit()
     session.refresh(host)
@@ -181,15 +213,20 @@ def create_host(ip: str = Form(...), session: Session = Depends(get_session)) ->
 @app.post("/hosts/{host_id}/edit")
 def edit_host(
     host_id: int, ip: str = Form(...), session: Session = Depends(get_session)
-) -> RedirectResponse:
+) -> Response:
     host = session.get(Host, host_id)
     if host is None:
         return RedirectResponse("/", status_code=303)
     clean = ip.strip()
-    if clean and clean != host.ip:
-        dup = session.exec(select(Host).where(Host.ip == clean)).first()
+    if not clean:  # empty = leave the IP unchanged
+        return RedirectResponse(f"/hosts/{host_id}", status_code=303)
+    norm = _normalize_ip(clean)
+    if norm is None:
+        return _invalid_ip_response(clean, f"/hosts/{host_id}")
+    if norm != host.ip:
+        dup = session.exec(select(Host).where(Host.ip == norm)).first()
         if dup is None:  # don't collide with another host's IP
-            host.ip = clean
+            host.ip = norm
             session.commit()
     return RedirectResponse(f"/hosts/{host_id}", status_code=303)
 
