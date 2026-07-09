@@ -92,11 +92,21 @@ textarea { width:100%; max-width:var(--measure); resize:vertical; min-height:aut
 .filters select { width:14ch; }
 button { cursor:pointer; } button:hover { border-color:var(--accent); }
 
-/* service panels (host detail) */
-.service { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:var(--space-3) var(--space-4); margin:var(--space-3) 0; }
-.service h3 { font-family:var(--font-mono); }
-.service h3 small { color:var(--mut); font-weight:400; font-family:var(--font-sans); }
-.lastseen { margin-left:var(--space-2); }
+/* service rows (host detail): compact summary, editor revealed on expand */
+details.service { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); margin:var(--space-2) 0; }
+details.service > summary {
+  list-style:none; cursor:pointer; display:flex; flex-wrap:wrap; align-items:baseline;
+  gap:var(--space-2); padding:var(--space-2) var(--space-3);
+}
+details.service > summary::-webkit-details-marker { display:none; }
+details.service > summary::before { content:"▸"; color:var(--mut); }
+details.service[open] > summary::before { content:"▾"; }
+details.service > summary:hover { background:var(--row-hover); }
+details.service > summary .port { font-weight:600; }
+details.service > summary small { color:var(--mut); font-family:var(--font-sans); }
+.svc-body { padding:var(--space-3); border-top:1px solid var(--line); }
+.note-flag { color:var(--mut); font-size:var(--text-xs); }
+.lastseen { margin-left:auto; color:var(--mut); }
 .annotation .ann-row { display:flex; gap:var(--space-2); margin-bottom:var(--space-2); align-items:center; }
 .saved { color:#6bd06b; }
 
