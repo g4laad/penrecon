@@ -37,6 +37,7 @@ class ServiceView:
     version: str | None
     last_seen: str
     annotation: Annotation | None
+    manual: bool = False
 
 
 @dataclass
@@ -110,32 +111,68 @@ def latest_observations(session: Session, host_id: int) -> dict[tuple[int, str],
 
 
 def _hostnames_for(session: Session, host_id: int) -> list[str]:
+    return [name for _id, name in host_hostnames(session, host_id)]
+
+
+def host_hostnames(session: Session, host_id: int) -> list[tuple[int, str]]:
+    """(hostname_id, name) for a host, excluding manually-hidden links."""
     rows = session.exec(
-        select(Hostname.name)
+        select(Hostname.id, Hostname.name)
         .join(HostHostname, HostHostname.hostname_id == Hostname.id)  # type: ignore[arg-type]
-        .where(HostHostname.host_id == host_id)
+        .where(HostHostname.host_id == host_id, HostHostname.hidden == False)  # noqa: E712
+        .order_by(Hostname.name)
     ).all()
-    return list(rows)
+    return [(hid, name) for hid, name in rows if hid is not None]
+
+
+def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
+    """Current services for display: manual overrides win over the latest
+    observation, hidden services excluded, manual-only services included."""
+    latest = latest_observations(session, host_id)
+    views: list[ServiceView] = []
+    for svc in session.exec(
+        select(Service)
+        .where(Service.host_id == host_id, Service.hidden == False)  # noqa: E712
+        .order_by(Service.port)  # type: ignore[arg-type]
+    ).all():
+        assert svc.id is not None
+        o = latest.get((svc.port, svc.proto))
+        state = svc.m_state or (o.state if o else None) or "unknown"
+        views.append(
+            ServiceView(
+                service_id=svc.id,
+                port=svc.port,
+                proto=svc.proto,
+                state=state,
+                service_name=svc.m_service_name or (o.service_name if o else None),
+                product=svc.m_product or (o.product if o else None),
+                version=svc.m_version or (o.version if o else None),
+                last_seen=(o.observed_at.isoformat(timespec="seconds") if o else ""),
+                annotation=get_annotation(session, TargetType.service, svc.id),
+                manual=o is None
+                or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
+            )
+        )
+    return views
 
 
 def host_rows(session: Session) -> list[HostRow]:
     rows: list[HostRow] = []
     for host in session.exec(select(Host).order_by(Host.ip)).all():
         assert host.id is not None
-        latest = latest_observations(session, host.id)
-        open_obs = [o for o in latest.values() if o.state == "open"]
+        open_s = [s for s in resolved_services(session, host.id) if s.state == "open"]
         ann = get_annotation(session, TargetType.host, host.id)
         rows.append(
             HostRow(
                 id=host.id,
                 ip=host.ip,
                 hostnames=_hostnames_for(session, host.id),
-                open_count=len(open_obs),
+                open_count=len(open_s),
                 status=(ann.status if ann else Status.new),
                 tags=(ann.tags if ann else []),
-                open_ports=sorted(o.port for o in open_obs),
-                service_names=sorted({o.service_name for o in open_obs if o.service_name}),
-                open_services=sorted((o.port, o.service_name) for o in open_obs),
+                open_ports=sorted(s.port for s in open_s),
+                service_names=sorted({s.service_name for s in open_s if s.service_name}),
+                open_services=sorted((s.port, s.service_name) for s in open_s),
             )
         )
     return rows
@@ -183,27 +220,7 @@ def sort_hosts(rows: list[HostRow], sort: str) -> list[HostRow]:
 
 
 def host_services(session: Session, host_id: int) -> list[ServiceView]:
-    latest = latest_observations(session, host_id)
-    views: list[ServiceView] = []
-    for svc in session.exec(
-        select(Service).where(Service.host_id == host_id).order_by(Service.port)  # type: ignore[arg-type]
-    ).all():
-        assert svc.id is not None
-        o = latest.get((svc.port, svc.proto))
-        views.append(
-            ServiceView(
-                service_id=svc.id,
-                port=svc.port,
-                proto=svc.proto,
-                state=(o.state if o else "unknown"),
-                service_name=(o.service_name if o else None),
-                product=(o.product if o else None),
-                version=(o.version if o else None),
-                last_seen=(o.observed_at.isoformat(timespec="seconds") if o else ""),
-                annotation=get_annotation(session, TargetType.service, svc.id),
-            )
-        )
-    return views
+    return resolved_services(session, host_id)
 
 
 # --- diff ----------------------------------------------------------------------

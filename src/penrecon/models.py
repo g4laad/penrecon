@@ -66,16 +66,26 @@ class HostHostname(SQLModel, table=True):
     host_id: int = Field(foreign_key="host.id", primary_key=True)
     hostname_id: int = Field(foreign_key="hostname.id", primary_key=True)
     last_seen: datetime = Field(default_factory=_now)
+    hidden: bool = False  # manually deleted; sticky across re-scans
 
 
 class Service(SQLModel, table=True):
-    """Stable service identity. Annotations/attachments point here."""
+    """Stable service identity. Annotations/attachments point here.
+
+    Manual overrides (m_*) win over the latest Observation for display, so a
+    hand-corrected value survives re-scans. `hidden` is a sticky manual delete.
+    """
 
     __table_args__ = (UniqueConstraint("host_id", "port", "proto"),)
     id: int | None = Field(default=None, primary_key=True)
     host_id: int = Field(foreign_key="host.id", index=True)
     port: int
     proto: str
+    hidden: bool = False
+    m_state: ObsState | None = None
+    m_service_name: str | None = None
+    m_product: str | None = None
+    m_version: str | None = None
 
 
 class Observation(SQLModel, table=True):
