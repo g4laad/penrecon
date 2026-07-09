@@ -549,12 +549,6 @@ def _note_location(
     if target_type == TargetType.host:
         h = session.get(Host, target_id)
         return (f"/hosts/{h.id}", h.ip, "host") if h else None
-    if target_type == TargetType.service:
-        svc = session.get(Service, target_id)
-        if svc is None:
-            return None
-        h = session.get(Host, svc.host_id)
-        return (f"/hosts/{h.id}", f"{h.ip} · {svc.port}/{svc.proto}", "service") if h else None
     if target_type == TargetType.hostname:
         hn = session.get(Hostname, target_id)
         if hn is None:

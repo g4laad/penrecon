@@ -687,6 +687,8 @@ def note_create(
     body_md: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
+    if target_type != TargetType.host:  # notes live only on hosts
+        return HTMLResponse("notes are only supported on hosts", status_code=400)
     clean_title = title.strip() or "Untitled"  # a note always has a title
     session.add(
         Note(target_type=target_type, target_id=target_id, title=clean_title, body_md=body_md)

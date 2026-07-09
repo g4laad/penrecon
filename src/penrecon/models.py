@@ -118,9 +118,9 @@ class Annotation(SQLModel, table=True):
 
 
 class Note(SQLModel, table=True):
-    """A titled freeform note on an entity. Any number per target. Pure user
-    data — like annotations, ingest never touches it; deleting a host/service
-    deletes its notes."""
+    """A titled freeform note on a host. Any number per target. Pure user
+    data — like annotations, ingest never touches it; deleting a host deletes
+    its notes."""
 
     id: int | None = Field(default=None, primary_key=True)
     target_type: TargetType
