@@ -12,7 +12,7 @@
   <div class="page-head-actions">
     <button type="button" id="rename-open">{{ icons.icon('edit', 'icon-sm') }}Rename</button>
     <form action="/hosts/{{ host.id }}/delete" method="post"
-          onsubmit="return confirm('Delete host {{ host.ip }} and all its services, notes, and attachments? This cannot be undone.')">
+          onsubmit="return confirm('Delete host {{ host.ip }} and all its services and notes? This cannot be undone.')">
       <button type="submit" class="danger">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
     </form>
   </div>
@@ -57,11 +57,10 @@
 
 <section class="panel">
   <div class="panel-head">
-    <h2>{{ icons.icon('edit') }}Triage &amp; files</h2>
+    <h2>{{ icons.icon('edit') }}Triage</h2>
   </div>
   <div class="panel-body">
     {% with tt="host", tid=host.id, ann=host_ann %}{% include "_annotation.html" %}{% endwith %}
-    {% with tt="host", tid=host.id, attachments=host_attachments %}{% include "_attachments.html" %}{% endwith %}
   </div>
 </section>
 

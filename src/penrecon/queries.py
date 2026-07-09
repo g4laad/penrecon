@@ -1,5 +1,5 @@
 """Read-side helpers: current-state merge, host listing/detail, scan diff,
-and annotation/attachment access.
+and annotation access.
 
 Scale note: current-state is computed in Python (latest-observation-wins).
 # ponytail: naive per-host dedupe, fine for single-user local; push into SQL
@@ -15,7 +15,6 @@ from sqlmodel import Session, select
 
 from penrecon.models import (
     Annotation,
-    Attachment,
     Credential,
     CredentialHost,
     CredentialService,
@@ -100,7 +99,7 @@ class SearchResults:
         return len(self.hosts) + len(self.notes) + len(self.credentials)
 
 
-# --- annotations / attachments -------------------------------------------------
+# --- annotations ---------------------------------------------------------------
 
 def get_annotation(
     session: Session, target_type: TargetType, target_id: int
@@ -137,19 +136,6 @@ def notes_for(session: Session, target_type: TargetType, target_id: int) -> list
             select(Note)
             .where(Note.target_type == target_type, Note.target_id == target_id)
             .order_by(Note.created_at)  # type: ignore[arg-type]
-        ).all()
-    )
-
-
-def attachments_for(
-    session: Session, target_type: TargetType, target_id: int
-) -> list[Attachment]:
-    return list(
-        session.exec(
-            select(Attachment).where(
-                Attachment.target_type == target_type,
-                Attachment.target_id == target_id,
-            )
         ).all()
     )
 

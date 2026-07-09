@@ -46,7 +46,6 @@
             hx-confirm="Delete {{ s.port }}/{{ s.proto }}? A future scan that sees it will re-add it.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
         </div>
       </form>
-      {% with tt="service", tid=s.service_id, attachments=attachments_by_service[s.service_id] %}{% include "_attachments.html" %}{% endwith %}
     </div>
   </details>
   {% else %}

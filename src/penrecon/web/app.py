@@ -6,23 +6,20 @@ import csv
 import html
 import io
 import ipaddress
-import shutil
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from sqlmodel import Session, select
 
 from penrecon import queries
-from penrecon.db import ATTACHMENTS_DIR, get_session, init_db
+from penrecon.db import get_session, init_db
 from penrecon.ingest import _upsert_hostname, ingest_scan
 from penrecon.models import (
-    Attachment,
     CredKind,
     Credential,
     CredentialHost,
@@ -150,11 +147,6 @@ def host_detail(
             "services": services,
             "host_ann": queries.get_annotation(session, TargetType.host, host_id),
             "host_notes": queries.notes_for(session, TargetType.host, host_id),
-            "host_attachments": queries.attachments_for(session, TargetType.host, host_id),
-            "attachments_by_service": {
-                s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
-                for s in services
-            },
             "statuses": list(Status),
             "states": list(ObsState),
             "host_credentials": queries.credentials_for_host(session, host_id),
@@ -182,10 +174,6 @@ def _render_services(request: Request, session: Session, host: Host) -> HTMLResp
             "request": request,
             "host": host,
             "services": services,
-            "attachments_by_service": {
-                s.service_id: queries.attachments_for(session, TargetType.service, s.service_id)
-                for s in services
-            },
             "statuses": list(Status),
             "states": list(ObsState),
         },
@@ -293,13 +281,9 @@ def delete_host(host_id: int, session: Session = Depends(get_session)) -> Redire
     if host is None:
         return RedirectResponse("/", status_code=303)
     svc_ids = [s.id for s in session.exec(select(Service).where(Service.host_id == host_id)).all()]
-    for att in queries.attachments_for(session, TargetType.host, host_id):
-        session.delete(att)
     for sid in svc_ids:
         if sid is None:
             continue
-        for att in queries.attachments_for(session, TargetType.service, sid):
-            session.delete(att)
         ann = queries.get_annotation(session, TargetType.service, sid)
         if ann is not None:
             session.delete(ann)
@@ -409,9 +393,6 @@ def delete_service(
         select(CredentialService).where(CredentialService.service_id == service_id)
     ).all():
         session.delete(csl)  # drop credential↔service links (credential itself survives)
-    for att in queries.attachments_for(session, TargetType.service, service_id):
-        Path(att.stored_path).unlink(missing_ok=True)
-        session.delete(att)
     for obs in session.exec(
         select(Observation).where(
             Observation.host_id == svc.host_id,
@@ -726,48 +707,3 @@ def note_delete(
     session.delete(note)
     session.commit()
     return _render_notes(request, session, tt, tid)
-
-
-@app.post("/attachment", response_class=HTMLResponse)
-async def attachment_post(
-    request: Request,
-    target_type: TargetType = Form(...),
-    target_id: int = Form(...),
-    file: UploadFile = ...,  # type: ignore[assignment]
-    session: Session = Depends(get_session),
-) -> HTMLResponse:
-    stored = f"{uuid.uuid4().hex}_{file.filename}"
-    dest = ATTACHMENTS_DIR / stored
-    with dest.open("wb") as fh:
-        shutil.copyfileobj(file.file, fh)
-    session.add(
-        Attachment(
-            target_type=target_type,
-            target_id=target_id,
-            filename=file.filename or stored,
-            stored_path=str(dest),
-            content_type=file.content_type,
-            size=dest.stat().st_size,
-        )
-    )
-    session.commit()
-    return templates.TemplateResponse(
-        request,
-        "_attachments.html",
-        {
-            "request": request,
-            "tt": target_type.value,
-            "tid": target_id,
-            "attachments": queries.attachments_for(session, target_type, target_id),
-        },
-    )
-
-
-@app.get("/attachment/{attachment_id}")
-def attachment_get(
-    attachment_id: int, session: Session = Depends(get_session)
-) -> FileResponse:
-    att = session.get(Attachment, attachment_id)
-    if att is None:
-        return FileResponse("/dev/null", status_code=404)
-    return FileResponse(att.stored_path, filename=att.filename, media_type=att.content_type)

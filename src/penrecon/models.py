@@ -1,9 +1,8 @@
 """SQLModel tables for penrecon.
 
 Scans are immutable snapshots of Observations. Current state is derived by
-latest-observation-wins per (host, port, proto). Annotations/Attachments hang
-off stable entity identities (host / service / hostname) and are never touched
-by ingest.
+latest-observation-wins per (host, port, proto). Annotations hang off stable
+entity identities (host / service / hostname) and are never touched by ingest.
 """
 
 from __future__ import annotations
@@ -70,11 +69,11 @@ class HostHostname(SQLModel, table=True):
 
 
 class Service(SQLModel, table=True):
-    """Stable service identity. Annotations/attachments point here.
+    """Stable service identity. Annotations point here.
 
     Manual overrides (m_*) win over the latest Observation for display, so a
     hand-corrected value survives re-scans. Deleting a service is a real delete
-    (row + its notes/attachments); a later scan re-creates it fresh.
+    (row + its notes); a later scan re-creates it fresh.
     """
 
     __table_args__ = (UniqueConstraint("host_id", "port", "proto"),)
@@ -129,17 +128,6 @@ class Note(SQLModel, table=True):
     body_md: str = ""
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
-
-
-class Attachment(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    target_type: TargetType
-    target_id: int
-    filename: str
-    stored_path: str
-    content_type: str | None = None
-    size: int = 0
-    uploaded_at: datetime = Field(default_factory=_now)
 
 
 class CredKind(StrEnum):

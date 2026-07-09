@@ -1,7 +1,7 @@
 """Database engine, session, and on-disk data locations.
 
 Everything lives under ./data (override with PENRECON_DATA): the SQLite file
-and the attachments directory.
+and the retained raw scans.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine
 
 DATA_DIR: Path = Path(os.environ.get("PENRECON_DATA", "data")).resolve()
-ATTACHMENTS_DIR: Path = DATA_DIR / "attachments"
 RAW_SCANS_DIR: Path = DATA_DIR / "scans"  # retained raw upload bytes (Scan.raw_path)
 DB_PATH: Path = DATA_DIR / "penrecon.db"
 
@@ -26,7 +25,6 @@ def init_db() -> None:
     No migrations: this is a local single-user DB. If the schema changes,
     delete ./data/penrecon.db and re-ingest.
     """
-    ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     RAW_SCANS_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
     from penrecon import models  # noqa: F401

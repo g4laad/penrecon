@@ -1,7 +1,7 @@
 """Ingest a parsed scan into the DB. Shared by the web upload and the CLI.
 
 Upserts host/hostname/service identities and appends immutable Observation
-rows. Never touches Annotation/Attachment.
+rows. Never touches Annotation.
 """
 
 from __future__ import annotations
