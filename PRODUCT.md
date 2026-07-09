@@ -26,16 +26,19 @@ seconds.
 
 ## Brand Personality
 
-Terminal-native, dense, precise. Three words: **operator, legible, fast.** It
-should feel like a serious instrument — information-dense, dark, monospace where
-the data lives (IPs, ports, versions), with quiet confidence and zero marketing
-gloss. Calm under a lot of data.
+Modern, clean, dense, precise. Three words: **operator, legible, fast.** It
+should feel like a well-made instrument — a light, information-dense surface with
+monospace where the data lives (IPs, ports, versions) and a consistent icon set
+for wayfinding, carried with quiet confidence and zero marketing gloss. Calm
+under a lot of data. Reference points are clean modern operator tools (Linear,
+Stripe, Raycast), rendered dense.
 
 ## Anti-references
 
-Not a generic SaaS dashboard: no card-grid-everything, no gradient hero-metric
-tiles, no rounded pastel cards, no marketing-flavored admin chrome. Decoration
-that doesn't carry information is noise. Also avoid the heavy enterprise-security
+Not a generic SaaS dashboard: no gradient hero-metric tiles, no pastel
+card-grid-everything, no marketing-flavored admin chrome. Cards, soft elevation,
+and icons are used only where they aid triage — never as filler; decoration that
+doesn't carry information is noise. Also avoid the heavy enterprise-security
 console look (cluttered toolbars, hierarchy-less tiny tables).
 
 ## Design Principles

@@ -1,19 +1,21 @@
 {% extends "base.html" %}
+{% import "_icons.html" as icons %}
 {% block title %}Diff — penrecon{% endblock %}
 {% block content %}
 <h1>Diff scans</h1>
 <form action="/diff" method="get" class="filters">
-  <label>A <select name="a">
+  <label class="field"><span>scan A</span><select name="a">
     {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if a==s.id }}>#{{ s.id }} {{ s.filename }} ({{ s.imported_at.strftime("%m-%d %H:%M") }})</option>{% endfor %}
   </select></label>
-  <label>B <select name="b">
+  <label class="field"><span>scan B</span><select name="b">
     {% for s in scans %}<option value="{{ s.id }}" {{ 'selected' if b==s.id }}>#{{ s.id }} {{ s.filename }} ({{ s.imported_at.strftime("%m-%d %H:%M") }})</option>{% endfor %}
   </select></label>
-  <button type="submit">Compare</button>
+  <button type="submit">{{ icons.icon('diff') }}Compare</button>
 </form>
 
 {% if result %}
 <h2>#{{ result.scan_a.id }} → #{{ result.scan_b.id }}</h2>
+<div class="table-wrap">
 <table>
   <thead><tr><th>Change</th><th>Host</th><th>Port</th><th>Before</th><th>After</th></tr></thead>
   <tbody>
@@ -27,5 +29,6 @@
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

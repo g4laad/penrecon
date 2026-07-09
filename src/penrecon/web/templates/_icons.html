@@ -1,0 +1,42 @@
+{#- Inline-SVG icon set (Lucide-style, 24 grid, currentColor stroke). Local tool,
+    no icon library / no build — icons live here and inherit text color + size.
+    Usage: {% import "_icons.html" as icons %} then {{ icons.icon('server') }}. -#}
+{% macro icon(name, cls='') -%}
+<svg class="icon {{ cls }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{%- if name == 'server' -%}
+<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01"/><path d="M6 17h.01"/>
+{%- elif name == 'scan' -%}
+<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>
+{%- elif name == 'diff' -%}
+<circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/>
+{%- elif name == 'shield' -%}
+<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+{%- elif name == 'search' -%}
+<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
+{%- elif name == 'plus' -%}
+<path d="M5 12h14"/><path d="M12 5v14"/>
+{%- elif name == 'filter' -%}
+<path d="M3 4h18l-7 8v6l-4 2v-8z"/>
+{%- elif name == 'x' -%}
+<path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+{%- elif name == 'new' -%}
+<circle cx="12" cy="12" r="9"/><path d="M12 8v8"/><path d="M8 12h8"/>
+{%- elif name == 'changed' -%}
+<path d="M12 5 3.5 19.5h17z"/>
+{%- elif name == 'chevron-up' -%}
+<path d="m6 15 6-6 6 6"/>
+{%- elif name == 'chevron-down' -%}
+<path d="m6 9 6 6 6-6"/>
+{%- elif name == 'chevron-left' -%}
+<path d="m15 18-6-6 6-6"/>
+{%- elif name == 'chevron-right' -%}
+<path d="m9 18 6-6-6-6"/>
+{%- elif name == 'upload' -%}
+<path d="M12 15V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/>
+{%- elif name == 'key' -%}
+<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.6-8.6"/><path d="m17 5 2.5 2.5"/><path d="m14 8 2.5 2.5"/>
+{%- elif name == 'link' -%}
+<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><path d="M8 12h8"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}

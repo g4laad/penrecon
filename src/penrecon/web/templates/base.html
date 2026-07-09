@@ -9,13 +9,33 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+  {% import "_icons.html" as icons %}
   {% set path = request.url.path %}
   <nav aria-label="Primary">
-    <a href="/"{% if path == '/' or path.startswith('/hosts') %} class="active" aria-current="page"{% endif %}>Hosts</a>
-    <a href="/scans"{% if path.startswith('/scans') %} class="active" aria-current="page"{% endif %}>Scans</a>
-    <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>Diff</a>
-    <span class="brand">penrecon</span>
+    <a href="/"{% if path == '/' or path.startswith('/hosts') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('server') }}<span>Hosts</span></a>
+    <a href="/credentials"{% if path.startswith('/credentials') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('key') }}<span>Credentials</span></a>
+    <a href="/scans"{% if path.startswith('/scans') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('scan') }}<span>Scans</span></a>
+    <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>{{ icons.icon('diff') }}<span>Diff</span></a>
+    <span class="brand">{{ icons.icon('shield') }}penrecon</span>
   </nav>
   <main id="main">{% block content %}{% endblock %}</main>
+  <script>
+    // Inline IP check for any input[data-ip]: instant feedback so a typo shows a
+    // native validation bubble instead of the server's 400. The server
+    // (ipaddress) stays authoritative; this is permissive on IPv6 by design.
+    function looksLikeIp(v) {
+      v = v.trim();
+      if (!v) return true;  // let `required` own emptiness
+      const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(v);
+      if (m) return m.slice(1).every((o) => (o === '0' || o[0] !== '0') && +o <= 255);
+      return v.includes(':') && /^[0-9a-fA-F:.]+$/.test(v);  // IPv6: server decides the rest
+    }
+    document.querySelectorAll('input[data-ip]').forEach((inp) => {
+      const check = () => inp.setCustomValidity(
+        looksLikeIp(inp.value) ? '' : 'Enter a valid IPv4 or IPv6 address');
+      inp.addEventListener('input', check);
+      check();
+    });
+  </script>
 </body>
 </html>
