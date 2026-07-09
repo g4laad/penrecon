@@ -7,9 +7,11 @@ rows. Never touches Annotation/Attachment.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlmodel import Session, select
 
+from penrecon.db import RAW_SCANS_DIR
 from penrecon.models import (
     Host,
     Hostname,
@@ -109,6 +111,13 @@ def ingest_scan(session: Session, data: bytes, filename: str, tool: str) -> Scan
     session.add(scan)
     session.flush()
     assert scan.id is not None
+
+    # Retain the raw bytes so a scan can be re-parsed or audited later. Strip any
+    # directory components from the client-supplied filename before joining a path.
+    RAW_SCANS_DIR.mkdir(parents=True, exist_ok=True)
+    raw_dest = RAW_SCANS_DIR / f"{scan.id}_{Path(filename).name}"
+    raw_dest.write_bytes(data)
+    scan.raw_path = str(raw_dest)
 
     for hr in result:
         _store_host(session, scan.id, hr, now)
