@@ -76,7 +76,7 @@ td.ip a { font-weight:500; }
 .port b { font-weight:600; color:var(--fg); }
 .port i { font-style:normal; color:var(--mut); font-size:.85em; }
 .ports .more { color:var(--mut); }
-.ports .none { color:var(--mut); }
+.none { color:var(--mut); }  /* the "no open ports" dash sits outside .ports */
 
 /* filters: tight group, breathing room before the table */
 .filters, .upload { display:flex; gap:var(--space-2); flex-wrap:wrap; align-items:center; margin:0 0 var(--space-5); }
@@ -90,10 +90,14 @@ input[name="port"] { width:12ch; font-family:var(--font-mono); }
 textarea { width:100%; max-width:var(--measure); resize:vertical; min-height:auto; line-height:var(--lh-body); }
 
 /* uniform-height toolbar; widths sized to each control's purpose, none hog the row */
+.filters { align-items:flex-end; }  /* labels stack above inputs; bottom-align the row */
 .filters input, .filters select, .filters button { height:36px; min-height:0; }
 .filters input[type="search"] { width:26ch; }  /* bounded: fits the placeholder, doesn't hog the row */
 .filters input[name="tag"] { width:14ch; }
 .filters select { width:14ch; }
+/* persistent field labels: the hint stays put after you type (no placeholder-only labels) */
+.field { display:flex; flex-direction:column; gap:var(--space-1); }
+.field > span { font-size:var(--text-xs); color:var(--mut); letter-spacing:.02em; }
 button { cursor:pointer; } button:hover { border-color:var(--accent); }
 
 /* service rows (host detail): compact summary, editor revealed on expand */
@@ -124,6 +128,8 @@ details.service > summary small { color:var(--mut); font-family:var(--font-sans)
 .status-exploited { background:#622; color:#fbb; }
 .status-new { background:#334; color:#bcd; }
 .status-reviewed { background:#345; color:#cde; }
+/* default (un-triaged) status recedes to flat muted text so real triage pills pop */
+.status.untriaged { background:none; color:var(--mut); padding:0; }
 
 .hostnames { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); margin:0 0 var(--space-3); }
 .hostnames .hn-label, .svc-add .hn-label { color:var(--mut); font-size:var(--text-sm); }

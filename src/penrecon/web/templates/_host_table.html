@@ -1,4 +1,6 @@
-<p class="count">{{ rows | length }} host{{ '' if rows | length == 1 else 's' }}</p>
+{% set n = rows | length %}
+{% set filtered = (q or port or tag or status) and n != total %}
+<p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}</p>
 <table>
   <thead>
     <tr><th>IP</th><th>Hostnames</th><th>Open ports</th><th>Status</th><th>Tags</th></tr>
@@ -20,7 +22,7 @@
         <span class="none">—</span>
         {% endif %}
       </td>
-      <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+      <td><span class="status status-{{ r.status }}{{ ' untriaged' if not r.triaged }}">{{ r.status }}</span></td>
       <td>{% for t in r.tags %}<span class="tag">{{ t }}</span>{% endfor %}</td>
     </tr>
     {% else %}

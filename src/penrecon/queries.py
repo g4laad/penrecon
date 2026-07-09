@@ -52,6 +52,7 @@ class HostRow:
     service_names: list[str]
     open_services: list[tuple[int, str | None]]  # (port, service_name), port-sorted
     change: str = ""  # "new" | "changed" | "" — scan-delta marker
+    triaged: bool = False  # has an annotation; un-triaged hosts wear only the default status
 
 
 @dataclass
@@ -209,6 +210,7 @@ def host_rows(session: Session) -> list[HostRow]:
                 service_names=sorted({s.service_name for s in open_s if s.service_name}),
                 open_services=sorted((s.port, s.service_name) for s in open_s),
                 change=host_change(session, host.id),
+                triaged=ann is not None,
             )
         )
     return rows
