@@ -10,7 +10,7 @@
 <body>
   {% set path = request.url.path %}
   <nav aria-label="Primary">
-    <a href="/"{% if path == '/' %} class="active" aria-current="page"{% endif %}>Hosts</a>
+    <a href="/"{% if path == '/' or path.startswith('/hosts') %} class="active" aria-current="page"{% endif %}>Hosts</a>
     <a href="/scans"{% if path.startswith('/scans') %} class="active" aria-current="page"{% endif %}>Scans</a>
     <a href="/diff"{% if path.startswith('/diff') %} class="active" aria-current="page"{% endif %}>Diff</a>
     <span class="brand">penrecon</span>

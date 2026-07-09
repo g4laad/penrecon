@@ -107,6 +107,8 @@ details.service > summary small { color:var(--mut); font-family:var(--font-sans)
 .svc-body { padding:var(--space-3); border-top:1px solid var(--line); }
 .note-flag { color:var(--mut); font-size:var(--text-xs); }
 .lastseen { margin-left:auto; color:var(--mut); }
+.back { display:inline-block; color:var(--mut); text-decoration:none; font-size:var(--text-sm); margin-bottom:var(--space-2); }
+.back:hover { color:var(--accent); }
 .annotation .ann-row { display:flex; gap:var(--space-2); margin-bottom:var(--space-2); align-items:center; }
 .saved { color:#6bd06b; }
 

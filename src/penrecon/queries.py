@@ -145,7 +145,7 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
                 service_name=svc.m_service_name or (o.service_name if o else None),
                 product=svc.m_product or (o.product if o else None),
                 version=svc.m_version or (o.version if o else None),
-                last_seen=(o.observed_at.isoformat(timespec="seconds") if o else ""),
+                last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
                 annotation=get_annotation(session, TargetType.service, svc.id),
                 manual=o is None
                 or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
