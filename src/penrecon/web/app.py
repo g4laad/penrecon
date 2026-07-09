@@ -6,6 +6,8 @@ import csv
 import html
 import io
 import ipaddress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -58,13 +60,15 @@ def _highlight(text: str, q: str) -> Markup:
 
 templates.env.filters["highlight"] = _highlight
 
-app = FastAPI(title="penrecon")
-app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
-
-@app.on_event("startup")
-def _startup() -> None:
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_db()
+    yield
+
+
+app = FastAPI(title="penrecon", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
 
 def _is_htmx(request: Request) -> bool:
