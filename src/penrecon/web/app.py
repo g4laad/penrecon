@@ -154,6 +154,7 @@ def host_detail(
             "statuses": list(Status),
             "states": list(ObsState),
             "host_credentials": queries.credentials_for_host(session, host_id),
+            "kinds": list(CredKind),
         },
     )
 
@@ -434,6 +435,47 @@ def _render_credentials(request: Request, session: Session) -> HTMLResponse:
     )
 
 
+def _render_host_credentials(
+    request: Request, session: Session, host_id: int
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "_host_credentials.html",
+        {
+            "request": request,
+            "host": session.get(Host, host_id),
+            "host_credentials": queries.credentials_for_host(session, host_id),
+            "kinds": list(CredKind),
+        },
+    )
+
+
+@app.post("/credentials/{cred_id}/edit", response_class=HTMLResponse)
+def edit_credential(
+    request: Request,
+    cred_id: int,
+    kind: str = Form("password"),
+    username: str = Form(""),
+    secret: str = Form(""),
+    notes: str = Form(""),
+    host_id: int | None = Form(None),
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    cred = session.get(Credential, cred_id)
+    if cred is not None:
+        try:
+            cred.kind = CredKind(kind)
+        except ValueError:
+            cred.kind = CredKind.password
+        cred.username = username.strip()
+        cred.secret = secret.strip()
+        cred.notes = notes.strip()
+        session.commit()
+    if host_id is not None:
+        return _render_host_credentials(request, session, host_id)
+    return _render_credentials(request, session)
+
+
 @app.get("/credentials", response_class=HTMLResponse)
 def credentials_page(request: Request, session: Session = Depends(get_session)) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -471,7 +513,10 @@ def create_credential(
 
 @app.post("/credentials/{cred_id}/delete", response_class=HTMLResponse)
 def delete_credential(
-    request: Request, cred_id: int, session: Session = Depends(get_session)
+    request: Request,
+    cred_id: int,
+    host_id: int | None = Form(None),
+    session: Session = Depends(get_session),
 ) -> HTMLResponse:
     cred = session.get(Credential, cred_id)
     if cred is not None:
@@ -485,6 +530,8 @@ def delete_credential(
             session.delete(sl)
         session.delete(cred)
         session.commit()
+    if host_id is not None:  # deleted from a host panel — re-render just that panel
+        return _render_host_credentials(request, session, host_id)
     return _render_credentials(request, session)
 
 
