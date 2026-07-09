@@ -10,7 +10,7 @@
 </div>
 <form class="filters" role="search" hx-get="/" hx-target="#host-table" hx-push-url="true"
       hx-swap="innerHTML transition:true swap:120ms"
-      hx-trigger="submit">
+      hx-trigger="submit, change from:.filters select">
   <input type="search" name="q" value="{{ q }}" placeholder="ip / hostname / service" aria-label="Search by IP, hostname, or service">
   <input type="number" name="port" value="{{ port or '' }}" placeholder="port" aria-label="Filter by open port">
   <input type="text" name="tag" value="{{ tag }}" placeholder="tag" aria-label="Filter by tag">
@@ -23,7 +23,7 @@
     <option value="ports" {{ 'selected' if sort=='ports' }}>sort: most ports</option>
     <option value="status" {{ 'selected' if sort=='status' }}>sort: status</option>
   </select>
-  <button type="submit">Filter</button>
+  <button type="submit">Apply</button>
 </form>
 <div id="host-table" aria-live="polite" aria-atomic="true">
   {% include "_host_table.html" %}
