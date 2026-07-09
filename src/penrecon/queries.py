@@ -377,6 +377,7 @@ class CredentialView:
     created_at: str
     hosts: list[LinkedHost]
     services: list[LinkedService]
+    pickable_services: list[LinkedService]  # services of linked hosts, not yet linked
 
 
 def _service_name(session: Session, svc: Service) -> str | None:
@@ -423,6 +424,32 @@ def credential_views(session: Session) -> list[CredentialView]:
                 LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
             )
 
+    # Services grouped by host, but only for hosts that some credential links —
+    # this is the pool the per-credential picker draws from (services of linked
+    # hosts), so we never ship the whole service table to the page.
+    linked_host_ids = {h.host_id for hs in hosts_by_cred.values() for h in hs}
+    services_by_host: dict[int, list[LinkedService]] = defaultdict(list)
+    if linked_host_ids:
+        for svc, ip in session.exec(
+            select(Service, Host.ip)
+            .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+            .where(Service.host_id.in_(linked_host_ids))  # type: ignore[attr-defined]
+            .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
+        ).all():
+            if svc.id is not None:
+                services_by_host[svc.host_id].append(
+                    LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
+                )
+
+    def _pickable(cid: int) -> list[LinkedService]:
+        linked = {s.service_id for s in services_by_cred.get(cid, [])}
+        return [
+            s
+            for h in hosts_by_cred.get(cid, [])
+            for s in services_by_host.get(h.host_id, [])
+            if s.service_id not in linked
+        ]
+
     return [
         CredentialView(
             id=c.id,
@@ -433,6 +460,7 @@ def credential_views(session: Session) -> list[CredentialView]:
             created_at=c.created_at.strftime("%Y-%m-%d %H:%M"),
             hosts=hosts_by_cred.get(c.id, []),
             services=services_by_cred.get(c.id, []),
+            pickable_services=_pickable(c.id),
         )
         for c in creds
         if c.id is not None
@@ -447,21 +475,6 @@ def credentials_for_host(session: Session, host_id: int) -> list[CredentialView]
         if any(h.host_id == host_id for h in v.hosts)
         or any(s.host_id == host_id for s in v.services)
     ]
-
-
-def service_picker(session: Session) -> list[LinkedService]:
-    """All services, labelled with host IP + port/proto + name, for a link dropdown."""
-    rows: list[LinkedService] = []
-    for svc, ip in session.exec(
-        select(Service, Host.ip)
-        .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
-        .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
-    ).all():
-        if svc.id is not None:
-            rows.append(
-                LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
-            )
-    return rows
 
 
 # --- diff ----------------------------------------------------------------------

@@ -386,7 +386,6 @@ def _render_credentials(request: Request, session: Session) -> HTMLResponse:
             "request": request,
             "credentials": queries.credential_views(session),
             "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
-            "services": queries.service_picker(session),
         },
     )
 
@@ -441,7 +440,6 @@ def credentials_page(request: Request, session: Session = Depends(get_session)) 
             "request": request,
             "credentials": queries.credential_views(session),
             "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
-            "services": queries.service_picker(session),
             "kinds": list(CredKind),
         },
     )
@@ -514,7 +512,10 @@ def link_cred_service(
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     sid = int(service_id) if service_id.strip().isdigit() else None
-    valid = sid is not None and session.get(Credential, cred_id) is not None and session.get(Service, sid) is not None
+    svc = session.get(Service, sid) if sid is not None else None
+    # only services of a host already linked to this credential may be linked
+    scoped = svc is not None and session.get(CredentialHost, (cred_id, svc.host_id)) is not None
+    valid = sid is not None and session.get(Credential, cred_id) is not None and scoped
     if valid and sid is not None and session.get(CredentialService, (cred_id, sid)) is None:
         session.add(CredentialService(credential_id=cred_id, service_id=sid))
         session.commit()
