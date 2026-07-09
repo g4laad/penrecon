@@ -183,6 +183,7 @@ button[type="submit"], button.primary {
 button[type="submit"] .icon, button.primary .icon { color:var(--accent-ink); }
 button[type="submit"]:hover, button.primary:hover { background:#1d4fd0; border-color:#1d4fd0; }
 button.danger { background:var(--surface); color:var(--diff-del); border-color:var(--line-strong); }
+button.danger .icon { color:var(--diff-del); }  /* override the submit-button light ink */
 button.danger:hover { border-color:var(--diff-del); background:#fdecec; }
 /* a.button: a link that reads as a secondary (outline) button — box copied from the input/button base */
 a.button { display:inline-flex; align-items:center; gap:var(--space-2); font-weight:500; text-decoration:none;
