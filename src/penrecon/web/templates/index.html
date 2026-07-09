@@ -22,12 +22,8 @@
       <option value="">any</option>
       {% for s in statuses %}<option value="{{ s.value }}" {{ 'selected' if status==s.value }}>{{ s.value }}</option>{% endfor %}
     </select></label>
-  <label class="field"><span>sort</span>
-    <select name="sort">
-      <option value="ip" {{ 'selected' if sort=='ip' }}>IP</option>
-      <option value="ports" {{ 'selected' if sort=='ports' }}>most ports</option>
-      <option value="status" {{ 'selected' if sort=='status' }}>status</option>
-    </select></label>
+  <input type="hidden" name="sort" value="{{ sort }}">
+  <input type="hidden" name="dir" value="{{ direction }}">
   <button type="submit">Apply</button>
 </form>
 <p id="filter-status" class="visually-hidden" role="status" aria-live="polite"></p>

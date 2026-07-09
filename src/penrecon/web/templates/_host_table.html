@@ -1,9 +1,19 @@
 {% set n = rows | length %}
 {% set filtered = (q or port or tag or status) and n != total %}
+{%- set base = "q=" ~ (q|urlencode) ~ "&port=" ~ (port|urlencode) ~ "&tag=" ~ (tag|urlencode) ~ "&status=" ~ (status|urlencode) -%}
+{% macro sort_th(label, col, default_dir) -%}
+  {%- set active = sort == col -%}
+  {%- set next_dir = ('asc' if active and direction == 'desc' else ('desc' if active and direction == 'asc' else default_dir)) -%}
+  {%- set url = "/?" ~ base ~ "&sort=" ~ col ~ "&dir=" ~ next_dir -%}
+  <th aria-sort="{{ ('ascending' if direction == 'asc' else 'descending') if active else 'none' }}"{{ ' class=sorted' if active }}>
+    <a class="th-sort" href="{{ url }}" hx-get="{{ url }}" hx-target="#host-table" hx-push-url="true"
+       hx-swap="innerHTML transition:true swap:120ms">{{ label }}<span class="caret" aria-hidden="true">{{ ('▲' if direction == 'asc' else '▼') if active else '' }}</span></a>
+  </th>
+{%- endmacro %}
 <p class="count">{{ n }}{% if filtered %} of {{ total }}{% endif %} host{{ '' if (total if filtered else n) == 1 else 's' }}</p>
 <table>
   <thead>
-    <tr><th>IP</th><th>Hostnames</th><th>Open ports</th><th>Status</th><th>Tags</th></tr>
+    <tr>{{ sort_th('IP', 'ip', 'asc') }}<th>Hostnames</th>{{ sort_th('Open ports', 'ports', 'desc') }}{{ sort_th('Status', 'status', 'asc') }}<th>Tags</th></tr>
   </thead>
   <tbody>
     {% for r in rows %}

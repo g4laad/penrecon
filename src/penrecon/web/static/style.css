@@ -62,6 +62,12 @@ a { color:var(--accent); }
 table { width:100%; border-collapse:collapse; }
 th, td { text-align:left; padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--line); vertical-align:top; }
 th { color:var(--mut); font-weight:600; font-size:var(--text-xs); letter-spacing:.02em; }
+/* sortable column headers: click to sort, caret shows active column + direction */
+th[aria-sort] { padding:0; }  /* the link owns the padding so the whole header is the hit target */
+.th-sort { display:flex; align-items:center; gap:.4ch; color:inherit; text-decoration:none; padding:var(--space-2) var(--space-3); }
+.th-sort:hover { color:var(--accent); }
+th[aria-sort]:not([aria-sort="none"]) .th-sort { color:var(--fg); }  /* active column reads brighter */
+.caret { font-size:.75em; }
 tbody tr:hover td { background:var(--row-hover); }
 td.ip a { font-weight:500; }
 /* scan-delta marker: fixed slot keeps IPs column-aligned; text+glyph, never color-only */

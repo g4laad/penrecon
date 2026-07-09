@@ -242,11 +242,15 @@ def filter_hosts(
     return out
 
 
-def sort_hosts(rows: list[HostRow], sort: str) -> list[HostRow]:
+SORT_DEFAULT_DIR = {"ports": "desc", "ip": "asc", "status": "asc"}
+
+
+def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[HostRow]:
+    reverse = direction == "desc"
     if sort == "ports":
-        return sorted(rows, key=lambda r: r.open_count, reverse=True)
+        return sorted(rows, key=lambda r: r.open_count, reverse=reverse)
     if sort == "status":
-        return sorted(rows, key=lambda r: r.status)
+        return sorted(rows, key=lambda r: r.status, reverse=reverse)
 
     def ip_key(r: HostRow) -> tuple[int, ...]:
         parts = r.ip.split(".")
@@ -254,7 +258,7 @@ def sort_hosts(rows: list[HostRow], sort: str) -> list[HostRow]:
             return tuple(int(p) for p in parts)
         return (999, 999, 999, 999)  # non-IPv4 sorts last
 
-    return sorted(rows, key=ip_key)
+    return sorted(rows, key=ip_key, reverse=reverse)
 
 
 def host_services(session: Session, host_id: int) -> list[ServiceView]:

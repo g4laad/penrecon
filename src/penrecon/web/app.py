@@ -54,15 +54,17 @@ def index(
     tag: str = "",
     status: str = "",
     sort: str = "ip",
+    dir: str = "",  # sort direction; empty falls back to the column's natural default
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     port_val = int(port) if port.strip().isdigit() else None
+    direction = dir if dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
     all_rows = queries.host_rows(session)
     rows = queries.filter_hosts(all_rows, q=q, port=port_val, tag=tag, status=status)
-    rows = queries.sort_hosts(rows, sort)
+    rows = queries.sort_hosts(rows, sort, direction)
     ctx = {"request": request, "rows": rows, "total": len(all_rows),
            "q": q, "port": port, "tag": tag, "status": status,
-           "sort": sort, "statuses": list(Status)}
+           "sort": sort, "direction": direction, "statuses": list(Status)}
     tpl = "_host_table.html" if _is_htmx(request) else "index.html"
     return templates.TemplateResponse(request, tpl, ctx)
 
