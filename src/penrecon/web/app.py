@@ -259,6 +259,15 @@ def _invalid_ip_response(raw: str, back: str) -> HTMLResponse:
     )
 
 
+def _duplicate_ip_response(norm: str, back: str) -> HTMLResponse:
+    safe = html.escape(norm)
+    return HTMLResponse(
+        f'<p>"{safe}" already belongs to another host, so this host was not changed.</p>'
+        f'<p><a href="{html.escape(back)}">Back</a></p>',
+        status_code=409,
+    )
+
+
 @app.post("/hosts")
 def create_host(
     ip: str = Form(...), session: Session = Depends(get_session)
@@ -295,9 +304,10 @@ def edit_host(
         return _invalid_ip_response(clean, f"/hosts/{host_id}")
     if norm != host.ip:
         dup = session.exec(select(Host).where(Host.ip == norm)).first()
-        if dup is None:  # don't collide with another host's IP
-            host.ip = norm
-            session.commit()
+        if dup is not None:
+            return _duplicate_ip_response(norm, f"/hosts/{host_id}")
+        host.ip = norm
+        session.commit()
     return RedirectResponse(f"/hosts/{host_id}", status_code=303)
 
 

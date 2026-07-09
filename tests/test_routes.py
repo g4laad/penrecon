@@ -82,3 +82,25 @@ def test_upload_scan_then_host_appears(client: TestClient) -> None:
     assert r.status_code == 303
     idx = client.get("/")
     assert "10.0.0.1" in idx.text
+
+
+def test_edit_host_rejects_duplicate_ip(client: TestClient) -> None:
+    a = client.post("/hosts", data={"ip": "10.0.0.10"}, follow_redirects=False)
+    b = client.post("/hosts", data={"ip": "10.0.0.11"}, follow_redirects=False)
+    b_id = b.headers["location"].rsplit("/", 1)[1]
+    # try to rename host B onto host A's IP
+    r = client.post(f"/hosts/{b_id}/edit", data={"ip": "10.0.0.10"}, follow_redirects=False)
+    assert r.status_code == 409
+    assert "already belongs to another host" in r.text
+    # host B is unchanged
+    detail = client.get(f"/hosts/{b_id}")
+    assert "10.0.0.11" in detail.text
+
+
+def test_edit_host_accepts_new_ip(client: TestClient) -> None:
+    a = client.post("/hosts", data={"ip": "10.0.0.12"}, follow_redirects=False)
+    a_id = a.headers["location"].rsplit("/", 1)[1]
+    r = client.post(f"/hosts/{a_id}/edit", data={"ip": "10.0.0.99"}, follow_redirects=False)
+    assert r.status_code == 303
+    detail = client.get(f"/hosts/{a_id}")
+    assert "10.0.0.99" in detail.text
