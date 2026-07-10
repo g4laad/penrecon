@@ -312,18 +312,29 @@ def filter_hosts(
     return out
 
 
-HOSTS_PER_PAGE = 50
-SERVICES_PER_PAGE = 20
+PER_PAGE_OPTIONS = (10, 25, 50)  # selectable page sizes; "all" (no limit) is the 4th choice
+PER_PAGE_DEFAULT = 10
 
 _Row = TypeVar("_Row")
 
 
+def resolve_per_page(raw: str) -> int | None:
+    """Map a ``?per`` query value to a row limit. ``"all"`` -> ``None`` (no
+    limit); an empty/unknown/non-whitelisted value falls back to the default."""
+    if raw == "all":
+        return None
+    return int(raw) if raw.isdigit() and int(raw) in PER_PAGE_OPTIONS else PER_PAGE_DEFAULT
+
+
 def paginate(
-    rows: list[_Row], page: int, per_page: int = HOSTS_PER_PAGE
+    rows: list[_Row], page: int, per_page: int | None = PER_PAGE_DEFAULT
 ) -> tuple[list[_Row], int, int]:
     """Slice ``rows`` to one page. Returns ``(page_rows, page, pages)`` with
     ``page`` clamped into ``[1, pages]`` so an out-of-range or filtered-away
-    page lands on the last real page rather than an empty table."""
+    page lands on the last real page rather than an empty table. ``per_page``
+    of ``None`` means "all": one page holds every row."""
+    if per_page is None:
+        return list(rows), 1, 1
     pages = max(1, -(-len(rows) // per_page))  # ceil division
     page = max(1, min(page, pages))
     start = (page - 1) * per_page

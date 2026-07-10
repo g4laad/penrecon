@@ -41,6 +41,8 @@ _HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
 # cache-bust /static assets by mtime so CSS/JS edits show up on refresh, no hard-reload needed
 templates.env.globals["asset_ver"] = lambda name: int((_HERE / "static" / name).stat().st_mtime)
+# rows-per-page selector: numeric sizes + "all"; keep in sync with queries.resolve_per_page
+templates.env.globals["per_page_choices"] = tuple(str(n) for n in queries.PER_PAGE_OPTIONS) + ("all",)
 
 
 def _highlight(text: str, q: str) -> Markup:
@@ -86,20 +88,23 @@ def index(
     sort: str = "change",  # change is the story: new/changed float to the top by default
     dir: str = "",  # sort direction; empty falls back to the column's natural default
     page: str = "1",  # str, tolerate empty/garbage from the URL; parsed + clamped below
+    per: str = "",  # rows per page: "10" | "25" | "50" | "all"; empty -> default
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     port_val = int(port) if port.strip().isdigit() else None
     direction = dir if dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
     page_no = int(page) if page.strip().isdigit() else 1
+    per_limit = queries.resolve_per_page(per)
     all_rows = queries.host_rows(session)
     rows = queries.filter_hosts(
         all_rows, q=q, port=port_val, tag=tag, status=status, change=change
     )
     rows = queries.sort_hosts(rows, sort, direction)
     matched = len(rows)
-    page_rows, page_no, pages = queries.paginate(rows, page_no)
+    page_rows, page_no, pages = queries.paginate(rows, page_no, per_limit)
     ctx = {"request": request, "rows": page_rows, "total": len(all_rows), "matched": matched,
-           "page": page_no, "pages": pages, "per_page": queries.HOSTS_PER_PAGE,
+           "page": page_no, "pages": pages, "per_page": per_limit or matched,
+           "per": "all" if per_limit is None else str(per_limit),
            "q": q, "port": port, "tag": tag, "status": status, "change": change,
            "sort": sort, "direction": direction, "statuses": list(Status)}
     tpl = "_host_table.html" if _is_htmx(request) else "index.html"
@@ -134,7 +139,7 @@ def export_hosts_csv(session: Session = Depends(get_session)) -> Response:
 
 def _services_ctx(
     session: Session, host: Host, sort: str, dir: str, page: str,
-    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "",
+    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
 ) -> dict[str, object]:
     """Filtered + sorted + server-paginated service context, shared by the full
     page and the HTMX fragment. `svc_total` is the matched (pre-page) count."""
@@ -145,9 +150,11 @@ def _services_ctx(
     services = queries.sort_services(services, sort, direction)
     total = len(services)
     page_no = int(page) if page.strip().isdigit() else 1
-    page_services, page_no, pages = queries.paginate(services, page_no, queries.SERVICES_PER_PAGE)
+    per_limit = queries.resolve_per_page(per)
+    page_services, page_no, pages = queries.paginate(services, page_no, per_limit)
     return {"host": host, "services": page_services, "svc_total": total,
             "page": page_no, "pages": pages, "sort": sort, "direction": direction,
+            "per": "all" if per_limit is None else str(per_limit),
             "f_port": f_port, "f_state": f_state, "f_service": f_service, "f_status": f_status,
             "statuses": list(Status), "states": list(ObsState)}
 
@@ -163,12 +170,13 @@ def host_detail(
     f_state: str = "",
     f_service: str = "",
     f_status: str = "",
+    per: str = "",
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     host = session.get(Host, host_id)
     if host is None:
         return HTMLResponse("host not found", status_code=404)
-    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status)
+    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
     if _is_htmx(request):  # sort/pager clicks swap just the services panel
         return templates.TemplateResponse(request, "_services.html", {"request": request, **svc_ctx})
     return templates.TemplateResponse(
@@ -198,11 +206,11 @@ def _render_hostnames(request: Request, session: Session, host: Host) -> HTMLRes
 def _render_services(
     request: Request, session: Session, host: Host,
     sort: str = "port", dir: str = "", page: str = "1",
-    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "",
+    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
 ) -> HTMLResponse:
     return templates.TemplateResponse(
         request, "_services.html",
-        {"request": request, **_services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status)},
+        {"request": request, **_services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)},
     )
 
 
@@ -345,6 +353,7 @@ def add_service(
     f_state: str = Form(""),
     f_service: str = Form(""),
     f_status: str = Form(""),
+    per: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     host = session.get(Host, host_id)
@@ -363,7 +372,7 @@ def add_service(
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
     session.commit()
-    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
 
 
 @app.post("/services/{service_id}/edit", response_class=HTMLResponse)
@@ -383,6 +392,7 @@ def edit_service(
     f_state: str = Form(""),
     f_service: str = Form(""),
     f_status: str = Form(""),
+    per: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
@@ -398,7 +408,7 @@ def edit_service(
     queries.upsert_annotation(session, status, tag_list, service_id=service_id)
     host = session.get(Host, svc.host_id)
     assert host is not None
-    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
 
 
 @app.post("/services/{service_id}/delete", response_class=HTMLResponse)
@@ -412,6 +422,7 @@ def delete_service(
     f_state: str = Form(""),
     f_service: str = Form(""),
     f_status: str = Form(""),
+    per: str = Form(""),
     session: Session = Depends(get_session),
 ) -> HTMLResponse:
     svc = session.get(Service, service_id)
@@ -433,7 +444,7 @@ def delete_service(
         session.delete(obs)
     session.delete(svc)
     session.commit()
-    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status)
+    return _render_services(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
 
 
 # --- credentials --------------------------------------------------------------

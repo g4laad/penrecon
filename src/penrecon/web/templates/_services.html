@@ -8,12 +8,12 @@
   </th>
 {%- endmacro -%}
 {%- set any_filter = f_port or f_state or f_service or f_status -%}
-{%- set fqs = "&f_port=" ~ (f_port | urlencode) ~ "&f_state=" ~ (f_state | urlencode) ~ "&f_service=" ~ (f_service | urlencode) ~ "&f_status=" ~ (f_status | urlencode) -%}
+{%- set fqs = "&f_port=" ~ (f_port | urlencode) ~ "&f_state=" ~ (f_state | urlencode) ~ "&f_service=" ~ (f_service | urlencode) ~ "&f_status=" ~ (f_status | urlencode) ~ "&per=" ~ (per | urlencode) -%}
 {%- set furl = "/hosts/" ~ host.id -%}
 <div id="services" class="panel" data-total="{{ svc_total }}">
   <div class="panel-head">
     <h2>{{ icons.icon('server') }}Services{% if svc_total or any_filter %} <span class="grp-count">{{ svc_total }}</span>{% endif %}</h2>
-    {% if any_filter %}<a class="clear" href="{{ furl }}" hx-get="{{ furl }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true">clear filters</a>{% endif %}
+    {% if any_filter %}<a class="clear" href="{{ furl }}?per={{ per }}" hx-get="{{ furl }}?per={{ per }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true">clear filters</a>{% endif %}
   </div>
 
   {% if services or any_filter %}
@@ -49,6 +49,7 @@
           <th class="svc-th-actions">
             <input type="hidden" class="svc-filter-ctl" name="sort" value="{{ sort }}">
             <input type="hidden" class="svc-filter-ctl" name="dir" value="{{ direction }}">
+            <input type="hidden" class="svc-filter-ctl" name="per" value="{{ per }}">
           </th>
         </tr>
       </thead>
@@ -76,6 +77,12 @@
       </tbody>
     </table>
   </div>
+  <div class="table-toolbar svc-toolbar">
+    <form class="per-page" aria-label="Rows per page" hx-get="{{ furl }}" hx-target="#services" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+      <input type="hidden" name="sort" value="{{ sort }}"><input type="hidden" name="dir" value="{{ direction }}"><input type="hidden" name="f_port" value="{{ f_port }}"><input type="hidden" name="f_state" value="{{ f_state }}"><input type="hidden" name="f_service" value="{{ f_service }}"><input type="hidden" name="f_status" value="{{ f_status }}">
+      <label class="per-page-label">Rows <select class="per-page-select" name="per" aria-label="Rows per page">{% for opt in per_page_choices %}<option value="{{ opt }}"{{ ' selected' if per == opt }}>{{ opt }}</option>{% endfor %}</select></label>
+    </form>
+  </div>
 
   {% if pages > 1 %}
   <nav class="pager svc-pager" aria-label="Service pages">
@@ -91,6 +98,7 @@
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="dir" value="{{ direction }}">
       <input type="hidden" name="page" value="{{ page }}">
+      <input type="hidden" name="per" value="{{ per }}">
       <input type="hidden" name="f_port" value="{{ f_port }}">
       <input type="hidden" name="f_state" value="{{ f_state }}">
       <input type="hidden" name="f_service" value="{{ f_service }}">
@@ -138,6 +146,7 @@
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="dir" value="{{ direction }}">
       <input type="hidden" name="page" value="{{ page }}">
+      <input type="hidden" name="per" value="{{ per }}">
       <input type="hidden" name="f_port" value="{{ f_port }}">
       <input type="hidden" name="f_state" value="{{ f_state }}">
       <input type="hidden" name="f_service" value="{{ f_service }}">

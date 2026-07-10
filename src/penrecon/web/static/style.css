@@ -147,6 +147,13 @@ a.pager-btn:hover .icon-sm { color:var(--accent); }
 .pager-jump-label { display:inline-flex; align-items:center; gap:.5ch; color:var(--mut); font-size:var(--text-sm); }
 .pager-jump-input { width:6ch; height:32px; min-height:0; text-align:center;
   font-variant-numeric:tabular-nums; padding:var(--space-1) var(--space-2); }
+/* rows-per-page: count on the left, size selector on the right, above the table */
+.table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); margin:0 0 var(--space-3); }
+.table-toolbar .count { margin:0; }
+.svc-toolbar { justify-content:flex-end; margin:var(--space-3) 0 0; }
+.per-page { display:flex; align-items:center; margin:0; padding:0; border:0; background:none; box-shadow:none; }
+.per-page-label { display:inline-flex; align-items:center; gap:.5ch; color:var(--mut); font-size:var(--text-sm); }
+.per-page-select { width:auto; height:32px; min-height:0; padding:var(--space-1) var(--space-2); }
 
 /* --- filters toolbar: single clean bar, persistent small labels --- */
 .filters, .upload { display:flex; gap:var(--space-3); flex-wrap:wrap; align-items:flex-end;
