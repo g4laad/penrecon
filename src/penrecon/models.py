@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, Column, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, Column, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -132,6 +132,28 @@ class Note(SQLModel, table=True):
     host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", index=True)
     title: str
     body_md: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class OperationLog(SQLModel, table=True):
+    __tablename__ = "operation_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    started_at: datetime | None = Field(default=None, index=True)
+    ended_at: datetime | None = None
+    source: str = ""
+    destination: str = ""
+    tool: str = ""
+    user_context: str = ""
+    command: str = Field(sa_column=Column(Text))
+    output: str = Field(default="", sa_column=Column(Text))
+    description: str = Field(default="", sa_column=Column(Text))
+    comments: str = Field(default="", sa_column=Column(Text))
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    attachment_name: str | None = None
+    attachment_path: str | None = None
+    attachment_media_type: str | None = None
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 

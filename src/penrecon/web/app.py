@@ -6,20 +6,23 @@ import csv
 import html
 import io
 import ipaddress
+import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 from sqlmodel import Session, select
 
 from penrecon import queries
-from penrecon.db import get_session, init_db
+from penrecon.db import OPERATION_ATTACHMENTS_DIR, get_session, init_db
 from penrecon.ingest import _upsert_hostname, ingest_scan
 from penrecon.models import (
     CredKind,
@@ -31,6 +34,7 @@ from penrecon.models import (
     Note,
     Observation,
     ObsState,
+    OperationLog,
     Scan,
     Service,
     Status,
@@ -732,3 +736,333 @@ def note_delete(
     session.delete(note)
     session.commit()
     return _render_notes(request, session, host_id)
+
+
+# --- operation log ------------------------------------------------------------
+
+@dataclass(frozen=True)
+class _OperationForm:
+    started_at: datetime | None
+    ended_at: datetime | None
+    source: str
+    destination: str
+    tool: str
+    user_context: str
+    command: str
+    output: str
+    description: str
+    comments: str
+    tags: list[str]
+
+
+def _parse_operation_datetime(raw: str, field: str) -> datetime | None:
+    value = raw.strip()
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid {field} date-time.") from exc
+
+
+def _normalize_operation_form(
+    started_at: str,
+    ended_at: str,
+    source: str,
+    destination: str,
+    tool: str,
+    user_context: str,
+    command: str,
+    output: str,
+    description: str,
+    comments: str,
+    tags: str,
+) -> _OperationForm:
+    parsed_start = _parse_operation_datetime(started_at, "started_at")
+    parsed_end = _parse_operation_datetime(ended_at, "ended_at")
+    clean_command = command.strip()
+    if not clean_command:
+        raise ValueError("Command is required.")
+    if parsed_start is not None and parsed_end is not None and parsed_end < parsed_start:
+        raise ValueError("ended_at must not be earlier than started_at.")
+    return _OperationForm(
+        started_at=parsed_start,
+        ended_at=parsed_end,
+        source=source.strip(),
+        destination=destination.strip(),
+        tool=tool.strip(),
+        user_context=user_context.strip(),
+        command=clean_command,
+        output=output,
+        description=description,
+        comments=comments,
+        tags=[tag.strip() for tag in tags.split(",") if tag.strip()],
+    )
+
+
+def _apply_operation_form(operation: OperationLog, values: _OperationForm) -> None:
+    operation.started_at = values.started_at
+    operation.ended_at = values.ended_at
+    operation.source = values.source
+    operation.destination = values.destination
+    operation.tool = values.tool
+    operation.user_context = values.user_context
+    operation.command = values.command
+    operation.output = values.output
+    operation.description = values.description
+    operation.comments = values.comments
+    operation.tags = values.tags
+
+
+def _operation_bad_request(message: str) -> HTMLResponse:
+    return HTMLResponse(html.escape(message), status_code=400)
+
+
+def _safe_attachment_path(stored_path: str | None) -> Path | None:
+    if stored_path is None:
+        return None
+    root = OPERATION_ATTACHMENTS_DIR.resolve()
+    try:
+        path = Path(stored_path).resolve()
+        path.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    return path
+
+
+def _remove_operation_attachment(stored_path: str | None) -> None:
+    path = _safe_attachment_path(stored_path)
+    if path is not None:
+        path.unlink(missing_ok=True)
+
+
+def _save_operation_attachment(upload: UploadFile) -> tuple[str, str, str | None]:
+    original_name = Path(upload.filename or "").name
+    if not original_name:
+        raise ValueError("Attachment filename is required.")
+    OPERATION_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    destination = OPERATION_ATTACHMENTS_DIR / uuid4().hex
+    try:
+        with destination.open("xb") as target:
+            shutil.copyfileobj(upload.file, target)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    return original_name, str(destination), upload.content_type
+
+
+def _operation_form_values(
+    started_at: str,
+    ended_at: str,
+    source: str,
+    destination: str,
+    tool: str,
+    user_context: str,
+    command: str,
+    output: str,
+    description: str,
+    comments: str,
+    tags: str,
+) -> _OperationForm | HTMLResponse:
+    try:
+        return _normalize_operation_form(
+            started_at,
+            ended_at,
+            source,
+            destination,
+            tool,
+            user_context,
+            command,
+            output,
+            description,
+            comments,
+            tags,
+        )
+    except ValueError as exc:
+        return _operation_bad_request(str(exc))
+
+
+@app.get("/operations", response_class=HTMLResponse)
+def operations_page(
+    request: Request,
+    q: str = "",
+    page: int = 1,
+    per: str = "25",
+    session: Session = Depends(get_session),
+) -> HTMLResponse:
+    normalized_per = (
+        per
+        if per == "all" or (per.isdigit() and int(per) in queries.PER_PAGE_OPTIONS)
+        else "25"
+    )
+    matches = queries.operation_logs(session, q)
+    page_rows, page, pages = queries.paginate(
+        matches, page, queries.resolve_per_page(normalized_per)
+    )
+    context = {
+        "request": request,
+        "operations": page_rows,
+        "total": len(matches),
+        "q": q,
+        "page": page,
+        "pages": pages,
+        "per": normalized_per,
+    }
+    template = "_operation_table.html" if _is_htmx(request) else "operations.html"
+    return templates.TemplateResponse(request, template, context)
+
+
+@app.post("/operations")
+def create_operation(
+    started_at: str = Form(""),
+    ended_at: str = Form(""),
+    source: str = Form(""),
+    destination: str = Form(""),
+    tool: str = Form(""),
+    user_context: str = Form(""),
+    command: str = Form(""),
+    output: str = Form(""),
+    description: str = Form(""),
+    comments: str = Form(""),
+    tags: str = Form(""),
+    attachment: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+) -> Response:
+    values = _operation_form_values(
+        started_at,
+        ended_at,
+        source,
+        destination,
+        tool,
+        user_context,
+        command,
+        output,
+        description,
+        comments,
+        tags,
+    )
+    if isinstance(values, HTMLResponse):
+        return values
+    operation = OperationLog(command=values.command)
+    _apply_operation_form(operation, values)
+    new_path: str | None = None
+    try:
+        if attachment is not None and attachment.filename:
+            name, new_path, media_type = _save_operation_attachment(attachment)
+            operation.attachment_name = name
+            operation.attachment_path = new_path
+            operation.attachment_media_type = media_type
+        session.add(operation)
+        session.commit()
+    except ValueError as exc:
+        _remove_operation_attachment(new_path)
+        return _operation_bad_request(str(exc))
+    except Exception:
+        session.rollback()
+        _remove_operation_attachment(new_path)
+        raise
+    return RedirectResponse("/operations", status_code=303)
+
+
+@app.post("/operations/{operation_id}/edit")
+def edit_operation(
+    operation_id: int,
+    started_at: str = Form(""),
+    ended_at: str = Form(""),
+    source: str = Form(""),
+    destination: str = Form(""),
+    tool: str = Form(""),
+    user_context: str = Form(""),
+    command: str = Form(""),
+    output: str = Form(""),
+    description: str = Form(""),
+    comments: str = Form(""),
+    tags: str = Form(""),
+    remove_attachment: bool = Form(False),
+    attachment: UploadFile | None = File(None),
+    session: Session = Depends(get_session),
+) -> Response:
+    operation = session.get(OperationLog, operation_id)
+    if operation is None:
+        return HTMLResponse("operation not found", status_code=404)
+    has_replacement = attachment is not None and bool(attachment.filename)
+    if remove_attachment and has_replacement:
+        return _operation_bad_request(
+            "Cannot replace and remove an attachment in the same request."
+        )
+    values = _operation_form_values(
+        started_at,
+        ended_at,
+        source,
+        destination,
+        tool,
+        user_context,
+        command,
+        output,
+        description,
+        comments,
+        tags,
+    )
+    if isinstance(values, HTMLResponse):
+        return values
+
+    old_path = operation.attachment_path
+    new_path: str | None = None
+    _apply_operation_form(operation, values)
+    operation.updated_at = datetime.now(UTC)
+    try:
+        if has_replacement:
+            assert attachment is not None
+            name, new_path, media_type = _save_operation_attachment(attachment)
+            operation.attachment_name = name
+            operation.attachment_path = new_path
+            operation.attachment_media_type = media_type
+        elif remove_attachment:
+            operation.attachment_name = None
+            operation.attachment_path = None
+            operation.attachment_media_type = None
+        session.add(operation)
+        session.commit()
+    except ValueError as exc:
+        session.rollback()
+        _remove_operation_attachment(new_path)
+        return _operation_bad_request(str(exc))
+    except Exception:
+        session.rollback()
+        _remove_operation_attachment(new_path)
+        raise
+
+    if has_replacement or remove_attachment:
+        _remove_operation_attachment(old_path)
+    return RedirectResponse("/operations", status_code=303)
+
+
+@app.post("/operations/{operation_id}/delete")
+def delete_operation(
+    operation_id: int, session: Session = Depends(get_session)
+) -> Response:
+    operation = session.get(OperationLog, operation_id)
+    if operation is None:
+        return HTMLResponse("operation not found", status_code=404)
+    old_path = operation.attachment_path
+    session.delete(operation)
+    session.commit()
+    _remove_operation_attachment(old_path)
+    return RedirectResponse("/operations", status_code=303)
+
+
+@app.get("/operations/{operation_id}/attachment")
+def download_operation_attachment(
+    operation_id: int, session: Session = Depends(get_session)
+) -> Response:
+    operation = session.get(OperationLog, operation_id)
+    if operation is None or not operation.attachment_name:
+        return HTMLResponse("attachment not found", status_code=404)
+    path = _safe_attachment_path(operation.attachment_path)
+    if path is None or not path.is_file():
+        return HTMLResponse("attachment not found", status_code=404)
+    return FileResponse(
+        path,
+        filename=operation.attachment_name,
+        media_type=operation.attachment_media_type or "application/octet-stream",
+    )

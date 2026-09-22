@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TypeVar
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from penrecon.models import (
     Annotation,
@@ -24,6 +24,7 @@ from penrecon.models import (
     HostHostname,
     Note,
     Observation,
+    OperationLog,
     Scan,
     Service,
     Status,
@@ -143,6 +144,41 @@ def notes_for(session: Session, host_id: int) -> list[Note]:
             .order_by(Note.created_at)  # type: ignore[arg-type]
         ).all()
     )
+
+
+# --- operation log ------------------------------------------------------------
+
+def operation_logs(session: Session, q: str = "") -> list[OperationLog]:
+    """Operation entries in timeline order, optionally filtered across their text."""
+    rows = list(
+        session.exec(
+            select(OperationLog).order_by(
+                col(OperationLog.started_at).is_(None),
+                col(OperationLog.started_at).desc(),
+                col(OperationLog.created_at).desc(),
+            )
+        ).all()
+    )
+    needle = q.strip().casefold()
+    if not needle:
+        return rows
+
+    def matches(row: OperationLog) -> bool:
+        values = (
+            row.source,
+            row.destination,
+            row.tool,
+            row.user_context,
+            row.command,
+            row.output,
+            row.description,
+            row.comments,
+            row.attachment_name or "",
+            *row.tags,
+        )
+        return any(needle in value.casefold() for value in values)
+
+    return [row for row in rows if matches(row)]
 
 
 # --- current-state merge -------------------------------------------------------

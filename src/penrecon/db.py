@@ -15,6 +15,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 DATA_DIR: Path = Path(os.environ.get("PENRECON_DATA", "data")).resolve()
 RAW_SCANS_DIR: Path = DATA_DIR / "scans"  # retained raw upload bytes (Scan.raw_path)
+OPERATION_ATTACHMENTS_DIR: Path = DATA_DIR / "operation-attachments"
 DB_PATH: Path = DATA_DIR / "penrecon.db"
 
 def enable_sqlite_fks(engine: object) -> None:
@@ -40,6 +41,7 @@ def init_db() -> None:
     delete ./data/penrecon.db and re-ingest.
     """
     RAW_SCANS_DIR.mkdir(parents=True, exist_ok=True)
+    OPERATION_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
     from penrecon import models  # noqa: F401
 

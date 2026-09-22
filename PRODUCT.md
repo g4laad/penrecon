@@ -17,12 +17,14 @@ tool.
 ## Product Purpose
 
 Ingest recon tool output (nmap XML today; masscan/httpx/nuclei/subfinder next),
-merge it into a current-state view of hosts and services, diff any two scans to
-show what changed, and let the operator annotate findings with markdown notes,
-status, tags, and attachments that survive re-scans. Success = the operator
-reaches for penrecon instead of grepping raw XML, and can answer "what's open
-on this host, what changed since last week, and what did I note about it" in
-seconds.
+merge it into a current-state view of hosts and services, diff any two scans,
+and let the operator annotate findings with markdown notes, status, and tags
+that survive re-scans. A manually maintained command and action timeline helps
+reconstruct operator activity and can retain one attachment per entry; the
+tool does not execute commands or automatically capture terminal history.
+Success = the operator reaches for penrecon instead of grepping raw XML, and
+can answer “what’s open on this host, what changed since last week, what did I
+note about it, and what actions produced this state” in seconds.
 
 ## Brand Personality
 

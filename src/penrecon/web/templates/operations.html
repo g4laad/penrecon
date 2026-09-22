@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Operation log — penrecon{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Operation log</h1>
+  <button type="button" class="primary" data-operation-dialog="operation-create-dialog">{{ icons.icon('terminal') }}Add operation</button>
+</div>
+
+<form class="filters operation-search" action="/operations" method="get"
+      hx-get="/operations" hx-target="#operation-table" hx-swap="outerHTML" hx-push-url="true"
+      hx-trigger="submit, input changed delay:300ms from:input[name='q'], search from:input[name='q']">
+  <label class="field operation-search-field"><span>search operations</span>
+    <span class="input-icon">{{ icons.icon('search') }}
+      <input type="search" name="q" value="{{ q }}" placeholder="command, endpoint, tool, tag, attachment" autocomplete="off">
+    </span>
+  </label>
+  <input type="hidden" name="page" value="1">
+  <input type="hidden" name="per" value="{{ per }}">
+  <button type="submit">Search</button>
+</form>
+
+{% include "_operation_table.html" %}
+<dialog id="operation-create-dialog" class="modal operation-dialog" aria-labelledby="operation-create-title">
+  <form class="modal-form operation-form" method="post" action="/operations" enctype="multipart/form-data">
+    <h2 id="operation-create-title">Add operation</h2>
+    <div class="operation-grid">
+      <label class="field"><span>started</span><input class="mono" type="datetime-local" name="started_at"></label>
+      <label class="field"><span>ended</span><input class="mono" type="datetime-local" name="ended_at"></label>
+      <label class="field"><span>source</span><input class="mono" name="source" placeholder="operator host or IP"></label>
+      <label class="field"><span>destination</span><input class="mono" name="destination" placeholder="target host, IP, or range"></label>
+      <label class="field"><span>tool</span><input class="mono" name="tool" placeholder="nmap"></label>
+      <label class="field"><span>user context</span><input class="mono" name="user_context" placeholder="root, domain\\user, relay"></label>
+      <label class="field operation-wide"><span>command</span><textarea class="mono" name="command" rows="3" required></textarea></label>
+      <label class="field operation-wide"><span>output</span><textarea class="mono" name="output" rows="6"></textarea></label>
+      <label class="field operation-wide"><span>description</span><textarea name="description" rows="3"></textarea></label>
+      <label class="field operation-wide"><span>comments</span><textarea name="comments" rows="3"></textarea></label>
+      <label class="field operation-wide"><span>tags</span><input name="tags" placeholder="comma, separated"></label>
+      <label class="field operation-wide"><span>attachment</span><input type="file" name="attachment"></label>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="modal-cancel">Cancel</button>
+      <button type="submit" class="primary">Add operation</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    const opener = target.closest('[data-operation-dialog]');
+    if (opener) {
+      const dialog = document.getElementById(opener.dataset.operationDialog);
+      if (dialog) dialog.showModal();
+      return;
+    }
+    const cancel = target.closest('.modal-cancel');
+    if (cancel) {
+      cancel.closest('dialog').close();
+      return;
+    }
+    const destructive = target.closest('[data-operation-confirm]');
+    if (destructive && !window.confirm(destructive.dataset.operationConfirm)) {
+      event.preventDefault();
+      return;
+    }
+    if (target.tagName === 'DIALOG' && target.classList.contains('operation-dialog')) target.close();
+  });
+</script>
+{% endblock %}

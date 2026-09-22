@@ -1,8 +1,9 @@
 # penrecon
 
 Single-user, local pentest recon manager. Ingest scan output (nmap XML today),
-browse hosts/services, diff two scans, and keep your own notes/tags/attachments
-on findings. FastAPI + HTMX, SQLite, no auth — binds to `127.0.0.1`.
+browse hosts/services, diff two scans, keep your own notes/tags, and manually
+record the commands and actions behind an engagement. FastAPI + HTMX, SQLite,
+no auth — binds to `127.0.0.1`.
 
 ## Run
 
@@ -23,9 +24,11 @@ Data (SQLite db + attachments) lives under `./data` — override with
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.
 - **Diff** any two scans: added / removed / changed ports and versions.
-- **Annotate**: markdown note + status + tags + file attachments on any host,
-  service, or hostname. Annotations persist across re-scans; ingest never
-  touches them.
+- **Annotate**: markdown notes, status, and tags on findings persist across
+  re-scans; ingest never touches them.
+- **Operation log**: manually create, review, edit, search, and delete timeline
+  entries for commands and operator actions, with one replaceable attachment
+  per entry. penrecon does not execute commands or capture terminal history.
 
 ## Adding a parser
 

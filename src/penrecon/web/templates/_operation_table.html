@@ -1,0 +1,97 @@
+{% import "_icons.html" as icons %}
+{% set state = "q=" ~ (q | urlencode) ~ "&per=" ~ (per | urlencode) %}
+<div id="operation-table" data-total="{{ total }}">
+  <div class="table-toolbar operation-toolbar">
+    <p class="count">{{ total }} matched operation{{ '' if total == 1 else 's' }}</p>
+    <form class="per-page" action="/operations" method="get" aria-label="Rows per page"
+          hx-get="/operations" hx-target="#operation-table" hx-swap="outerHTML" hx-push-url="true" hx-trigger="change">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="page" value="1">
+      <label class="per-page-label">Rows
+        <select class="per-page-select" name="per" aria-label="Rows per page">
+          {% for opt in per_page_choices %}<option value="{{ opt }}"{{ ' selected' if per == opt }}>{{ opt }}</option>{% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+
+  <div class="table-wrap">
+    <table class="operation-table">
+      <thead>
+        <tr>
+          <th>Start / end</th>
+          <th>Source → destination</th>
+          <th>Tool</th>
+          <th>Context</th>
+          <th>Command</th>
+          <th>Tags</th>
+          <th>Attachment</th>
+          <th class="svc-th-actions"><span class="visually-hidden">Details</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for operation in operations %}
+        <tr>
+          <td class="mono operation-time">
+            {% if operation.started_at %}<time datetime="{{ operation.started_at.isoformat() }}">{{ operation.started_at.strftime('%Y-%m-%d %H:%M') }}</time>{% else %}<span class="none">—</span>{% endif %}
+            <span class="operation-time-separator">to</span>
+            {% if operation.ended_at %}<time datetime="{{ operation.ended_at.isoformat() }}">{{ operation.ended_at.strftime('%Y-%m-%d %H:%M') }}</time>{% else %}<span class="none">—</span>{% endif %}
+          </td>
+          <td class="mono operation-endpoints"><span>{{ operation.source or '—' }}</span><span aria-hidden="true">→</span><span>{{ operation.destination or '—' }}</span></td>
+          <td class="mono">{{ operation.tool or '—' }}</td>
+          <td class="mono">{{ operation.user_context or '—' }}</td>
+          <td class="mono"><span class="operation-command-preview" title="{{ operation.command }}">{{ operation.command }}</span></td>
+          <td>{% if operation.tags %}{% for tag in operation.tags %}<span class="tag">{{ tag }}</span>{% endfor %}{% else %}<span class="none">—</span>{% endif %}</td>
+          <td>{% if operation.attachment_name %}<a class="operation-attachment" href="/operations/{{ operation.id }}/attachment">{{ icons.icon('download', 'icon-sm') }}<span>{{ operation.attachment_name }}</span></a>{% else %}<span class="none">—</span>{% endif %}</td>
+          <td class="svc-th-actions"><button type="button" class="icon-btn" data-operation-dialog="operation-edit-{{ operation.id }}" aria-label="Edit operation {{ operation.id }}">{{ icons.icon('edit', 'icon-sm') }}</button></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="empty">{% if q %}No operations match “{{ q }}”.{% else %}No operations recorded yet. Add the command or action that started your timeline.{% endif %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if pages > 1 %}
+  <nav class="pager" aria-label="Operation pages">
+    {% if page > 1 %}{% set prev = "/operations?" ~ state ~ "&page=" ~ (page - 1) %}<a class="pager-btn" href="{{ prev }}" hx-get="{{ prev }}" hx-target="#operation-table" hx-swap="outerHTML" hx-push-url="true" rel="prev">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</a>{% else %}<span class="pager-btn" aria-disabled="true">{{ icons.icon('chevron-left', 'icon-sm') }}Prev</span>{% endif %}
+    <span class="pager-info">Page {{ page }} of {{ pages }}</span>
+    {% if page < pages %}{% set next = "/operations?" ~ state ~ "&page=" ~ (page + 1) %}<a class="pager-btn" href="{{ next }}" hx-get="{{ next }}" hx-target="#operation-table" hx-swap="outerHTML" hx-push-url="true" rel="next">Next{{ icons.icon('chevron-right', 'icon-sm') }}</a>{% else %}<span class="pager-btn" aria-disabled="true">Next{{ icons.icon('chevron-right', 'icon-sm') }}</span>{% endif %}
+  </nav>
+  {% endif %}
+
+  {% for operation in operations %}
+  <dialog id="operation-edit-{{ operation.id }}" class="modal operation-dialog" aria-labelledby="operation-edit-{{ operation.id }}-title">
+    <form class="modal-form operation-form" method="post" action="/operations/{{ operation.id }}/edit" enctype="multipart/form-data">
+      <h2 id="operation-edit-{{ operation.id }}-title">Operation <span class="mono">#{{ operation.id }}</span></h2>
+      <div class="operation-grid">
+        <label class="field"><span>started</span><input class="mono" type="datetime-local" name="started_at" value="{{ operation.started_at.strftime('%Y-%m-%dT%H:%M') if operation.started_at else '' }}"></label>
+        <label class="field"><span>ended</span><input class="mono" type="datetime-local" name="ended_at" value="{{ operation.ended_at.strftime('%Y-%m-%dT%H:%M') if operation.ended_at else '' }}"></label>
+        <label class="field"><span>source</span><input class="mono" name="source" value="{{ operation.source }}"></label>
+        <label class="field"><span>destination</span><input class="mono" name="destination" value="{{ operation.destination }}"></label>
+        <label class="field"><span>tool</span><input class="mono" name="tool" value="{{ operation.tool }}"></label>
+        <label class="field"><span>user context</span><input class="mono" name="user_context" value="{{ operation.user_context }}"></label>
+        <label class="field operation-wide"><span>command</span><textarea class="mono" name="command" rows="3" required>{{ operation.command }}</textarea></label>
+        <label class="field operation-wide"><span>output</span><textarea class="mono" name="output" rows="6">{{ operation.output }}</textarea></label>
+        <label class="field operation-wide"><span>description</span><textarea name="description" rows="3">{{ operation.description }}</textarea></label>
+        <label class="field operation-wide"><span>comments</span><textarea name="comments" rows="3">{{ operation.comments }}</textarea></label>
+        <label class="field operation-wide"><span>tags</span><input name="tags" value="{{ operation.tags | join(', ') }}"></label>
+        <label class="field operation-wide"><span>replacement attachment</span><input type="file" name="attachment"></label>
+        {% if operation.attachment_name %}
+        <div class="operation-existing operation-wide">
+          <span>Current attachment</span>
+          <a href="/operations/{{ operation.id }}/attachment">{{ icons.icon('download', 'icon-sm') }}{{ operation.attachment_name }}</a>
+          <label><input type="checkbox" name="remove_attachment" value="true"> Remove attachment</label>
+        </div>
+        {% endif %}
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="danger" formaction="/operations/{{ operation.id }}/delete" formnovalidate
+                data-operation-confirm="Delete operation #{{ operation.id }}? It cannot be restored.">{{ icons.icon('trash', 'icon-sm') }}Delete</button>
+        <button type="button" class="modal-cancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+  {% endfor %}
+</div>
