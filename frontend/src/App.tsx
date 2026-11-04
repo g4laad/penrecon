@@ -150,10 +150,10 @@ function Inventory({ data }: { data: PageData }) {
         <Modal
           title="New host"
           trigger={
-            <>
+            <Button>
               <Plus />
               New host
-            </>
+            </Button>
           }
         >
           <MutationForm action="/hosts">

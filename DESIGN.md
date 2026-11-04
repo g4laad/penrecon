@@ -21,9 +21,12 @@ results in tables, not card grids. See `PRODUCT.md` for product principles.
 
 Use shadcn semantic tokens (`background`, `foreground`, `muted`, `primary`,
 `border`, `destructive`, `ring`) through Tailwind utilities. The light neutral
-palette is authoritative; dark tokens are inherited component defaults, not an
-exposed product theme. Muted foreground is darkened for legibility. Global focus
-outlines use the ring token. Status and diff badges always include text.
+canvas with **Blue action** emphasis is authoritative; dark tokens are inherited
+component defaults, not an exposed product theme. Primary actions and text links
+use blue (`#1d4ed8`), selected navigation and workbench items use a light blue
+tint, and keyboard focus uses the blue ring token. Muted foreground is darkened
+for legibility. Status and diff badges remain neutral and always include text;
+destructive actions retain red.
 
 Use `.mono` for IPs, ports, protocol/version strings, timestamps, commands,
 output, and secrets. Body text is 14px; headings distinguish page and section
@@ -82,6 +85,14 @@ Tables scroll horizontally rather than crushing technical content.
 - Global search is always reachable. `/` focuses a search field outside text
   entry. A skip link, visible focus, text labels, and semantic table structure
   support keyboard use. Reduced-motion preferences disable transitions/animations.
+- Links underline only on hover, including navigation and linked service chips.
+  Table-header links retain neutral text and never underline. Button-styled links
+  keep button emphasis rather than text-link decoration. Inventory creation is
+  a filled primary action; export, filtering, and management stay secondary.
+- Color design reference: `prototype/color-emphasis` at `1f8be95` preserves the
+  original and A/B/C comparisons. The user approved **A / Blue action**, with
+  hover-only underlines and neutral, undecorated table headers. Production
+  contains only the approved treatment, with real mutations and no switcher.
 
 ## Runtime boundary
 
