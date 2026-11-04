@@ -65,6 +65,11 @@ For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
 This watches and rebuilds the local bundle; refresh the browser after changes.
 `npm --prefix frontend run build` checks TypeScript and produces release assets.
 
+GitHub Actions runs on pushes, pull requests, and manual dispatches. The workflow
+in `.github/workflows/ci.yml` installs locked dependencies, runs pytest and mypy,
+checks TypeScript and builds the frontend, then packages a wheel and smoke-tests
+its installed CLI. CI uses Python from `.python-version` and Node.js 22.
+
 React source lives in `frontend/src`. Shared components are shadcn/ui's
 `base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
 icons. Add components with `npx shadcn@latest add <component> -c frontend`.
