@@ -47,6 +47,9 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
 - **Operation log**: manually create, review, edit, search, and delete timeline
   entries for commands and operator actions, with one replaceable attachment
   per entry. penrecon does not execute commands or capture terminal history.
+  Start and end timestamps use shadcn calendar popovers and styled native time
+  inputs; the browser/system chooses 12- or 24-hour display. A selected date
+  defaults to midnight; use Clear date to omit that timestamp.
 
 ## Adding a parser
 

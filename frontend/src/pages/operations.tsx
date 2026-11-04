@@ -3,6 +3,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { CalendarIcon } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -23,6 +32,76 @@ import {
 } from "../common";
 import type { Operation, PageData } from "../types";
 
+function OperationTimestamp({
+  label,
+  name,
+  defaultValue,
+}: {
+  label: string;
+  name: string;
+  defaultValue?: string | null;
+}) {
+  const [date, setDate] = useState(defaultValue?.slice(0, 10) ?? "");
+  const [time, setTime] = useState(defaultValue?.slice(11, 16) || "00:00");
+  const [dateOpen, setDateOpen] = useState(false);
+  const selectedDate = date ? parseISO(date) : undefined;
+  return (
+    <fieldset className="grid min-w-0 gap-1.5">
+      <legend className="mb-1.5 text-sm font-medium">{label}</legend>
+      <div className="grid grid-cols-[minmax(0,1fr)_9rem] gap-2">
+        <Popover open={dateOpen} onOpenChange={setDateOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                className="mono w-full min-w-0 justify-between px-2"
+                aria-label={`${label} date`}
+              />
+            }
+          >
+            {date || "Pick date"}
+            <CalendarIcon className="size-3.5 shrink-0" />
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <PopoverTitle className="sr-only">{label} date</PopoverTitle>
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              defaultMonth={selectedDate}
+              autoFocus
+              onSelect={(day) => {
+                setDate(day ? format(day, "yyyy-MM-dd") : "");
+                setDateOpen(false);
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              className="m-2 mt-0"
+              onClick={() => {
+                setDate("");
+                setDateOpen(false);
+              }}
+            >
+              Clear date
+            </Button>
+          </PopoverContent>
+        </Popover>
+        <Input
+          type="time"
+          aria-label={`${label} time`}
+          value={time}
+          required={Boolean(date)}
+          onChange={(event) => setTime(event.target.value)}
+        />
+      </div>
+      <p className="muted text-xs">Time defaults to midnight.</p>
+      <input type="hidden" name={name} value={date ? `${date}T${time}` : ""} />
+    </fieldset>
+  );
+}
+
 function OperationFields({ operation }: { operation?: Operation }) {
   const attachmentId = useId();
   const removeId = useId();
@@ -30,17 +109,15 @@ function OperationFields({ operation }: { operation?: Operation }) {
   const [removeAttachment, setRemoveAttachment] = useState(false);
   return (
     <div className="form-grid">
-      <Field
+      <OperationTimestamp
         label="Started"
         name="started_at"
-        type="datetime-local"
-        defaultValue={operation?.started_at?.slice(0, 16) ?? ""}
+        defaultValue={operation?.started_at}
       />
-      <Field
+      <OperationTimestamp
         label="Ended"
         name="ended_at"
-        type="datetime-local"
-        defaultValue={operation?.ended_at?.slice(0, 16) ?? ""}
+        defaultValue={operation?.ended_at}
       />
       <Field
         label="Source"

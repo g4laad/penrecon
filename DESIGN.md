@@ -43,6 +43,10 @@ Tables scroll horizontally rather than crushing technical content.
   dismissal, focus restoration, scrollable content, and an accessible close button.
 - `MutationForm` posts real multipart form data, disables duplicate submissions,
   surfaces errors, refreshes page data, and closes its modal on success.
+- Operation timestamps use shadcn Calendar/Popover date pickers; selecting a day
+  closes the calendar, and Clear date omits the timestamp. Time uses shadcn
+  Input with `type="time"`; the browser/system chooses 12- or 24-hour display.
+  No custom hour/minute selectors or forced time format.
 - Inventory/service filters, sorting, pagination, scan comparison, and search
   use addressable query parameters. Page URLs can be bookmarked and reloaded.
   Pagination buttons bottom-align with the rows selector and page input, not

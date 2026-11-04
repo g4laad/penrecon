@@ -402,9 +402,6 @@ export default function App() {
           >
             <Activity className="size-5 text-primary" />
             penrecon
-            <span className="ml-1 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
-              local
-            </span>
           </a>
           <nav
             aria-label="Primary"
