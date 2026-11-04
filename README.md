@@ -32,6 +32,8 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
 - **Diff** any two scans: added / removed / changed ports and versions.
 - **Annotate**: markdown notes, status, and tags on findings persist across
   re-scans; ingest never touches them.
+- **Manual services**: manually edited services show a “Manual” pill to the right
+  of the service name in the host's services table.
 - **Credentials**: store secrets and link them to hosts and services. Secrets
   start masked on both the credentials and host pages, with eye and copy icons
   to reveal/hide or copy them. Linked credentials show username and secret side

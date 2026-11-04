@@ -613,9 +613,14 @@ export function HostPage({ data }: { data: PageData }) {
                   </TableCell>
                   <TableCell className="min-w-48 whitespace-normal">
                     <div className="space-y-1">
-                      <p className="font-medium">
-                        {service.service_name || "—"}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium">
+                          {service.service_name || "—"}
+                        </p>
+                        {service.manual && (
+                          <Badge variant="secondary">Manual</Badge>
+                        )}
+                      </div>
                       {(service.product || service.version) && (
                         <p className="mono muted text-xs">
                           {[service.product, service.version]
@@ -624,9 +629,6 @@ export function HostPage({ data }: { data: PageData }) {
                         </p>
                       )}
                       <div className="flex flex-wrap gap-1">
-                        {service.manual && (
-                          <Badge variant="secondary">Manual</Badge>
-                        )}
                         {service.annotation?.tags.map((tag) => (
                           <Badge key={tag} variant="outline">
                             {tag}
