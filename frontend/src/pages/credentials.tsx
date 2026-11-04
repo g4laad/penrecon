@@ -82,7 +82,7 @@ function CredentialLinks({
     (host) => !credential.hosts.some((link) => link.host_id === host.id),
   );
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid items-start gap-4 md:grid-cols-2">
       <div className="stack gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide">
           Linked hosts

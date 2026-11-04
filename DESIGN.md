@@ -53,6 +53,8 @@ Tables scroll horizontally rather than crushing technical content.
   host/service link management. The list stacks above details on small screens.
   Selected identity uses `#credential-ID`; text/kind/association filters use
   query parameters. Text filtering excludes secrets.
+  Host/service link columns top-align and size independently so linked chips
+  stay compact when the adjacent column has a taller picker.
 - Secrets start concealed, with reveal/copy actions, and conceal again when
   switching identities or changing the secret. Delete is a secondary footer
   action with confirmation. Associations do not imply verified access.
