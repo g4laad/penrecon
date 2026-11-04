@@ -278,7 +278,6 @@ function CredentialRow({
           <div className="flex min-h-7 items-center">
             <Badge variant="secondary">{credential.kind}</Badge>
           </div>
-          <div className="muted mt-2 text-xs">#{credential.id}</div>
         </TableCell>
         <TableCell className="mono align-top break-all">
           <div className="min-h-7 py-1">

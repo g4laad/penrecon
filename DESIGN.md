@@ -51,7 +51,8 @@ Tables scroll horizontally rather than crushing technical content.
 - Credential secrets are concealed on the global list until revealed, with a
   copy action. Credential table fields share a 28px first-line alignment with
   their controls; multiline notes and revealed secrets expand below that line.
-  Host detail shows linked evidence directly.
+  Credential rows omit internal numeric IDs. Host detail shows linked evidence
+  directly.
 - Global search is always reachable. `/` focuses a search field outside text
   entry. A skip link, visible focus, text labels, and semantic table structure
   support keyboard use. Reduced-motion preferences disable transitions/animations.
