@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Copy, Eye, EyeOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,22 +93,33 @@ function Secret({ value }: { value: string }) {
   }
   return (
     <div className="stack gap-1">
-      <span className="mono block max-w-80 select-text whitespace-pre-wrap break-all">
-        {visible ? value : "••••••••••••"}
-      </span>
-      <div className="actions">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setVisible(!visible)}
-          aria-pressed={visible}
-        >
-          {visible ? "Hide secret" : "Reveal secret"}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={copy}>
-          Copy secret
-        </Button>
+      <div className="flex items-center gap-2">
+        <span className="mono block min-w-0 max-w-80 select-text whitespace-pre-wrap break-all">
+          {visible ? value : "••••••••••••"}
+        </span>
+        <div className="flex shrink-0 items-center">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setVisible(!visible)}
+            aria-label={visible ? "Hide secret" : "Reveal secret"}
+            title={visible ? "Hide secret" : "Reveal secret"}
+            aria-pressed={visible}
+          >
+            {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={copy}
+            aria-label="Copy secret"
+            title="Copy secret"
+          >
+            <Copy aria-hidden="true" />
+          </Button>
+        </div>
       </div>
       <span role="status" className="muted text-xs">
         {status}

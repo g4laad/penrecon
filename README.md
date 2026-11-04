@@ -32,6 +32,9 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
 - **Diff** any two scans: added / removed / changed ports and versions.
 - **Annotate**: markdown notes, status, and tags on findings persist across
   re-scans; ingest never touches them.
+- **Credentials**: store secrets and link them to hosts and services. Eye and
+  copy icons are vertically centered to the right of each secret to reveal/hide
+  it or copy it.
 - **Operation log**: manually create, review, edit, search, and delete timeline
   entries for commands and operator actions, with one replaceable attachment
   per entry. penrecon does not execute commands or capture terminal history.
