@@ -58,6 +58,8 @@ Tables scroll horizontally rather than crushing technical content.
   query parameters. Text filtering excludes secrets.
   Host/service link columns top-align and size independently so linked chips
   stay compact when the adjacent column has a taller picker.
+  Unlink actions use compact ghost icon buttons with the unlink symbol,
+  target-specific accessible labels, and hover titles.
 - Secrets start concealed, with reveal/copy actions, and conceal again when
   switching identities or changing the secret. Delete is a secondary footer
   action with confirmation. Associations do not imply verified access.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Unlink } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,10 +106,11 @@ function CredentialLinks({
                 <Button
                   type="submit"
                   variant="ghost"
-                  size="sm"
+                  size="icon-sm"
                   aria-label={`Unlink host ${host.ip}`}
+                  title={`Unlink host ${host.ip}`}
                 >
-                  Unlink
+                  <Unlink aria-hidden="true" />
                 </Button>
               </MutationForm>
             </div>
@@ -162,10 +163,11 @@ function CredentialLinks({
                 <Button
                   type="submit"
                   variant="ghost"
-                  size="sm"
+                  size="icon-sm"
                   aria-label={`Unlink service ${service.ip}:${service.port}/${service.proto}`}
+                  title={`Unlink service ${service.ip}:${service.port}/${service.proto}`}
                 >
-                  Unlink
+                  <Unlink aria-hidden="true" />
                 </Button>
               </MutationForm>
             </div>
