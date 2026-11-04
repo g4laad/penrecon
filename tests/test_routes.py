@@ -244,6 +244,42 @@ def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> 
     assert deleted.json()["credentials"] == []
 
 
+def test_unlink_host_removes_only_its_credential_service_links(client: TestClient) -> None:
+    host_path = _create_host(client)
+    other_path = _create_host(client, "10.0.0.6")
+    host_id = int(host_path.rsplit("/", 1)[1])
+    other_id = int(other_path.rsplit("/", 1)[1])
+    service_ids: list[int] = []
+    for path, port in ((host_path, 22), (host_path, 443), (other_path, 22)):
+        services = client.post(f"{path}/services", data={"port": str(port)}).json()["services"]
+        service_ids.append(next(service["service_id"] for service in services if service["port"] == port))
+    credential_id = client.post("/credentials", data={"username": "root", "secret": "toor"}).json()["credentials"][0]["id"]
+    other_credential_id = client.post("/credentials", data={"username": "admin", "secret": "other"}).json()["credentials"][0]["id"]
+    for cid in (credential_id, other_credential_id):
+        for hid in (host_id, other_id):
+            client.post(f"/credentials/{cid}/link/host", data={"host_id": str(hid)})
+        for sid in service_ids:
+            client.post(f"/credentials/{cid}/link/service", data={"service_id": str(sid)})
+
+    response = client.post(f"/credentials/{credential_id}/unlink/host/{host_id}")
+    assert response.status_code == 200
+    credentials = {credential["id"]: credential for credential in response.json()["credentials"]}
+    credential = credentials[credential_id]
+    assert [host["host_id"] for host in credential["hosts"]] == [other_id]
+    assert [service["service_id"] for service in credential["services"]] == [service_ids[2]]
+    assert credential["username"] == "root"
+    assert credential["secret"] == "toor"
+    other = credentials[other_credential_id]
+    assert {host["host_id"] for host in other["hosts"]} == {host_id, other_id}
+    assert {service["service_id"] for service in other["services"]} == set(service_ids)
+
+    # Re-linking the host must not resurrect its old service associations.
+    client.post(f"/credentials/{credential_id}/unlink/host/{host_id}")
+    client.post(f"/credentials/{credential_id}/link/host", data={"host_id": str(host_id)})
+    persisted = {credential["id"]: credential for credential in client.get("/credentials").json()["credentials"]}
+    assert [service["service_id"] for service in persisted[credential_id]["services"]] == [service_ids[2]]
+
+
 def test_search_serializes_all_result_sources(client: TestClient) -> None:
     path = _create_host(client)
     host_id = path.rsplit("/", 1)[1]

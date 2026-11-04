@@ -522,10 +522,17 @@ def link_cred_host(request: Request, cred_id: int, host_id: str = Form(""), sess
 
 @app.post("/credentials/{cred_id}/unlink/host/{host_id}", response_class=JSONResponse)
 def unlink_cred_host(request: Request, cred_id: int, host_id: int, session: Session = Depends(get_session)) -> Response:
+    service_links = session.exec(
+        select(CredentialService)
+        .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
+        .where(CredentialService.credential_id == cred_id, Service.host_id == host_id)
+    ).all()
+    for service_link in service_links:
+        session.delete(service_link)
     link = session.get(CredentialHost, (cred_id, host_id))
     if link is not None:
         session.delete(link)
-        session.commit()
+    session.commit()
     return _credentials_response(request, session)
 
 
