@@ -47,6 +47,9 @@ Tables scroll horizontally rather than crushing technical content.
   use addressable query parameters. Page URLs can be bookmarked and reloaded.
   Pagination buttons bottom-align with the rows selector and page input, not
   with the combined height of their labels and controls.
+  Inventory and host-service filters use outline Apply and Reset buttons with
+  filter and rotate-back icons. Reset clears filters; host-service reset keeps
+  the current rows-per-page setting.
 - Destructive actions require confirmation. Host deletion states that credential
   links are deleted, not the credentials themselves.
 - Notes and scan-derived text render as escaped React text. Notes retain their

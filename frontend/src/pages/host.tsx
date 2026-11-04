@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { Network } from "lucide-react";
+import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -558,16 +558,20 @@ function ServiceFilters({ data }: { data: PageData }) {
           />
           <input type="hidden" name="per" value={data.per ?? "25"} />
           <Button type="submit" variant="outline">
-            Apply filters
+            <ListFilter />
+            Apply
           </Button>
-          {filtered && (
-            <a
-              className="self-end py-2 text-sm underline underline-offset-4"
-              href={`/hosts/${data.host!.id}?per=${encodeURIComponent(data.per ?? "25")}`}
-            >
-              Clear filters
-            </a>
-          )}
+          <Button
+            variant="outline"
+            render={
+              <a
+                href={`/hosts/${data.host!.id}?per=${encodeURIComponent(data.per ?? "25")}`}
+              />
+            }
+          >
+            <RotateCcw />
+            Reset
+          </Button>
         </Filters>
       </div>
     </details>

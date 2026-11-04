@@ -9,6 +9,7 @@ import {
   Plus,
   Radar,
   Search,
+  RotateCcw,
   Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -209,9 +210,10 @@ function Inventory({ data }: { data: PageData }) {
           <ListFilter />
           Apply
         </Button>
-        <a href="/" className="text-sm text-muted-foreground hover:underline">
+        <Button variant="outline" render={<a href="/" />}>
+          <RotateCcw />
           Reset
-        </a>
+        </Button>
       </Filters>
       <div className="overflow-hidden rounded-lg border bg-card">
         <div className="flex items-center justify-between border-b px-4 py-3 text-sm">
