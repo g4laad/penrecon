@@ -113,6 +113,84 @@ def test_create_credential_lists_it(client: TestClient) -> None:
     assert credential["kind"] == "password"
 
 
+def test_create_credential_with_multiple_targets_deduplicates_links(client: TestClient) -> None:
+    paths = [_create_host(client), _create_host(client, "10.0.0.6")]
+    host_ids = [int(path.rsplit("/", 1)[1]) for path in paths]
+    service_ids = [
+        client.post(f"{path}/services", data={"port": "22"}).json()["services"][0]["service_id"]
+        for path in paths
+    ]
+    response = client.post("/credentials", data={
+        "username": " root ", "secret": " toor ", "notes": " shared ",
+        "host_ids": [str(hid) for hid in [*host_ids, host_ids[0]]],
+        "service_ids": [str(sid) for sid in [*service_ids, service_ids[0]]],
+    })
+    assert response.status_code == 200
+    credential = response.json()["credentials"][0]
+    assert credential["username"] == "root"
+    assert credential["secret"] == "toor"
+    assert credential["notes"] == "shared"
+    assert credential["kind"] == "password"
+    assert sorted(host["host_id"] for host in credential["hosts"]) == sorted(host_ids)
+    assert sorted(service["service_id"] for service in credential["services"]) == sorted(service_ids)
+    persisted = client.get("/credentials").json()["credentials"]
+    assert persisted == response.json()["credentials"]
+    for path in paths:
+        assert client.get(path).json()["host_credentials"][0]["id"] == credential["id"]
+
+
+@pytest.mark.parametrize("invalid_target", ["unknown_host", "unknown_service", "unselected_host", "no_hosts"])
+def test_create_credential_rejects_invalid_targets_without_partial_writes(
+    client: TestClient, invalid_target: str,
+) -> None:
+    path = _create_host(client)
+    other_path = _create_host(client, "10.0.0.6")
+    host_id = path.rsplit("/", 1)[1]
+    service_id = client.post(f"{path}/services", data={"port": "22"}).json()["services"][0]["service_id"]
+    other_service_id = client.post(f"{other_path}/services", data={"port": "443"}).json()["services"][0]["service_id"]
+    existing = client.post("/credentials", data={"username": "existing"}).json()["credentials"]
+    data = {
+        "username": "rejected",
+        "host_ids": [host_id],
+        "service_ids": [str(service_id)],
+    }
+    if invalid_target == "unknown_host":
+        data["host_ids"].append("999999")
+    elif invalid_target == "unknown_service":
+        data["service_ids"].append("999999")
+    elif invalid_target == "unselected_host":
+        data["service_ids"].append(str(other_service_id))
+    else:
+        data["host_ids"] = []
+    response = client.post("/credentials", data=data)
+    assert response.status_code == 422
+    assert client.get("/credentials").json()["credentials"] == existing
+    assert client.get(path).json()["host_credentials"] == []
+    assert client.get(other_path).json()["host_credentials"] == []
+
+
+@pytest.mark.parametrize("data", [{}, {"username": "  ", "secret": "\t", "notes": "notes only"}])
+def test_create_credential_rejects_empty_identity(client: TestClient, data: dict[str, str]) -> None:
+    response = client.post("/credentials", data=data)
+    assert response.status_code == 422
+    assert client.get("/credentials").json()["credentials"] == []
+
+
+@pytest.mark.parametrize("data", [
+    {"username": "user only"},
+    {"secret": "secret only", "kind": "unknown"},
+])
+def test_create_credential_preserves_target_free_defaults(client: TestClient, data: dict[str, str]) -> None:
+    response = client.post("/credentials", data=data)
+    assert response.status_code == 200
+    credential = response.json()["credentials"][0]
+    assert credential["kind"] == "password"
+    assert credential["username"] == data.get("username", "")
+    assert credential["secret"] == data.get("secret", "")
+    assert credential["hosts"] == []
+    assert credential["services"] == []
+
+
 def test_upload_scan_then_host_appears(client: TestClient) -> None:
     _upload(client, SCAN_A, "a.xml")
     row = client.get("/").json()["rows"][0]

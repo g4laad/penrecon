@@ -15,6 +15,7 @@ import {
   SelectField,
 } from "../common";
 import type { PageData } from "../types";
+import { CredentialCreateForm } from "./credential-create";
 
 type Credential = NonNullable<PageData["credentials"]>[number];
 type Host = NonNullable<PageData["hosts"]>[number];
@@ -322,12 +323,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
         description="Find an identity. Inspect its secret, discovery notes, and target associations."
       >
         <Modal title="Add credential" trigger={<Button type="button">Add credential</Button>}>
-          <MutationForm action="/credentials">
-            <CredentialFields kinds={kinds} />
-            <div className="actions mt-4 justify-end">
-              <Button type="submit">Add credential</Button>
-            </div>
-          </MutationForm>
+          <CredentialCreateForm kinds={kinds} hosts={hosts} />
         </Modal>
       </PageHeader>
       <div className="credential-filters" role="search" aria-label="Filter credentials">

@@ -73,6 +73,16 @@ Tables scroll horizontally rather than crushing technical content.
 - Design reference: `prototype/credential-views` at `b564842` preserves the
   workbench, ledger, and target-grouped comparison. The user approved Workbench;
   production contains only that view, with real mutations and no switcher.
+- Credential creation uses approved **A / Compact dialog**: kind, identity,
+  concealed kind-aware secret entry, and discovery notes appear first; optional
+  host/service associations expand below. Search filters hosts without clearing
+  selections. Unchecking a host clears its selected services.
+  A username or secret is required. Credential and selected links save in one
+  transaction; invalid or out-of-scope targets create nothing. Service-loading
+  failures remain visible with retry, and saving waits for selected hosts to load.
+  Reopening the dialog starts a fresh, concealed draft.
+  Design reference: `prototype/credential-entry` at `199ec06` preserves A/B/C.
+  The user approved A; production has real persistence and no prototype controls.
 - Host details use the approved **D / Tabbed Workbench** layout: Services,
   Host notes, and Credentials tabs, each with a 240px selectable list beside
   the selected item's details. Lists stack above details on small screens.

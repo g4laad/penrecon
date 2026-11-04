@@ -481,16 +481,37 @@ def create_credential(
     username: str = Form(""),
     secret: str = Form(""),
     notes: str = Form(""),
+    host_ids: list[int] = Form([]),
+    service_ids: list[int] = Form([]),
     session: Session = Depends(get_session),
 ) -> Response:
     user, sec = username.strip(), secret.strip()
-    if user or sec:  # a credential must carry at least a username or a secret
-        try:
-            k = CredKind(kind)
-        except ValueError:
-            k = CredKind.password
-        session.add(Credential(kind=k, username=user, secret=sec, notes=notes.strip()))
-        session.commit()
+    if not (user or sec):
+        return JSONResponse({"detail": "a credential must carry at least a username or a secret"}, status_code=422)
+    selected_hosts = set(host_ids)
+    selected_services = set(service_ids)
+    for host_id in selected_hosts:
+        if session.get(Host, host_id) is None:
+            return JSONResponse({"detail": "host not found"}, status_code=422)
+    for service_id in selected_services:
+        service = session.get(Service, service_id)
+        if service is None:
+            return JSONResponse({"detail": "service not found"}, status_code=422)
+        if service.host_id not in selected_hosts:
+            return JSONResponse({"detail": "service must belong to a selected host"}, status_code=422)
+    try:
+        k = CredKind(kind)
+    except ValueError:
+        k = CredKind.password
+    credential = Credential(kind=k, username=user, secret=sec, notes=notes.strip())
+    session.add(credential)
+    session.flush()
+    assert credential.id is not None
+    for host_id in selected_hosts:
+        session.add(CredentialHost(credential_id=credential.id, host_id=host_id))
+    for service_id in selected_services:
+        session.add(CredentialService(credential_id=credential.id, service_id=service_id))
+    session.commit()
     return _credentials_response(request, session)
 
 
