@@ -61,6 +61,24 @@ Tables scroll horizontally rather than crushing technical content.
 - Design reference: `prototype/credential-views` at `b564842` preserves the
   workbench, ledger, and target-grouped comparison. The user approved Workbench;
   production contains only that view, with real mutations and no switcher.
+- Host details use the approved **D / Tabbed Workbench** layout: Services,
+  Host notes, and Credentials tabs, each with a 240px selectable list beside
+  the selected item's details. Lists stack above details on small screens.
+  Active tabs use `#services`, `#notes`, and `#credentials` and survive reloads
+  and browser history. Selection stays intact across tab changes; deletion or
+  filtering falls back to the first available item.
+- Host identity, status, tags, hostnames, and observation dates stay above the
+  workbench. Host triage and host management are secondary dialog actions;
+  management contains rename, hostname links, and confirmed deletion.
+  Service editing/reset/deletion, note creation/editing/deletion, and linked
+  credential editing retain the existing mutation and validation contracts.
+  Service filtering, sorting, and pagination remain server-side and addressable
+  through query parameters. No full-dataset counts are inferred from loaded rows.
+- Host-linked secrets conceal on identity changes, secret updates, and leaving
+  the Credentials tab. Credential association does not imply verified access.
+- Host design reference: `prototype/host-detail-views` at `4b88008` preserves
+  A/B/C/D comparisons. The user approved D with split-pane notes and credentials;
+  production contains only that layout, real mutations, and no variant controls.
 - Global search is always reachable. `/` focuses a search field outside text
   entry. A skip link, visible focus, text labels, and semantic table structure
   support keyboard use. Reduced-motion preferences disable transitions/animations.

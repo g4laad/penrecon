@@ -159,6 +159,18 @@
   .credential-choice[aria-current] { background: var(--muted); border-left-color: var(--primary); }
   .credential-choice:focus-visible { outline-offset: -3px; }
   .credential-detail { display: grid; min-width: 0; gap: 1.5rem; padding: 1.5rem; }
+  .host-tabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
+  .host-tabs [role=tab] { display: inline-flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 2px solid transparent; font-size: .875rem; cursor: pointer; }
+  .host-tabs [role=tab]:hover { background: var(--muted); }
+  .host-tabs [aria-selected=true] { border-bottom-color: var(--primary); font-weight: 600; }
+  .host-service-filters { margin-bottom: 1rem; }
+  .host-inspector { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 26rem; align-items: start; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); }
+  .host-item-list { min-width: 0; align-self: stretch; border-right: 1px solid var(--border); max-height: 40rem; overflow-y: auto; }
+  .host-item-choice { display: block; width: 100%; padding: 1rem; text-align: left; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; cursor: pointer; overflow-wrap: anywhere; }
+  .host-item-choice:hover { background: var(--muted); }
+  .host-item-choice[aria-pressed=true] { background: var(--muted); border-left-color: var(--primary); }
+  .host-item-choice:focus-visible { outline-offset: -3px; }
+  .host-item-detail { min-width: 0; padding: 1.5rem; }
 }
 @media (max-width: 900px) {
   .credential-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
@@ -171,6 +183,9 @@
   .credential-workbench { grid-template-columns: minmax(0, 1fr); }
   .credential-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 16rem; overflow-y: auto; }
   .credential-detail { padding: 1rem; }
+  .host-inspector { grid-template-columns: minmax(0, 1fr); }
+  .host-item-list { border-right: 0; border-bottom: 1px solid var(--border); max-height: 16rem; }
+  .host-item-detail { padding: 1rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
