@@ -95,7 +95,7 @@ function Secret({ value }: { value: string }) {
   return (
     <div className="stack gap-1">
       <div className="flex min-h-7 items-start gap-2">
-        <span className="mono block min-w-0 max-w-80 select-text whitespace-pre-wrap break-all py-1">
+        <span className="mono block min-w-0 flex-1 select-text whitespace-pre-wrap break-all py-1">
           {visible ? value : "••••••••••••"}
         </span>
         <div className="flex shrink-0 items-center">
@@ -279,7 +279,7 @@ function CredentialRow({
             <Badge variant="secondary">{credential.kind}</Badge>
           </div>
         </TableCell>
-        <TableCell className="mono align-top break-all">
+        <TableCell className="mono whitespace-normal align-top break-all">
           <div className="min-h-7 py-1">
             {credential.username || <span className="muted">No username</span>}
           </div>
@@ -287,8 +287,8 @@ function CredentialRow({
         <TableCell className="align-top">
           <Secret value={credential.secret} />
         </TableCell>
-        <TableCell className="max-w-sm whitespace-pre-wrap align-top break-words">
-          <div className="min-h-7 py-1">
+        <TableCell className="align-top">
+          <div className="min-h-7 truncate py-1">
             {credential.notes || <span className="muted">—</span>}
           </div>
         </TableCell>
@@ -359,7 +359,15 @@ export function CredentialsPage({ data }: { data: PageData }) {
       </p>
       {credentials.length ? (
         <div className="overflow-x-auto rounded-lg border bg-card">
-          <Table className="data-table">
+          <Table className="data-table min-w-[70rem] table-fixed">
+            <colgroup>
+              <col className="w-28" />
+              <col className="w-[14%]" />
+              <col className="w-[28%]" />
+              <col />
+              <col className="w-44" />
+              <col className="w-44" />
+            </colgroup>
             <TableHeader>
               <TableRow>
                 <TableHead>Kind</TableHead>

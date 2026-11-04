@@ -49,8 +49,10 @@ Tables scroll horizontally rather than crushing technical content.
 - Notes and scan-derived text render as escaped React text. Notes retain their
   Markdown source; arbitrary HTML is not executed.
 - Credential secrets are concealed on the global list until revealed, with a
-  copy action. Credential table fields share a 28px first-line alignment with
-  their controls; multiline notes and revealed secrets expand below that line.
+  copy action. Credential table columns keep fixed widths as content changes,
+  scrolling horizontally on narrow screens. Fields share a 28px first-line
+  alignment with their controls; revealed secrets wrap within their column.
+  Notes show a single-line ellipsis preview; Edit exposes the full notes.
   Credential rows omit internal numeric IDs. Host detail shows linked evidence
   directly.
 - Global search is always reachable. `/` focuses a search field outside text
