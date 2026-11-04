@@ -79,7 +79,8 @@ function CredentialFields({
 function Secret({ value }: { value: string }) {
   const [visible, setVisible] = useState(false);
   const [status, setStatus] = useState("");
-  if (!value) return <span className="muted">No secret</span>;
+  if (!value)
+    return <span className="muted flex min-h-7 items-center">No secret</span>;
   async function copy() {
     try {
       await navigator.clipboard.writeText(value);
@@ -93,8 +94,8 @@ function Secret({ value }: { value: string }) {
   }
   return (
     <div className="stack gap-1">
-      <div className="flex items-center gap-2">
-        <span className="mono block min-w-0 max-w-80 select-text whitespace-pre-wrap break-all">
+      <div className="flex min-h-7 items-start gap-2">
+        <span className="mono block min-w-0 max-w-80 select-text whitespace-pre-wrap break-all py-1">
           {visible ? value : "••••••••••••"}
         </span>
         <div className="flex shrink-0 items-center">
@@ -274,20 +275,26 @@ function CredentialRow({
     <>
       <TableRow id={`credential-${credential.id}`}>
         <TableCell className="align-top">
-          <Badge variant="secondary">{credential.kind}</Badge>
+          <div className="flex min-h-7 items-center">
+            <Badge variant="secondary">{credential.kind}</Badge>
+          </div>
           <div className="muted mt-2 text-xs">#{credential.id}</div>
         </TableCell>
         <TableCell className="mono align-top break-all">
-          {credential.username || <span className="muted">No username</span>}
+          <div className="min-h-7 py-1">
+            {credential.username || <span className="muted">No username</span>}
+          </div>
         </TableCell>
         <TableCell className="align-top">
           <Secret value={credential.secret} />
         </TableCell>
         <TableCell className="max-w-sm whitespace-pre-wrap align-top break-words">
-          {credential.notes || <span className="muted">—</span>}
+          <div className="min-h-7 py-1">
+            {credential.notes || <span className="muted">—</span>}
+          </div>
         </TableCell>
         <TableCell className="mono whitespace-nowrap align-top text-xs">
-          {credential.created_at}
+          <div className="flex min-h-7 items-center">{credential.created_at}</div>
         </TableCell>
         <TableCell className="align-top">
           <div className="actions">
