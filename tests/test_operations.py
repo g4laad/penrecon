@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,10 +34,9 @@ def _create_operation(
 
 
 def _only_operation_id(client: TestClient) -> int:
-    page = client.get("/operations")
-    match = re.search(r'id="operation-edit-(\d+)"', page.text)
-    assert match is not None
-    return int(match.group(1))
+    operations = client.get("/operations").json()["operations"]
+    assert len(operations) == 1
+    return int(operations[0]["id"])
 
 
 def test_operation_logs_orders_dated_then_undated_newest_first(session: Session) -> None:
@@ -95,16 +93,6 @@ def test_operation_logs_blank_query_returns_every_entry(session: Session) -> Non
     assert {row.command for row in operation_logs(session, "  ")} == {"one", "two"}
 
 
-def test_operations_full_page_and_htmx_fragment(client: TestClient) -> None:
-    full = client.get("/operations")
-    assert full.status_code == 200
-    assert "<!doctype html>" in full.text.lower()
-    assert "Operation log" in full.text
-
-    fragment = client.get("/operations", headers={"HX-Request": "true"})
-    assert fragment.status_code == 200
-    assert "<html" not in fragment.text.lower()
-    assert 'id="operation-table"' in fragment.text
 
 
 def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> None:
@@ -127,24 +115,25 @@ def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> 
     assert response.status_code == 303
     assert response.headers["location"] == "/operations"
 
-    page = client.get("/operations")
-    for expected in (
-        "nmap -sV target.internal",
-        "jump.internal",
-        "target.internal",
-        "nmap",
-        "operator",
-        "recon",
-        "priority",
-    ):
-        assert expected in page.text
+    operation = client.get("/operations").json()["operations"][0]
+    assert operation["command"] == "nmap -sV target.internal"
+    assert operation["started_at"] == "2026-09-22T09:15:00"
+    assert operation["ended_at"] == "2026-09-22T09:45:00"
+    assert operation["source"] == "jump.internal"
+    assert operation["destination"] == "target.internal"
+    assert operation["tool"] == "nmap"
+    assert operation["user_context"] == "operator"
+    assert operation["output"] == "line one\nline two"
+    assert operation["description"] == "Service enumeration"
+    assert operation["comments"] == "First pass\nReview later"
+    assert operation["tags"] == ["recon", "priority"]
 
 
 def test_create_operation_rejects_blank_command(client: TestClient) -> None:
     response = _create_operation(client, command="  ")
     assert response.status_code == 400
-    assert "Command is required" in response.text
-    assert "No operations recorded yet" in client.get("/operations").text
+    assert response.json()["detail"] == "Command is required."
+    assert client.get("/operations").json()["operations"] == []
 
 
 def test_create_operation_rejects_invalid_date_ranges(client: TestClient) -> None:
@@ -154,7 +143,7 @@ def test_create_operation_rejects_invalid_date_ranges(client: TestClient) -> Non
         data={"started_at": "2026-09-22T10:00", "ended_at": "2026-09-22T09:59"},
     )
     assert backwards.status_code == 400
-    assert "ended_at" in backwards.text
+    assert "ended_at" in backwards.json()["detail"]
 
     malformed = _create_operation(
         client,
@@ -162,10 +151,8 @@ def test_create_operation_rejects_invalid_date_ranges(client: TestClient) -> Non
         data={"started_at": "not-a-date"},
     )
     assert malformed.status_code == 400
-    assert "started_at" in malformed.text
-    page = client.get("/operations")
-    assert "bad range" not in page.text
-    assert "bad date" not in page.text
+    assert "started_at" in malformed.json()["detail"]
+    assert client.get("/operations").json()["operations"] == []
 
 
 def test_edit_preserves_existing_attachment_without_attachment_control(client: TestClient) -> None:
@@ -191,9 +178,9 @@ def test_edit_preserves_existing_attachment_without_attachment_control(client: T
     download = client.get(f"/operations/{operation_id}/attachment")
     assert download.status_code == 200
     assert download.content == b"original bytes"
-    page = client.get("/operations")
-    assert "edited command" in page.text
-    assert "curl" in page.text
+    operation = client.get("/operations").json()["operations"][0]
+    assert operation["command"] == "edited command"
+    assert operation["tool"] == "curl"
 
 
 def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: TestClient) -> None:
@@ -255,7 +242,7 @@ def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None
     assert conflict.status_code == 400
     assert _attachment_files() == before_conflict
     assert client.get(f"/operations/{operation_id}/attachment").content == b"new"
-    assert "attach replaced" in client.get("/operations").text
+    assert client.get("/operations").json()["operations"][0]["command"] == "attach replaced"
 
     before_remove = _attachment_files()
     removed = client.post(
@@ -285,7 +272,7 @@ def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None
     deleted = client.post(f"/operations/{operation_id}/delete", follow_redirects=False)
     assert deleted.status_code == 303
     assert _attachment_files() == before_delete - {created_file}
-    assert "delete me" not in client.get("/operations").text
+    assert client.get("/operations").json()["operations"] == []
     assert client.get(f"/operations/{operation_id}/attachment").status_code == 404
 
 
@@ -304,25 +291,25 @@ def test_search_and_pagination_retain_state_and_expected_rows(client: TestClient
         data={"source": "NeedleHost"},
     ).status_code == 303
 
-    search = client.get("/operations", params={"q": "needlehost", "per": "10", "page": "1"})
-    assert "endpoint result" in search.text
-    assert "batch 10" not in search.text
-    assert 'name="q" value="needlehost"' in search.text
+    search = client.get("/operations", params={"q": "needlehost", "per": "10", "page": "1"}).json()
+    assert [row["command"] for row in search["operations"]] == ["endpoint result"]
+    assert search["q"] == "needlehost"
+    assert search["total"] == 1
 
-    first = client.get("/operations", params={"q": "batch", "per": "10", "page": "1"})
-    assert "batch 10" in first.text
-    assert "batch 01" in first.text
-    assert "batch 00" not in first.text
-    assert "q=batch&amp;per=10&amp;page=2" in first.text
+    first = client.get("/operations", params={"q": "batch", "per": "10", "page": "1"}).json()
+    assert [row["command"] for row in first["operations"]] == [
+        f"batch {index:02d}" for index in range(10, 0, -1)
+    ]
+    assert first["q"] == "batch"
+    assert first["page"] == 1
+    assert first["pages"] == 2
+    assert first["per"] == "10"
+    assert first["total"] == 11
 
-    second = client.get(
-        "/operations",
-        params={"q": "batch", "per": "10", "page": "2"},
-        headers={"HX-Request": "true"},
-    )
-    assert "batch 00" in second.text
-    assert "batch 10" not in second.text
-    assert '<option value="10" selected>10</option>' in second.text
+    second = client.get("/operations", params={"q": "batch", "per": "10", "page": "2"}).json()
+    assert [row["command"] for row in second["operations"]] == ["batch 00"]
+    assert second["page"] == 2
+    assert second["per"] == "10"
 
 
 def test_failed_attachment_write_and_commit_leave_no_new_file(

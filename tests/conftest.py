@@ -45,6 +45,6 @@ def client() -> Iterator[TestClient]:
             yield s
 
     app.dependency_overrides[get_session] = _override
-    with TestClient(app) as c:
+    with TestClient(app, headers={"Accept": "application/json"}) as c:
         yield c
     app.dependency_overrides.clear()

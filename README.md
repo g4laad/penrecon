@@ -2,19 +2,25 @@
 
 Single-user, local pentest recon manager. Ingest scan output (nmap XML today),
 browse hosts/services, diff two scans, keep your own notes/tags, and manually
-record the commands and actions behind an engagement. FastAPI + HTMX, SQLite,
-no auth — binds to `127.0.0.1`.
+record the commands and actions behind an engagement. FastAPI + React +
+shadcn/ui (Base UI), SQLite, no auth — binds to `127.0.0.1`.
 
 ## Run
 
 ```sh
 uv sync
+npm --prefix frontend ci
+npm --prefix frontend run build
 uv run penrecon serve          # http://127.0.0.1:8000
 uv run penrecon ingest scan.xml --tool nmap   # or upload on the /scans page
 ```
 
 Data (SQLite db + attachments) lives under `./data` — override with
 `PENRECON_DATA=/path`.
+
+Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
+assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
+server is needed at runtime. Rebuild before serving or packaging a wheel.
 
 ## What it does
 
@@ -42,3 +48,14 @@ amass/dnsx are registered stubs — implement one file and it's wired in.
 uv run pytest
 uv run mypy src/penrecon
 ```
+
+For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
+This watches and rebuilds the local bundle; refresh the browser after changes.
+`npm --prefix frontend run build` checks TypeScript and produces release assets.
+
+React source lives in `frontend/src`. Shared components are shadcn/ui's
+`base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
+icons. Add components with `npx shadcn@latest add <component> -c frontend`.
+Existing page URLs return the React shell, or the same page context as JSON
+with `Accept: application/json`. Mutations retain their form endpoints and
+refresh page data after success.

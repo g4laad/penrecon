@@ -1,12 +1,14 @@
 # penrecon
 
-Single-user, local pentest recon manager. FastAPI + HTMX (server-rendered
-Jinja2, no frontend build) + SQLite via SQLModel. `uv` for everything. Full
-type annotations; `mypy` must stay clean.
+Single-user, local pentest recon manager. FastAPI + React + shadcn/ui
+(Base UI) + SQLite via SQLModel. `uv` for Python, npm for `frontend/`.
+Full type annotations; `mypy` and TypeScript must stay clean.
 
 ## Run / dev
 
 ```sh
+npm --prefix frontend ci
+npm --prefix frontend run build
 uv run penrecon serve                          # http://127.0.0.1:8000
 uv run penrecon ingest scan.xml --tool nmap    # or upload on /scans
 uv run pytest
@@ -28,7 +30,10 @@ test/preview servers on another port, e.g. `uv run penrecon serve --port 8765`.
   nmap implemented; others stubbed.
 - `src/penrecon/queries.py` — current-state merge (latest-observation-wins),
   scan diff, annotation/attachment access.
-- `src/penrecon/web/` — FastAPI app + Jinja templates + static.
+- `src/penrecon/web/` — FastAPI page-data/form routes + built static assets.
+- `frontend/src/` — React pages and shadcn/ui Base UI components.
+- Frontend changes require rebuilding `web/static/ui` before browser verification
+  or packaging. `npm --prefix frontend run dev` watches/rebuilds; FastAPI serves it.
 
 ## Core model rules
 
@@ -52,5 +57,5 @@ See `PRODUCT.md` (strategic) for the full brief. In short:
   · change is the story · fast and local.
 - **A11y:** WCAG AA contrast, full keyboard nav + visible focus,
   `prefers-reduced-motion` honored, status never conveyed by color alone.
-- Design work uses the `impeccable` skill; the committed system is `DESIGN.md`
-  (modern light theme), implemented in `web/static/style.css`.
+- The committed system is `DESIGN.md`, implemented by shadcn/ui `base-nova`
+  components and `frontend/src/index.css`.
