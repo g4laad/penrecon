@@ -1,3 +1,4 @@
+import { Secret } from "@/components/secret";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -190,17 +191,23 @@ function CredentialDetail({
               </Badge>
             ))}
           </div>
-          <dl className="grid gap-2 text-sm sm:grid-cols-[5rem_1fr]">
-            <dt className="muted">Username</dt>
-            <dd className="mono break-all">{credential.username || "—"}</dd>
-            <dt className="muted">Secret</dt>
-            <dd className="mono whitespace-pre-wrap break-all">
-              {credential.secret || "—"}
-            </dd>
+          <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-x-4 gap-y-1 text-sm">
+            <div className="min-w-0">
+              <dt className="muted">Username</dt>
+              <dd className="mono min-w-0 break-all py-1">
+                {credential.username || "—"}
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="muted">Secret</dt>
+              <dd className="min-w-0">
+                <Secret value={credential.secret} />
+              </dd>
+            </div>
             {credential.notes && (
               <>
-                <dt className="muted">Notes</dt>
-                <dd className="whitespace-pre-wrap break-words">
+                <dt className="muted col-span-full">Notes</dt>
+                <dd className="col-span-full whitespace-pre-wrap break-words">
                   {credential.notes}
                 </dd>
               </>
