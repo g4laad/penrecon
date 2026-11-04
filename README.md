@@ -40,6 +40,10 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
   by side on the host page. Unlinking a host also unlinks that credential from
   all services on that host; the credential and its links to other hosts remain
   intact.
+  The credentials page uses a searchable identity list with a detail pane for
+  the selected secret, full notes, and link management. Filter by username,
+  notes, IP/service, kind, or linked/unlinked scope; secret values are excluded.
+  Filters and selection are bookmarkable. The layout stacks on narrow screens.
 - **Operation log**: manually create, review, edit, search, and delete timeline
   entries for commands and operator actions, with one replaceable attachment
   per entry. penrecon does not execute commands or capture terminal history.

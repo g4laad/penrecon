@@ -48,13 +48,17 @@ Tables scroll horizontally rather than crushing technical content.
   links are deleted, not the credentials themselves.
 - Notes and scan-derived text render as escaped React text. Notes retain their
   Markdown source; arbitrary HTML is not executed.
-- Credential secrets are concealed on the global list until revealed, with a
-  copy action. Credential table columns keep fixed widths as content changes,
-  scrolling horizontally on narrow screens. Fields share a 28px first-line
-  alignment with their controls; revealed secrets wrap within their column.
-  Notes show a single-line ellipsis preview; Edit exposes the full notes.
-  Credential rows omit internal numeric IDs. Host detail shows linked evidence
-  directly.
+- Credentials use the approved identity-first workbench: a compact selectable
+  list beside the selected credential's secret, full discovery notes, and
+  host/service link management. The list stacks above details on small screens.
+  Selected identity uses `#credential-ID`; text/kind/association filters use
+  query parameters. Text filtering excludes secrets.
+- Secrets start concealed, with reveal/copy actions, and conceal again when
+  switching identities or changing the secret. Delete is a secondary footer
+  action with confirmation. Associations do not imply verified access.
+- Design reference: `prototype/credential-views` at `b564842` preserves the
+  workbench, ledger, and target-grouped comparison. The user approved Workbench;
+  production contains only that view, with real mutations and no switcher.
 - Global search is always reachable. `/` focuses a search field outside text
   entry. A skip link, visible focus, text labels, and semantic table structure
   support keyboard use. Reduced-motion preferences disable transitions/animations.
