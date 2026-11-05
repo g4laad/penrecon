@@ -1,6 +1,6 @@
 # penrecon
 
-Single-user, local pentest recon manager. Ingest scan output (nmap XML today),
+Single-user, local pentest recon manager. Ingest nmap XML and Amass exports,
 browse hosts/services, diff two scans, keep your own notes/tags, and manually
 record the commands and actions behind an engagement. FastAPI + React +
 shadcn/ui (Base UI), SQLite, no auth — binds to `127.0.0.1`.
@@ -24,8 +24,8 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
 
 ## What it does
 
-- **Ingest** nmap `-oX` XML via web upload or CLI. Each ingest is an immutable
-  snapshot of observations.
+- **Ingest** nmap `-oX` XML and Amass hostname/IP exports via web upload or CLI.
+  Each ingest retains the original file; service observations are immutable.
 - **Merge, latest-wins**: current host/service state is the newest observation
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.
@@ -51,11 +51,40 @@ server is needed at runtime. Rebuild before serving or packaging a wheel.
   inputs; the browser/system chooses 12- or 24-hour display. A selected date
   defaults to midnight; use Clear date to omit that timestamp.
 
+## Amass imports
+
+For Amass v5 (including v5.1.3), export discovered names with their IP addresses
+from an existing enumeration database:
+
+```sh
+amass subs -d example.com -names -ip -nocolor -o amass.txt
+uv run penrecon ingest amass.txt --tool amass
+```
+
+Alternatively, upload the export on `/scans` with **amass** selected.
+The text format is one hostname followed by comma-separated IPv4/IPv6 addresses:
+
+```text
+www.example.com 192.0.2.10,2001:db8::10
+api.example.com 192.0.2.10
+```
+
+Legacy Amass `enum -json` output is also supported: JSONL, a single JSON object,
+or an array of objects containing `name` and `addresses: [{"ip": "..."}]`.
+Duplicate IPs and names are merged; IPv6 addresses and hostname case/trailing
+dots are normalized. Imports add no services and preserve existing port data,
+notes, and credentials. No DNS lookups are performed.
+
+Names-only text files and files with no IP mappings are rejected because hosts
+are keyed by IP. Unresolved JSON records are skipped when other records contain
+IP mappings. Amass graph/OAM exports and summary/log output are not supported;
+use the export command above rather than `-show` or `-summary`.
+
 ## Adding a parser
 
 Parsers live in `src/penrecon/parsers/` and register in `PARSERS`. Each is a
 `fn(bytes) -> ScanResult`. masscan/rustscan/httpx/nuclei/whatweb/subfinder/
-amass/dnsx are registered stubs — implement one file and it's wired in.
+dnsx are registered stubs — implement one file and it's wired in.
 
 ## Dev
 
