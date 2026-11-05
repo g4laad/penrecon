@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Field, MutationForm } from "../common";
 import type { Host, PageData, Service } from "../types";
+
+const HOSTS_PER_PAGE = 50;
 
 function HostServices({ host, selected, onSelect, onReady }: {
   host: Host;
@@ -63,6 +65,7 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
   const [reveal, setReveal] = useState(false);
   const [query, setQuery] = useState("");
   const [associationsMounted, setAssociationsMounted] = useState(false);
+  const [hostPage, setHostPage] = useState(1);
   const [targets, setTargets] = useState<Record<number, number[]>>({});
   const [ready, setReady] = useState<Record<number, boolean>>({});
   const secretId = useId();
@@ -71,6 +74,17 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
   const serviceCount = Object.values(targets).reduce((count, ids) => count + ids.length, 0);
   const valid = Boolean(username.trim() || secret.trim());
   const loading = hostIds.some((id) => !ready[id]);
+  const matchingHosts = useMemo(
+    () => associationsMounted ? hosts.filter((host) => host.ip.includes(query.trim())) : [],
+    [associationsMounted, hosts, query],
+  );
+  const selectedHosts = useMemo(() => hosts.filter((host) => host.id in targets), [hosts, targets]);
+  const hostPages = Math.max(1, Math.ceil(matchingHosts.length / HOSTS_PER_PAGE));
+  const currentHostPage = Math.min(hostPage, hostPages);
+  const visibleHosts = matchingHosts.slice((currentHostPage - 1) * HOSTS_PER_PAGE, currentHostPage * HOSTS_PER_PAGE);
+  const visibleHostIds = new Set(visibleHosts.map((host) => host.id));
+  // Keep selected rows mounted across pages so service loads and form values survive.
+  const renderedHosts = [...visibleHosts, ...selectedHosts.filter((host) => !visibleHostIds.has(host.id))];
   const onReady = useCallback((id: number, value: boolean) => {
     setReady((current) => ({ ...current, [id]: value }));
   }, []);
@@ -111,15 +125,22 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
       <summary className="cursor-pointer text-sm font-semibold">Target associations · {hostIds.length} hosts / {serviceCount} services</summary>
       {associationsMounted && <section className="grid gap-3 pt-4" aria-label="Target associations">
         <div><h3 className="text-sm font-semibold">Link targets <span className="font-normal text-muted-foreground">· optional</span></h3><p className="mt-1 text-xs text-muted-foreground">Choose hosts, then specific services. Links record scope, not verified access.</p></div>
-        <Input type="search" aria-label="Search target hosts" placeholder="Search hosts by IP…" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Input type="search" aria-label="Search target hosts" placeholder="Search hosts by IP…" value={query} onChange={(event) => { setQuery(event.target.value); setHostPage(1); }} />
         <div className="max-h-56 overflow-y-auto rounded-md border">
-          {hosts.map((host) => <div key={host.id} hidden={!host.ip.includes(query.trim())} className="border-b last:border-b-0">
+          {renderedHosts.map((host) => <div key={host.id} hidden={!visibleHostIds.has(host.id)} className="border-b last:border-b-0">
             <label className="flex cursor-pointer items-center gap-3 p-3 text-sm hover:bg-muted/40"><input type="checkbox" className="size-4 accent-primary" name="host_ids" value={host.id} checked={host.id in targets} onChange={() => toggleHost(host.id)} /><span className="mono">{host.ip}</span></label>
             {host.id in targets && <HostServices host={host} selected={targets[host.id]} onSelect={onSelect} onReady={onReady} />}
           </div>)}
           {!hosts.length && <p className="p-3 text-sm text-muted-foreground">No hosts yet. You can save an unlinked credential.</p>}
-          {hosts.length > 0 && !hosts.some((host) => host.ip.includes(query.trim())) && <p className="p-3 text-sm text-muted-foreground">No matching hosts. Existing selections are kept.</p>}
+          {hosts.length > 0 && !matchingHosts.length && <p className="p-3 text-sm text-muted-foreground">No matching hosts. Existing selections are kept.</p>}
         </div>
+        {matchingHosts.length > HOSTS_PER_PAGE && <nav aria-label="Target host pagination" className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground" aria-live="polite">{matchingHosts.length} hosts · Page {currentHostPage} of {hostPages}</span>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" aria-label="Previous host page" disabled={currentHostPage <= 1} onClick={() => setHostPage(currentHostPage - 1)}>Previous</Button>
+            <Button type="button" variant="outline" size="sm" aria-label="Next host page" disabled={currentHostPage >= hostPages} onClick={() => setHostPage(currentHostPage + 1)}>Next</Button>
+          </div>
+        </nav>}
         <p className="text-xs text-muted-foreground" role="status">{hostIds.length} hosts · {serviceCount} services selected. {hostIds.length ? "Unchecking a host also clears its services." : "Unlinked is OK."}</p>
       </section>}
     </details>

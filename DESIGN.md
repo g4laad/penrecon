@@ -126,6 +126,9 @@ count with the result heading and display filenames as secondary metadata.
   selections. Unchecking a host clears its selected services.
   Association controls mount only on first expansion, then remain mounted while
   collapsed so selected hosts/services stay in the submitted form until dismissal.
+  Host results use 50-row pagination; changing the search resets to the first page.
+  Only current-page and selected host rows remain mounted. Selected off-page rows
+  are hidden but retain service loads, retry state, and submitted associations.
   A username or secret is required. Credential and selected links save in one
   transaction; invalid or out-of-scope targets create nothing. Service-loading
   failures remain visible with retry, and saving waits for selected hosts to load.
