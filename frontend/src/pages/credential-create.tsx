@@ -19,9 +19,6 @@ function HostServices({ host, selected, onSelect, onReady }: {
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError("");
-    onReady(host.id, false);
     void (async () => {
       try {
         const response = await fetch(`/hosts/${host.id}?per=all`, {
@@ -42,9 +39,15 @@ function HostServices({ host, selected, onSelect, onReady }: {
     })();
     return () => controller.abort();
   }, [host.id, attempt, onReady]);
+  function retry() {
+    setLoading(true);
+    setError("");
+    onReady(host.id, false);
+    setAttempt((value) => value + 1);
+  }
   return <div className="grid gap-2 border-t bg-muted/20 py-2 pr-3 pl-9">
     {loading && <p role="status" className="text-xs text-muted-foreground">Loading services…</p>}
-    {error && <div className="grid gap-2"><p role="alert" className="text-xs text-destructive">{error}</p><Button type="button" variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>Retry services</Button></div>}
+    {error && <div className="grid gap-2"><p role="alert" className="text-xs text-destructive">{error}</p><Button type="button" variant="outline" size="sm" onClick={retry}>Retry services</Button></div>}
     {!loading && !error && !services.length && <p className="text-xs text-muted-foreground">No services recorded. The host can still be linked.</p>}
     {!loading && !error && services.map((service) => <label key={service.service_id} className="flex cursor-pointer items-center gap-2 text-xs">
       <input type="checkbox" className="size-4 accent-primary" name="service_ids" value={service.service_id} checked={selected.includes(service.service_id)} onChange={() => onSelect(host.id, service.service_id)} />

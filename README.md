@@ -73,6 +73,9 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   the selected secret, full notes, and link management. Filter by username,
   notes, IP/service, kind, or linked/unlinked scope; secret values are excluded.
   Filters and selection are bookmarkable. The layout stacks on narrow screens.
+  During creation, selecting a host loads its services. A failed load blocks
+  saving until you retry successfully or deselect the host; retrying clears the
+  error and shows loading while saving remains disabled.
 - **Operation log**: manually create, review, edit, search, and delete timeline
   entries for commands and operator actions, with one replaceable attachment
   per entry. penrecon does not execute commands or capture terminal history.
