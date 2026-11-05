@@ -70,6 +70,8 @@ count with the result heading and display filenames as secondary metadata.
 - Global search uses matching default-height input and Find button controls.
 - `Modal` composes Base UI dialogs with a labeled title, focus trapping, Escape
   dismissal, focus restoration, scrollable content, and an accessible close button.
+  Dialogs use an unblurred dim backdrop and a 75 ms opacity-only entrance, with
+  no zoom or exit animation. Reduced-motion preferences disable the entrance fade.
 - `MutationForm` posts real multipart form data, disables duplicate submissions,
   surfaces errors, refreshes page data, and closes its modal on success.
 - Operation timestamps use shadcn Calendar/Popover date pickers; selecting a day
