@@ -83,8 +83,8 @@ use the export command above rather than `-show` or `-summary`.
 ## Adding a parser
 
 Parsers live in `src/penrecon/parsers/` and register in `PARSERS`. Each is a
-`fn(bytes) -> ScanResult`. masscan/rustscan/httpx/nuclei/whatweb/subfinder/
-dnsx are registered stubs — implement one file and it's wired in.
+`fn(bytes) -> ScanResult`. Only nmap and Amass are currently supported. To add
+another tool, implement its parser in a new module and register it in `PARSERS`.
 
 ## Dev
 

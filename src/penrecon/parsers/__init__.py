@@ -1,8 +1,7 @@
 """Parser registry. Each parser turns raw tool output bytes into a normalized
 ScanResult that ingest knows how to store.
 
-Implemented parsers handle nmap XML and Amass hostname/IP exports. Other
-tools remain registered stubs.
+Implemented parsers handle nmap XML and Amass hostname/IP exports.
 """
 
 from __future__ import annotations
@@ -33,18 +32,11 @@ class HostResult:
 ScanResult = list[HostResult]
 Parser = Callable[[bytes], ScanResult]
 
-from penrecon.parsers import amass, nmap, stubs  # noqa: E402
+from penrecon.parsers import amass, nmap  # noqa: E402
 
 PARSERS: dict[str, Parser] = {
     "nmap": nmap.parse,
-    "masscan": stubs.not_implemented("masscan"),
-    "rustscan": stubs.not_implemented("rustscan"),
-    "httpx": stubs.not_implemented("httpx"),
-    "nuclei": stubs.not_implemented("nuclei"),
-    "whatweb": stubs.not_implemented("whatweb"),
-    "subfinder": stubs.not_implemented("subfinder"),
     "amass": amass.parse,
-    "dnsx": stubs.not_implemented("dnsx"),
 }
 
 
