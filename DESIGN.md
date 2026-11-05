@@ -100,6 +100,21 @@ filenames as secondary metadata.
 - Design reference: `prototype/credential-views` at `b564842` preserves the
   workbench, ledger, and target-grouped comparison. The user approved Workbench;
   production contains only that view, with real mutations and no switcher.
+- Operations use the approved **A / Workbench**: a compact selectable list
+  beside the selected operation's full command, output, metadata, tags, notes,
+  and attachment download. Reading evidence does not open an edit form.
+  Add and Edit retain the existing forms; confirmed deletion remains in Edit.
+  Commands can be copied, with visible success or failure feedback.
+  Search and Add operation share a bottom-aligned toolbar without the standalone
+  filter/header margins offsetting their controls.
+- The operations list and details scroll independently within the viewport,
+  stacking on narrow screens. Selection uses `#operation-ID`, survives reload
+  and browser history, and falls back to the first available record after
+  filtering or deletion. Search and pagination remain server-side with
+  addressable query parameters; the page-size control appears only in pagination.
+- Operations design reference: `prototype/operation-views` at `989d855`
+  preserves A / Workbench, B / Journal, and C / Target dossier. The user approved
+  A; production contains only the workbench, real mutations, and no switcher.
 - Credential creation uses approved **A / Compact dialog**: kind, identity,
   concealed kind-aware secret entry, and discovery notes appear first; optional
   host/service associations expand below. Search filters hosts without clearing

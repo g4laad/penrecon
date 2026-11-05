@@ -1,9 +1,9 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Copy, Paperclip } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -13,14 +13,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Empty,
   Field,
   Filters,
@@ -28,7 +20,6 @@ import {
   MutationForm,
   PageHeader,
   Pager,
-  SelectField,
 } from "../common";
 import type { Operation, PageData } from "../types";
 
@@ -290,127 +281,138 @@ function OperationEditor({ operation }: { operation: Operation }) {
   );
 }
 
-function OperationRow({ operation }: { operation: Operation }) {
+function OperationDetails({ operation }: { operation: Operation }) {
+  const [copyStatus, setCopyStatus] = useState("");
+  const metadata = [
+    ["Start", operation.started_at?.replace("T", " ").slice(0, 16)],
+    ["End", operation.ended_at?.replace("T", " ").slice(0, 16)],
+    ["From", operation.source],
+    ["To", operation.destination],
+    ["Tool", operation.tool],
+    ["User context", operation.user_context],
+  ];
   return (
-    <TableRow>
-      <TableCell className="mono whitespace-nowrap align-top">
-        {operation.started_at && (
-          <div>
-            <span className="muted text-xs">Start </span>
-            <time dateTime={operation.started_at}>
-              {operation.started_at.replace("T", " ").slice(0, 16)}
-            </time>
-          </div>
-        )}
-        {operation.ended_at && (
-          <div>
-            <span className="muted text-xs">End </span>
-            <time dateTime={operation.ended_at}>
-              {operation.ended_at.replace("T", " ").slice(0, 16)}
-            </time>
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="mono max-w-56 align-top whitespace-normal break-words">
-        {operation.source && (
-          <div>
-            <span className="muted text-xs">From </span>
-            {operation.source}
-          </div>
-        )}
-        {operation.destination && (
-          <div>
-            <span className="muted text-xs">To </span>
-            {operation.destination}
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="mono align-top">{operation.tool}</TableCell>
-      <TableCell className="mono max-w-40 align-top whitespace-normal break-words">
-        {operation.user_context}
-      </TableCell>
-      <TableCell className="min-w-56 max-w-md align-top">
-        <pre
-          className="mono line-clamp-4 whitespace-pre-wrap break-all text-[13px]"
-          title={operation.command}
-        >
-          {operation.command}
-        </pre>
-        {operation.description && (
-          <p className="muted mt-1 line-clamp-2 whitespace-pre-wrap">
-            {operation.description}
+    <section
+      className="operation-detail"
+      aria-label={`Operation ${operation.id} details`}
+      tabIndex={0}
+    >
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
+        <div className="min-w-0">
+          <p className="muted text-xs">Operation #{operation.id}</p>
+          <h2 className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold">
+            {operation.description || operation.tool || "Recorded operation"}
+          </h2>
+        </div>
+        <div className="actions">
+          {operation.tags.map((tag, index) => (
+            <Badge key={`${tag}-${index}`} variant="secondary">
+              {tag}
+            </Badge>
+          ))}
+          <Modal
+            title={`Edit operation #${operation.id}`}
+            trigger={
+              <Button variant="outline" size="sm">
+                Edit operation
+              </Button>
+            }
+          >
+            <OperationEditor operation={operation} />
+          </Modal>
+        </div>
+      </header>
+      {metadata.some(([, value]) => value) && (
+        <dl className="operation-metadata">
+          {metadata
+            .filter(([, value]) => value)
+            .map(([label, value]) => (
+              <div key={label}>
+                <dt className="muted mb-1 text-xs">{label}</dt>
+                <dd className="mono break-words">{value}</dd>
+              </div>
+            ))}
+        </dl>
+      )}
+      <section>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="credential-label">Command</h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(operation.command);
+                setCopyStatus("Command copied.");
+              } catch {
+                setCopyStatus(
+                  "Unable to copy. Select the command and copy it manually.",
+                );
+              }
+            }}
+          >
+            <Copy className="size-3.5" aria-hidden="true" />
+            Copy command
+          </Button>
+        </div>
+        <pre className="operation-code bg-muted">{operation.command}</pre>
+        {copyStatus && (
+          <p className="muted mt-1 text-xs" role="status">
+            {copyStatus}
           </p>
         )}
-        {(operation.output || operation.comments) && (
-          <div className="muted mt-1 flex flex-wrap gap-x-3 text-xs">
-            {operation.output && <span>Output recorded</span>}
-            {operation.comments && <span>Comments recorded</span>}
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="max-w-48 align-top">
-        {!!operation.tags.length && (
-          <div className="flex flex-wrap gap-1">
-            {operation.tags.map((tag, index) => (
-              <Badge key={`${tag}-${index}`} variant="secondary">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </TableCell>
-      <TableCell className="max-w-48 align-top whitespace-normal">
-        {operation.attachment_name && (
-          <a
-            href={`/operations/${operation.id}/attachment`}
-            className="break-all text-[13px] underline underline-offset-4"
-            download
-          >
-            {operation.attachment_name}
-          </a>
-        )}
-      </TableCell>
-      <TableCell className="align-top">
-        <Modal
-          title={`Operation #${operation.id}`}
-          trigger={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="text-[13px]"
-              aria-label={`View or edit operation ${operation.id}`}
-            >
-              View / edit
-            </Button>
-          }
+      </section>
+      {operation.output && (
+        <section>
+          <h3 className="credential-label mb-2">Output</h3>
+          <pre className="operation-code">{operation.output}</pre>
+        </section>
+      )}
+      {operation.comments && (
+        <section className="border-l-2 pl-3">
+          <h3 className="credential-label mb-1">Operator notes</h3>
+          <p className="whitespace-pre-wrap break-words">
+            {operation.comments}
+          </p>
+        </section>
+      )}
+      {operation.attachment_name && (
+        <a
+          href={`/operations/${operation.id}/attachment`}
+          className="flex items-center gap-2 break-all"
+          download
         >
-          <OperationEditor operation={operation} />
-        </Modal>
-      </TableCell>
-    </TableRow>
+          <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
+          {operation.attachment_name}
+        </a>
+      )}
+      <p className="muted text-xs">
+        Recorded {operation.created_at.replace("T", " ").slice(0, 16)}
+        {" · "}Updated {operation.updated_at.replace("T", " ").slice(0, 16)}
+      </p>
+    </section>
   );
 }
 
 export function OperationsPage({ data }: { data: PageData }) {
   const operations = data.operations ?? [];
+  const [hash, setHash] = useState(() => location.hash);
+  useEffect(() => {
+    const sync = () => setHash(location.hash);
+    window.addEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+  const selected =
+    operations.find((operation) => hash === `#operation-${operation.id}`) ??
+    operations[0];
   return (
-    <div className="stack gap-3">
-      <PageHeader title="Operation log">
-        <Modal
-          title="Add operation"
-          trigger={<Button type="button">Add operation</Button>}
-        >
-          <MutationForm action="/operations">
-            <OperationFields />
-            <div className="actions mt-4 justify-end">
-              <Button type="submit">Add operation</Button>
-            </div>
-          </MutationForm>
-        </Modal>
-      </PageHeader>
-      <Filters>
-        <div className="min-w-64 flex-1">
+    <div className="operation-workbench-page">
+      <div className="operation-toolbar">
+        <Filters>
           <Field
             label="Search operations"
             name="q"
@@ -418,58 +420,91 @@ export function OperationsPage({ data }: { data: PageData }) {
             defaultValue={data.q}
             placeholder="Command, endpoint, tool, tag, attachment"
           />
-        </div>
-        <input type="hidden" name="page" value="1" />
-        <SelectField
-          label="Rows per page"
-          name="per"
-          defaultValue={data.per ?? "25"}
-          options={(data.per_page_choices ?? ["10", "25", "50", "all"]).map(
-            (value) => ({ value, label: value === "all" ? "All" : value }),
+          <input type="hidden" name="page" value="1" />
+          <input type="hidden" name="per" value={data.per ?? "25"} />
+          <Button type="submit" variant="outline">
+            Search
+          </Button>
+          {data.q && (
+            <Button
+              variant="ghost"
+              render={<a href={`/operations?per=${data.per ?? "25"}`} />}
+            >
+              Reset
+            </Button>
           )}
-        />
-        <Button type="submit">Search</Button>
-        {data.q && (
-          <a
-            href="/operations"
-            className="self-end pb-2 text-sm underline underline-offset-4"
+        </Filters>
+        <PageHeader title="Operation log">
+          <Modal
+            title="Add operation"
+            trigger={<Button type="button">Add operation</Button>}
           >
-            Clear search
-          </a>
-        )}
-      </Filters>
+            <MutationForm action="/operations">
+              <OperationFields />
+              <div className="actions mt-4 justify-end">
+                <Button type="submit">Add operation</Button>
+              </div>
+            </MutationForm>
+          </Modal>
+        </PageHeader>
+      </div>
       <p className="muted text-xs" role="status">
         {data.total ?? operations.length} matched operation
         {(data.total ?? operations.length) === 1 ? "" : "s"}
       </p>
-      {operations.length ? (
-        <div className="overflow-x-auto rounded-lg border bg-card">
-          <Table className="data-table">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Start / end</TableHead>
-                <TableHead>Source → destination</TableHead>
-                <TableHead>Tool</TableHead>
-                <TableHead>User context</TableHead>
-                <TableHead>Command</TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead>Attachment</TableHead>
-                <TableHead>Details</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {operations.map((operation) => (
-                <OperationRow key={operation.id} operation={operation} />
-              ))}
-            </TableBody>
-          </Table>
+      {selected ? (
+        <div className="operation-workbench rounded-lg border bg-card">
+          <nav
+            className="operation-list"
+            aria-label="Operations on this page"
+            tabIndex={0}
+          >
+            {operations.map((operation) => (
+              <button
+                type="button"
+                className="operation-choice"
+                key={operation.id}
+                aria-pressed={operation.id === selected.id}
+                title={operation.command}
+                onClick={() => {
+                  const next = new URL(location.href);
+                  next.hash = `operation-${operation.id}`;
+                  history.pushState(null, "", next);
+                  setHash(next.hash);
+                }}
+              >
+                <span className="flex items-start justify-between gap-2">
+                  <strong className="mono break-words">
+                    {operation.destination || "No destination recorded"}
+                  </strong>
+                  <span className="muted shrink-0 text-xs">
+                    #{operation.id}
+                  </span>
+                </span>
+                <span className="mono line-clamp-2 break-all">
+                  {operation.command}
+                </span>
+                <span className="muted flex flex-wrap gap-x-3 text-xs">
+                  {operation.tool && <span>{operation.tool}</span>}
+                  <span className="mono">
+                    {operation.started_at?.replace("T", " ").slice(0, 16) ||
+                      "Start not recorded"}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </nav>
+          <OperationDetails
+            key={`${selected.id}:${selected.updated_at}`}
+            operation={selected}
+          />
         </div>
       ) : (
         <Empty>
           {data.q ? (
             <>No operations match “{data.q}”.</>
           ) : (
-            "No operations recorded yet."
+            "No operations recorded yet. Add an operation to start your log."
           )}
         </Empty>
       )}

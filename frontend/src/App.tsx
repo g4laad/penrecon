@@ -545,7 +545,9 @@ export default function App() {
         className={
           path === "/"
             ? "workbench-shell inventory-shell"
-            : path.startsWith("/hosts/") || path === "/credentials"
+            : path.startsWith("/hosts/") ||
+                path === "/credentials" ||
+                path === "/operations"
               ? "workbench-shell"
               : undefined
         }
