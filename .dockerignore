@@ -1,0 +1,22 @@
+# Only build inputs belong in the context; never send local recon data.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+src/**
+!src/penrecon/
+!src/penrecon/**
+!frontend/
+frontend/**
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig*.json
+!frontend/vite.config.ts
+!frontend/src/
+!frontend/src/**
+**/__pycache__/
+**/*.pyc
+src/penrecon/web/static/ui/

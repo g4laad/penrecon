@@ -1,0 +1,29 @@
+services:
+  penrecon:
+    build: .
+    image: penrecon:local
+    ports:
+      - "127.0.0.1:${PENRECON_PORT:-8000}:8000"
+    volumes:
+      - penrecon-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/python3.14
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).close()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  penrecon-data:

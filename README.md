@@ -22,6 +22,69 @@ Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
 server is needed at runtime. Rebuild before serving or packaging a wheel.
 
+## Docker (distroless)
+
+Docker Engine with the Compose plugin is sufficient; Python and Node.js are
+only used in build stages:
+
+```sh
+docker compose up --build -d
+docker compose ps
+docker compose logs -f penrecon
+```
+
+Open `http://127.0.0.1:8000`. To use another host port:
+
+```sh
+PENRECON_PORT=8765 docker compose up --build -d
+```
+
+The image builds the frontend with `npm ci` and installs locked Python 3.14
+dependencies with `uv`. The final `distroless/base-debian13:nonroot` image
+contains Python, its native libraries, and the installed app/assets, but no
+shell, pip, uv, npm, or OS package manager. It runs as UID/GID `65532:65532`.
+Compose drops all capabilities, prevents privilege escalation, and makes the
+root filesystem read-only; `/tmp` is a temporary writable filesystem.
+
+The app listens on all interfaces **inside** the container; Compose publishes
+it only on host loopback. There is no authentication: do not change the host
+binding to `0.0.0.0` or expose it through an unauthenticated proxy. Forwarded
+proxy headers are disabled in the container command.
+
+The `penrecon-data` named volume stores the database, retained scans, and
+attachments under `/data` (`PENRECON_DATA` in the image). It survives container
+rebuilds and `docker compose down`. **`docker compose down --volumes` deletes
+this data.** Local `./data` is neither copied into the image nor automatically
+imported. If replacing the volume with a bind mount, make the directory
+writable by UID/GID `65532:65532` first.
+
+Upload scans through `/scans`, or run the CLI without a shell:
+
+```sh
+docker compose run --rm -v "$PWD/scan.xml:/input/scan.xml:ro" \
+  penrecon -m penrecon ingest /input/scan.xml --tool nmap
+docker compose exec penrecon /usr/local/bin/python3.14 -m penrecon --help
+```
+
+For a consistent backup, stop the app before copying the entire data directory
+(not just the SQLite file), then restart it:
+
+```sh
+docker compose stop penrecon
+docker compose cp penrecon:/data ./penrecon-backup
+docker compose start penrecon
+```
+
+Without Compose:
+
+```sh
+docker build -t penrecon:local .
+docker run -d --name penrecon -p 127.0.0.1:8000:8000 \
+  --mount source=penrecon-data,target=/data \
+  --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m,mode=1777 \
+  --cap-drop ALL --security-opt no-new-privileges:true penrecon:local
+```
+
 ## Mock-data test mode
 
 Create a separate test database, then serve it using the same data directory:
