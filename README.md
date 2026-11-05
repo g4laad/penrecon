@@ -124,6 +124,8 @@ uv run mypy src/penrecon
 
 For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
 This watches and rebuilds the local bundle; refresh the browser after changes.
+Bundle URLs are versioned on rebuild so a normal refresh loads the updated
+layout instead of reusing stale JavaScript or CSS.
 `npm --prefix frontend run build` checks TypeScript and produces release assets.
 
 GitHub Actions runs on pushes, pull requests, and manual dispatches. The workflow

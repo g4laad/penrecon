@@ -391,6 +391,7 @@ export default function App() {
   const active = path.startsWith("/hosts/") ? "/" : path;
   return (
     <PageContext.Provider value={{ data, refresh, navigate }}>
+      <div className={path.startsWith("/hosts/") || path === "/credentials" ? "workbench-shell" : undefined}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -464,6 +465,7 @@ export default function App() {
         penrecon · Local recon workspace{" "}
         <span className="float-right">Press / to focus search</span>
       </footer>
+      </div>
     </PageContext.Provider>
   );
 }

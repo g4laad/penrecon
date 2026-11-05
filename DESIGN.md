@@ -86,6 +86,11 @@ Tables scroll horizontally rather than crushing technical content.
 - Host details use the approved **D / Tabbed Workbench** layout: Services,
   Host notes, and Credentials tabs, each with a 240px selectable list beside
   the selected item's details. Lists stack above details on small screens.
+  All workbenches stay within the viewport: item lists and selected details
+  scroll independently rather than growing with their contents. Neither the
+  document nor the outer workspace scrolls. On narrow or short screens,
+  navigation and host metadata have bounded, independently scrollable regions
+  to preserve space for the item and detail panes.
   Active tabs use `#services`, `#notes`, and `#credentials` and survive reloads
   and browser history. Selection stays intact across tab changes; deletion or
   filtering falls back to the first available item.

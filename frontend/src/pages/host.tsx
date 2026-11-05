@@ -618,7 +618,7 @@ export function HostPage({ data }: { data: PageData }) {
     data.f_port || data.f_state || data.f_service || data.f_status,
   );
   return (
-    <div className="space-y-6">
+    <div className="host-workbench-page">
       <header className="space-y-4 border-b pb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <a href="/" className="muted text-sm hover:underline">
@@ -681,7 +681,7 @@ export function HostPage({ data }: { data: PageData }) {
           setSection(next);
           location.hash = next;
         }}
-        className="min-w-0"
+        className="host-workbench-tabs"
       >
         <Tabs.List aria-label="Host workbench sections" className="host-tabs">
           <Tabs.Tab value="services">

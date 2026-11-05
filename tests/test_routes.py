@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+from os import utime
+from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
@@ -32,8 +34,10 @@ def test_page_shell_embeds_same_safe_data_and_local_assets(client: TestClient, a
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["vary"] == "Accept"
     assert '<div id="root"></div>' in response.text
-    assert 'src="/static/ui/app.js"' in response.text
-    assert 'href="/static/ui/app.css"' in response.text
+    assets = re.findall(r'(?:src|href)="(/static/ui/[^"]+)"', response.text)
+    assert len(assets) == 2
+    for asset in assets:
+        assert client.get(asset).status_code == 200
     match = re.search(r'<script id="page-data" type="application/json">(.*?)</script>', response.text)
     assert match is not None
     embedded = match.group(1)
@@ -41,6 +45,33 @@ def test_page_shell_embeds_same_safe_data_and_local_assets(client: TestClient, a
     assert json.loads(embedded) == expected
     assert expected["q"] == query
     assert "request" not in expected
+
+
+def test_rebuilt_assets_get_new_browser_cache_keys(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from penrecon.web import app as web_app
+
+    assets = tmp_path / "static/ui"
+    assets.mkdir(parents=True)
+    for name in ("app.js", "app.css"):
+        (assets / name).write_text("old bundle")
+        utime(assets / name, ns=(1_000_000_000, 1_000_000_000))
+    monkeypatch.setattr(web_app, "_HERE", tmp_path)
+
+    def asset_urls() -> list[str]:
+        response = client.get("/credentials", headers={"Accept": "text/html"})
+        assert response.status_code == 200
+        return re.findall(r'(?:src|href)="(/static/ui/[^"]+)"', response.text)
+
+    original = asset_urls()
+    assert asset_urls() == original
+    for name in ("app.js", "app.css"):
+        (assets / name).write_text("rebuilt bundle")
+        utime(assets / name, ns=(2_000_000_000, 2_000_000_000))
+    rebuilt = asset_urls()
+    assert len(rebuilt) == len(original) == 2
+    assert all(before != after for before, after in zip(original, rebuilt))
 
 
 @pytest.mark.parametrize(

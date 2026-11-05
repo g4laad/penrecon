@@ -60,13 +60,17 @@ def page_response(request: Request, context: dict[str, object]) -> Response:
         ("\u2028", "\\u2028"), ("\u2029", "\\u2029"),
     ):
         serialized = serialized.replace(char, escaped)
+    # Rebuilt bundles keep fixed filenames; change their URLs on every rebuild
+    # so normal navigation cannot reuse a cached, obsolete layout.
+    css_version = (_HERE / "static/ui/app.css").stat().st_mtime_ns
+    js_version = (_HERE / "static/ui/app.js").stat().st_mtime_ns
     return HTMLResponse(
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        '<title>penrecon</title><link rel="stylesheet" href="/static/ui/app.css">'
+        f'<title>penrecon</title><link rel="stylesheet" href="/static/ui/app.css?v={css_version}">'
         '</head><body><div id="root"></div>'
         f'<script id="page-data" type="application/json">{serialized}</script>'
-        '<script type="module" src="/static/ui/app.js"></script></body></html>',
+        f'<script type="module" src="/static/ui/app.js?v={js_version}"></script></body></html>',
         headers=headers,
     )
 

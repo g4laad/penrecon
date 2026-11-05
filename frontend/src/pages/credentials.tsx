@@ -317,7 +317,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
     setUrl(next.href);
   }
   return (
-    <div className="stack gap-5">
+    <div className="credential-workbench-page">
       <PageHeader
         title="Credentials"
         description="Find an identity. Inspect its secret, discovery notes, and target associations."
