@@ -31,11 +31,15 @@ PENRECON_DATA=./data-test uv run penrecon seed
 PENRECON_DATA=./data-test uv run penrecon serve --port 8765
 ```
 
-Open `http://127.0.0.1:8765`. Seeding creates 100 hosts, hostnames, services,
-scans, observations, notes, credentials, and operation logs; 200 annotations
-(host and service triage); and 100 rows in each relationship table. Each scan
-has retained nmap XML, and each operation has a downloadable text attachment.
-Statuses, service states, service products, and credential kinds vary.
+Open `http://127.0.0.1:8765`. Seeding creates at least 100 rows per database
+table, including hosts, hostnames, services, scans, observations, notes,
+credentials, operation logs, and their relationships. Every host and service
+has a triage annotation. Each scan has retained nmap XML, and each operation
+has a downloadable text attachment.
+
+The first host, `198.18.0.1` (`host-00001.mock.test`), has five open ports:
+TCP 22 (SSH), 80 (HTTP), 443 (HTTPS), 5432 (PostgreSQL), and UDP 53 (DNS).
+Other hosts vary in status, service state, product, and credential kind.
 
 Use `seed --count 250` for a larger dataset (minimum 100, maximum 131070 per
 type). The command refuses a nonempty database: it never clears or merges

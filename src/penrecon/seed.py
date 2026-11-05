@@ -82,19 +82,38 @@ def seed_database(session: Session, count: int = 100) -> dict[str, int]:
             session.flush()
             assert host.id is not None and hostname.id is not None
             assert scan.id is not None and credential.id is not None
-            service = Service(host_id=host.id, port=port, proto=proto)
-            session.add(service)
-            session.flush()
-            assert service.id is not None
+            profiles = _PROFILES if index == 0 else (_PROFILES[index % len(_PROFILES)],)
+            port_xml = []
+            for svc_port, svc_proto, svc_name, svc_product, svc_version in profiles:
+                svc_state = ObsState.open if index == 0 else state
+                service = Service(host_id=host.id, port=svc_port, proto=svc_proto)
+                session.add(service)
+                session.flush()
+                assert service.id is not None
+                session.add_all([
+                    Observation(
+                        scan_id=scan.id, host_id=host.id, port=svc_port, proto=svc_proto,
+                        state=svc_state, service_name=svc_name, product=svc_product,
+                        version=svc_version, extra={"mock": True}, observed_at=observed,
+                    ),
+                    Annotation(
+                        service_id=service.id, status=statuses[(index + 1) % len(statuses)],
+                        tags=["mock", svc_name], updated_at=observed,
+                    ),
+                    CredentialService(credential_id=credential.id, service_id=service.id),
+                ])
+                port_xml.append(
+                    f'<port protocol="{svc_proto}" portid="{svc_port}">'
+                    f'<state state="{svc_state.value}"/><service name="{svc_name}" '
+                    f'product="{svc_product}" version="{svc_version}"/></port>'
+                )
 
             raw_path = RAW_SCANS_DIR / f"{scan.id}_{scan.filename}"
             xml = (
                 '<?xml version="1.0"?><nmaprun scanner="nmap" start="0" version="7.95">'
                 f'<host><status state="up"/><address addr="{ip}" addrtype="ipv4"/>'
                 f'<hostnames><hostname name="{name}" type="user"/></hostnames>'
-                f'<ports><port protocol="{proto}" portid="{port}">'
-                f'<state state="{state.value}"/><service name="{service_name}" '
-                f'product="{product}" version="{version}"/></port></ports></host>'
+                '<ports>' + "".join(port_xml) + '</ports></host>'
                 '<runstats><finished time="0" elapsed="0" exit="success"/>'
                 '<hosts up="1" down="0" total="1"/></runstats></nmaprun>'
             )
@@ -110,18 +129,9 @@ def seed_database(session: Session, count: int = 100) -> dict[str, int]:
                 attachment_file.write(output)
             session.add_all([
                 HostHostname(host_id=host.id, hostname_id=hostname.id, last_seen=observed),
-                Observation(
-                    scan_id=scan.id, host_id=host.id, port=port, proto=proto, state=state,
-                    service_name=service_name, product=product, version=version,
-                    extra={"mock": True}, observed_at=observed,
-                ),
                 Annotation(
                     host_id=host.id, status=statuses[index % len(statuses)],
                     tags=["mock", "internal"], updated_at=observed,
-                ),
-                Annotation(
-                    service_id=service.id, status=statuses[(index + 1) % len(statuses)],
-                    tags=["mock", service_name], updated_at=observed,
                 ),
                 Note(
                     host_id=host.id, title=f"Mock triage: {name}",
@@ -131,7 +141,6 @@ def seed_database(session: Session, count: int = 100) -> dict[str, int]:
                     created_at=observed, updated_at=observed,
                 ),
                 CredentialHost(credential_id=credential.id, host_id=host.id),
-                CredentialService(credential_id=credential.id, service_id=service.id),
                 OperationLog(
                     started_at=observed, ended_at=observed + timedelta(seconds=30),
                     source="198.19.255.254", destination=ip, tool="nmap",
