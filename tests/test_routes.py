@@ -9,17 +9,18 @@ import pytest
 from starlette.testclient import TestClient
 
 from tests.fixtures import SCAN_A, SCAN_B
+from tests.fixtures import ENGAGEMENT_PREFIX
 
 
 def _create_host(client: TestClient, ip: str = "10.0.0.5") -> str:
-    response = client.post("/hosts", data={"ip": ip}, follow_redirects=False)
+    response = client.post(ENGAGEMENT_PREFIX + "/hosts", data={"ip": ip}, follow_redirects=False)
     assert response.status_code == 303
     return response.headers["location"]
 
 
 def _upload(client: TestClient, content: str, filename: str) -> None:
     response = client.post(
-        "/scans", files={"file": (filename, content, "text/xml")},
+        ENGAGEMENT_PREFIX + "/scans", files={"file": (filename, content, "text/xml")},
         data={"tool": "nmap"}, follow_redirects=False,
     )
     assert response.status_code == 303
@@ -28,8 +29,8 @@ def _upload(client: TestClient, content: str, filename: str) -> None:
 @pytest.mark.parametrize("accept", ["text/html", "*/*", ""])
 def test_page_shell_embeds_same_safe_data_and_local_assets(client: TestClient, accept: str) -> None:
     query = '</script><script>alert("x")</script>&>\u2028\u2029tail'
-    expected = client.get("/search", params={"q": query}).json()
-    response = client.get("/search", params={"q": query}, headers={"Accept": accept})
+    expected = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": query}).json()
+    response = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": query}, headers={"Accept": accept})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["vary"] == "Accept"
@@ -60,7 +61,7 @@ def test_rebuilt_assets_get_new_browser_cache_keys(
     monkeypatch.setattr(web_app, "_HERE", tmp_path)
 
     def asset_urls() -> list[str]:
-        response = client.get("/credentials", headers={"Accept": "text/html"})
+        response = client.get(ENGAGEMENT_PREFIX + "/credentials", headers={"Accept": "text/html"})
         assert response.status_code == 200
         return re.findall(r'(?:src|href)="(/static/ui/[^"]+)"', response.text)
 
@@ -76,8 +77,8 @@ def test_rebuilt_assets_get_new_browser_cache_keys(
 
 @pytest.mark.parametrize(
     ("path", "key"),
-    [("/", "rows"), ("/search", "results"), ("/credentials", "credentials"),
-     ("/scans", "scans"), ("/diff", "result"), ("/operations", "operations")],
+    [(ENGAGEMENT_PREFIX + "/", "rows"), (ENGAGEMENT_PREFIX + "/search", "results"), (ENGAGEMENT_PREFIX + "/credentials", "credentials"),
+     (ENGAGEMENT_PREFIX + "/scans", "scans"), (ENGAGEMENT_PREFIX + "/diff", "result"), (ENGAGEMENT_PREFIX + "/operations", "operations")],
 )
 def test_page_json_contexts(client: TestClient, path: str, key: str) -> None:
     response = client.get(path)
@@ -86,19 +87,21 @@ def test_page_json_contexts(client: TestClient, path: str, key: str) -> None:
     assert response.headers["vary"] == "Accept"
     data = response.json()
     assert key in data
+    assert data["engagement"]["id"] == ENGAGEMENT_PREFIX.rsplit("/", 1)[1]
+    assert any(item["id"] == data["engagement"]["id"] for item in data["engagements"])
     assert "request" not in data
     assert data["per_page_choices"] == ["10", "25", "50", "all"]
 
 
 def test_missing_host_404(client: TestClient) -> None:
-    response = client.get("/hosts/999999")
+    response = client.get(ENGAGEMENT_PREFIX + "/hosts/999999")
     assert response.status_code == 404
     assert response.json()["detail"] == "host not found"
 
 
 def test_create_host_redirects_to_detail(client: TestClient) -> None:
     path = _create_host(client)
-    assert path.startswith("/hosts/")
+    assert path.startswith(ENGAGEMENT_PREFIX + "/hosts/")
     detail = client.get(path)
     assert detail.status_code == 200
     data = detail.json()
@@ -113,7 +116,7 @@ def test_create_host_redirects_to_detail(client: TestClient) -> None:
 
 
 def test_create_host_rejects_bad_ip(client: TestClient) -> None:
-    response = client.post("/hosts", data={"ip": "not-an-ip"}, follow_redirects=False)
+    response = client.post(ENGAGEMENT_PREFIX + "/hosts", data={"ip": "not-an-ip"}, follow_redirects=False)
     assert response.status_code == 400
     assert "not a valid" in response.json()["detail"]
 
@@ -122,12 +125,12 @@ def test_delete_host_redirects_home(client: TestClient) -> None:
     path = _create_host(client, "10.0.0.6")
     response = client.post(f"{path}/delete", follow_redirects=False)
     assert response.status_code == 303
-    assert response.headers["location"] == "/"
+    assert response.headers["location"] == ENGAGEMENT_PREFIX + "/"
     assert client.get(path).status_code == 404
 
 
 def test_export_csv_headers(client: TestClient) -> None:
-    response = client.get("/export/hosts.csv")
+    response = client.get(ENGAGEMENT_PREFIX + "/export/hosts.csv")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/csv")
     assert "attachment" in response.headers["content-disposition"]
@@ -135,7 +138,7 @@ def test_export_csv_headers(client: TestClient) -> None:
 
 def test_create_credential_lists_it(client: TestClient) -> None:
     response = client.post(
-        "/credentials", data={"kind": "password", "username": "root", "secret": "toor"},
+        ENGAGEMENT_PREFIX + "/credentials", data={"kind": "password", "username": "root", "secret": "toor"},
     )
     assert response.status_code == 200
     credential = response.json()["credentials"][0]
@@ -151,7 +154,7 @@ def test_create_credential_with_multiple_targets_deduplicates_links(client: Test
         client.post(f"{path}/services", data={"port": "22"}).json()["services"][0]["service_id"]
         for path in paths
     ]
-    response = client.post("/credentials", data={
+    response = client.post(ENGAGEMENT_PREFIX + "/credentials", data={
         "username": " root ", "secret": " toor ", "notes": " shared ",
         "host_ids": [str(hid) for hid in [*host_ids, host_ids[0]]],
         "service_ids": [str(sid) for sid in [*service_ids, service_ids[0]]],
@@ -164,7 +167,7 @@ def test_create_credential_with_multiple_targets_deduplicates_links(client: Test
     assert credential["kind"] == "password"
     assert sorted(host["host_id"] for host in credential["hosts"]) == sorted(host_ids)
     assert sorted(service["service_id"] for service in credential["services"]) == sorted(service_ids)
-    persisted = client.get("/credentials").json()["credentials"]
+    persisted = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]
     assert persisted == response.json()["credentials"]
     for path in paths:
         assert client.get(path).json()["host_credentials"][0]["id"] == credential["id"]
@@ -179,7 +182,7 @@ def test_create_credential_rejects_invalid_targets_without_partial_writes(
     host_id = path.rsplit("/", 1)[1]
     service_id = client.post(f"{path}/services", data={"port": "22"}).json()["services"][0]["service_id"]
     other_service_id = client.post(f"{other_path}/services", data={"port": "443"}).json()["services"][0]["service_id"]
-    existing = client.post("/credentials", data={"username": "existing"}).json()["credentials"]
+    existing = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "existing"}).json()["credentials"]
     data = {
         "username": "rejected",
         "host_ids": [host_id],
@@ -193,18 +196,18 @@ def test_create_credential_rejects_invalid_targets_without_partial_writes(
         data["service_ids"].append(str(other_service_id))
     else:
         data["host_ids"] = []
-    response = client.post("/credentials", data=data)
+    response = client.post(ENGAGEMENT_PREFIX + "/credentials", data=data)
     assert response.status_code == 422
-    assert client.get("/credentials").json()["credentials"] == existing
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"] == existing
     assert client.get(path).json()["host_credentials"] == []
     assert client.get(other_path).json()["host_credentials"] == []
 
 
 @pytest.mark.parametrize("data", [{}, {"username": "  ", "secret": "\t", "notes": "notes only"}])
 def test_create_credential_rejects_empty_identity(client: TestClient, data: dict[str, str]) -> None:
-    response = client.post("/credentials", data=data)
+    response = client.post(ENGAGEMENT_PREFIX + "/credentials", data=data)
     assert response.status_code == 422
-    assert client.get("/credentials").json()["credentials"] == []
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"] == []
 
 
 @pytest.mark.parametrize("data", [
@@ -212,7 +215,7 @@ def test_create_credential_rejects_empty_identity(client: TestClient, data: dict
     {"secret": "secret only", "kind": "unknown"},
 ])
 def test_create_credential_preserves_target_free_defaults(client: TestClient, data: dict[str, str]) -> None:
-    response = client.post("/credentials", data=data)
+    response = client.post(ENGAGEMENT_PREFIX + "/credentials", data=data)
     assert response.status_code == 200
     credential = response.json()["credentials"][0]
     assert credential["kind"] == "password"
@@ -224,16 +227,16 @@ def test_create_credential_preserves_target_free_defaults(client: TestClient, da
 
 def test_upload_scan_then_host_appears(client: TestClient) -> None:
     _upload(client, SCAN_A, "a.xml")
-    row = client.get("/").json()["rows"][0]
+    row = client.get(ENGAGEMENT_PREFIX + "/").json()["rows"][0]
     assert row["ip"] == "10.0.0.1"
     assert row["hostnames"] == ["a.example"]
     assert row["open_ports"] == [22, 80]
     assert row["open_services"] == [[22, "ssh"], [80, "http"]]
-    detail = client.get(f'/hosts/{row["id"]}').json()
+    detail = client.get(ENGAGEMENT_PREFIX + f'/hosts/{row["id"]}').json()
     assert [service["port"] for service in detail["services"]] == [22, 80]
     assert detail["services"][0]["version"] == "8.9"
     assert detail["hostnames"][0][1] == "a.example"
-    scan = client.get("/scans").json()["scans"][0]
+    scan = client.get(ENGAGEMENT_PREFIX + "/scans").json()["scans"][0]
     assert scan["filename"] == "a.xml"
     assert scan["imported_at"]
 
@@ -241,9 +244,9 @@ def test_upload_scan_then_host_appears(client: TestClient) -> None:
 def test_diff_serializes_scans_and_changes(client: TestClient) -> None:
     _upload(client, SCAN_A, "a.xml")
     _upload(client, SCAN_B, "b.xml")
-    scans = client.get("/scans").json()["scans"]
+    scans = client.get(ENGAGEMENT_PREFIX + "/scans").json()["scans"]
     ids = {scan["filename"]: scan["id"] for scan in scans}
-    data = client.get("/diff", params={"a": ids["a.xml"], "b": ids["b.xml"]}).json()
+    data = client.get(ENGAGEMENT_PREFIX + "/diff", params={"a": ids["a.xml"], "b": ids["b.xml"]}).json()
     assert data["a"] == ids["a.xml"]
     assert data["b"] == ids["b.xml"]
     assert data["result"]["scan_a"]["filename"] == "a.xml"
@@ -290,7 +293,7 @@ def test_service_mutations_return_resolved_json(client: TestClient) -> None:
     assert service["service_name"] == "https"
     assert service["manual"] is True
     service_id = service["service_id"]
-    edited = client.post(f"/services/{service_id}/edit", data={
+    edited = client.post(ENGAGEMENT_PREFIX + f"/services/{service_id}/edit", data={
         "state": "open", "service_name": "https", "product": "nginx",
         "status": "interesting", "tags": "web, tls",
     })
@@ -299,7 +302,7 @@ def test_service_mutations_return_resolved_json(client: TestClient) -> None:
     assert resolved["product"] == "nginx"
     assert resolved["annotation"]["status"] == "interesting"
     assert resolved["annotation"]["tags"] == ["web", "tls"]
-    deleted = client.post(f"/services/{service_id}/delete")
+    deleted = client.post(ENGAGEMENT_PREFIX + f"/services/{service_id}/delete")
     assert deleted.status_code == 200
     assert deleted.json()["services"] == []
 
@@ -307,24 +310,24 @@ def test_service_mutations_return_resolved_json(client: TestClient) -> None:
 def test_notes_and_annotation_round_trip_in_host_context(client: TestClient) -> None:
     path = _create_host(client)
     host_id = path.rsplit("/", 1)[1]
-    created = client.post("/notes", data={"host_id": host_id, "title": "  Recon  ", "body_md": "raw\nbody"})
+    created = client.post(ENGAGEMENT_PREFIX + "/notes", data={"host_id": host_id, "title": "  Recon  ", "body_md": "raw\nbody"})
     assert created.status_code == 200
     note = created.json()["notes"][0]
     assert note["title"] == "Recon"
     assert note["body_md"] == "raw\nbody"
     assert note["created_at"]
-    edited = client.post(f'/notes/{note["id"]}/edit', data={"title": "Updated", "body_md": "new body"})
+    edited = client.post(ENGAGEMENT_PREFIX + f'/notes/{note["id"]}/edit', data={"title": "Updated", "body_md": "new body"})
     assert edited.json()["notes"][0]["body_md"] == "new body"
-    saved = client.post("/annotation", data={"host_id": host_id, "status": "interesting", "tags": "pivot, web"})
+    saved = client.post(ENGAGEMENT_PREFIX + "/annotation", data={"host_id": host_id, "status": "interesting", "tags": "pivot, web"})
     assert saved.status_code == 200
     assert saved.json()["ann"]["status"] == "interesting"
-    annotation = client.get("/annotation", params={"host_id": host_id})
+    annotation = client.get(ENGAGEMENT_PREFIX + "/annotation", params={"host_id": host_id})
     assert annotation.status_code == 200
     assert annotation.json()["ann"]["tags"] == ["pivot", "web"]
     detail = client.get(path).json()
     assert detail["host_notes"][0]["title"] == "Updated"
     assert detail["host_ann"]["status"] == "interesting"
-    deleted = client.post(f'/notes/{note["id"]}/delete')
+    deleted = client.post(ENGAGEMENT_PREFIX + f'/notes/{note["id"]}/delete')
     assert deleted.status_code == 200
     assert deleted.json()["notes"] == []
 
@@ -333,23 +336,23 @@ def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> 
     path = _create_host(client)
     host_id = path.rsplit("/", 1)[1]
     service_id = client.post(f"{path}/services", data={"port": "22", "service_name": "ssh"}).json()["services"][0]["service_id"]
-    credential_id = client.post("/credentials", data={"username": "root", "secret": "toor"}).json()["credentials"][0]["id"]
-    linked = client.post(f"/credentials/{credential_id}/link/host", data={"host_id": host_id})
+    credential_id = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "root", "secret": "toor"}).json()["credentials"][0]["id"]
+    linked = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": host_id})
     assert linked.status_code == 200
     credential = linked.json()["credentials"][0]
     assert credential["hosts"][0]["ip"] == "10.0.0.5"
     assert credential["pickable_services"][0]["service_id"] == service_id
-    linked_service = client.post(f"/credentials/{credential_id}/link/service", data={"service_id": str(service_id)})
+    linked_service = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/service", data={"service_id": str(service_id)})
     assert linked_service.json()["credentials"][0]["services"][0]["name"] == "ssh"
     detail = client.get(path).json()
     assert detail["host_credentials"][0]["id"] == credential_id
-    edited = client.post(f"/credentials/{credential_id}/edit", data={"host_id": host_id, "username": "admin", "secret": "changed"})
+    edited = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/edit", data={"host_id": host_id, "username": "admin", "secret": "changed"})
     assert edited.json()["host_credentials"][0]["username"] == "admin"
-    unlinked_service = client.post(f"/credentials/{credential_id}/unlink/service/{service_id}")
+    unlinked_service = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/service/{service_id}")
     assert unlinked_service.json()["credentials"][0]["services"] == []
-    unlinked_host = client.post(f"/credentials/{credential_id}/unlink/host/{host_id}")
+    unlinked_host = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
     assert unlinked_host.json()["credentials"][0]["hosts"] == []
-    deleted = client.post(f"/credentials/{credential_id}/delete")
+    deleted = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/delete")
     assert deleted.json()["credentials"] == []
 
 
@@ -362,15 +365,15 @@ def test_unlink_host_removes_only_its_credential_service_links(client: TestClien
     for path, port in ((host_path, 22), (host_path, 443), (other_path, 22)):
         services = client.post(f"{path}/services", data={"port": str(port)}).json()["services"]
         service_ids.append(next(service["service_id"] for service in services if service["port"] == port))
-    credential_id = client.post("/credentials", data={"username": "root", "secret": "toor"}).json()["credentials"][0]["id"]
-    other_credential_id = client.post("/credentials", data={"username": "admin", "secret": "other"}).json()["credentials"][0]["id"]
+    credential_id = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "root", "secret": "toor"}).json()["credentials"][0]["id"]
+    other_credential_id = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "admin", "secret": "other"}).json()["credentials"][0]["id"]
     for cid in (credential_id, other_credential_id):
         for hid in (host_id, other_id):
-            client.post(f"/credentials/{cid}/link/host", data={"host_id": str(hid)})
+            client.post(ENGAGEMENT_PREFIX + f"/credentials/{cid}/link/host", data={"host_id": str(hid)})
         for sid in service_ids:
-            client.post(f"/credentials/{cid}/link/service", data={"service_id": str(sid)})
+            client.post(ENGAGEMENT_PREFIX + f"/credentials/{cid}/link/service", data={"service_id": str(sid)})
 
-    response = client.post(f"/credentials/{credential_id}/unlink/host/{host_id}")
+    response = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
     assert response.status_code == 200
     credentials = {credential["id"]: credential for credential in response.json()["credentials"]}
     credential = credentials[credential_id]
@@ -383,9 +386,9 @@ def test_unlink_host_removes_only_its_credential_service_links(client: TestClien
     assert {service["service_id"] for service in other["services"]} == set(service_ids)
 
     # Re-linking the host must not resurrect its old service associations.
-    client.post(f"/credentials/{credential_id}/unlink/host/{host_id}")
-    client.post(f"/credentials/{credential_id}/link/host", data={"host_id": str(host_id)})
-    persisted = {credential["id"]: credential for credential in client.get("/credentials").json()["credentials"]}
+    client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
+    client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": str(host_id)})
+    persisted = {credential["id"]: credential for credential in client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]}
     assert [service["service_id"] for service in persisted[credential_id]["services"]] == [service_ids[2]]
 
 
@@ -393,9 +396,9 @@ def test_search_serializes_all_result_sources(client: TestClient) -> None:
     path = _create_host(client)
     host_id = path.rsplit("/", 1)[1]
     client.post(f"{path}/hostnames", data={"name": "needle.internal"})
-    client.post("/notes", data={"host_id": host_id, "title": "Needle", "body_md": "needle evidence"})
-    client.post("/credentials", data={"username": "needle", "secret": "secret"})
-    data = client.get("/search", params={"q": " needle "}).json()
+    client.post(ENGAGEMENT_PREFIX + "/notes", data={"host_id": host_id, "title": "Needle", "body_md": "needle evidence"})
+    client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "needle", "secret": "secret"})
+    data = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": " needle "}).json()
     assert data["q"] == "needle"
     assert data["results"]["hosts"][0]["ip"] == "10.0.0.5"
     assert data["results"]["notes"][0]["href"] == path

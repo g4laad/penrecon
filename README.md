@@ -12,11 +12,35 @@ uv sync
 npm --prefix frontend ci
 npm --prefix frontend run build
 uv run penrecon serve          # http://127.0.0.1:8000
-uv run penrecon ingest scan.xml --tool nmap   # or upload on the /scans page
+uv run penrecon engagements create "Example engagement"
+uv run penrecon engagements list
+uv run penrecon ingest scan.xml --tool nmap --engagement <uuid>
 ```
 
 Data (SQLite db + attachments) lives under `./data` — override with
 `PENRECON_DATA=/path`.
+
+Open `/engagements` to create or select an engagement. The header selector switches
+to the selected engagement's host inventory. Every domain URL starts with
+`/e/<uuid>/`; separate tabs can work on different engagements independently.
+Upload files from the selected engagement's Scans page.
+
+One shared SQLite database stores all engagements. Hosts, hostnames, services,
+scans, notes, triage, credentials, and operations are engagement-owned; the same
+IP or hostname can exist independently in multiple engagements. Search, exports,
+and scan comparisons are restricted to the engagement in the URL. Composite
+foreign keys reject relationships between engagements.
+
+Retained files live under `data/engagements/<uuid>/scans/` and
+`data/engagements/<uuid>/operation-attachments/`; stored paths are relative to
+the data directory. Credentials are not shared across engagements.
+
+**Development schema reset:** no migrations or database portability work is
+included. An existing pre-engagement database is incompatible. Stop the app and
+choose a fresh `PENRECON_DATA` directory, or back up the existing directory and
+manually reset its database. Re-ingesting scans does **not** restore notes,
+credentials, manual edits, or operation logs. Startup never deletes or migrates
+your data automatically.
 
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
@@ -58,11 +82,11 @@ this data.** Local `./data` is neither copied into the image nor automatically
 imported. If replacing the volume with a bind mount, make the directory
 writable by UID/GID `65532:65532` first.
 
-Upload scans through `/scans`, or run the CLI without a shell:
+Upload scans through an engagement's Scans page, or run the CLI without a shell:
 
 ```sh
 docker compose run --rm -v "$PWD/scan.xml:/input/scan.xml:ro" \
-  penrecon -m penrecon ingest /input/scan.xml --tool nmap
+  penrecon -m penrecon ingest /input/scan.xml --tool nmap --engagement <uuid>
 docker compose exec penrecon /usr/local/bin/python3.14 -m penrecon --help
 ```
 
@@ -94,8 +118,10 @@ PENRECON_DATA=./data-test uv run penrecon seed
 PENRECON_DATA=./data-test uv run penrecon serve --port 8765
 ```
 
-Open `http://127.0.0.1:8765`. Seeding creates at least 100 rows per database
-table, including hosts, hostnames, services, scans, observations, notes,
+Open `http://127.0.0.1:8765` and select one of the ten generated engagements,
+named **Mock engagement 01** through **Mock engagement 10**. Each receives at
+least 100 rows per domain table, including hosts, hostnames, services, scans,
+observations, notes,
 credentials, operation logs, and their relationships. Every host and service
 has a triage annotation. Each scan has retained nmap XML, and each operation
 has a downloadable text attachment.
@@ -105,9 +131,10 @@ TCP 22 (SSH), 80 (HTTP), 443 (HTTPS), 5432 (PostgreSQL), and UDP 53 (DNS).
 Other hosts vary in status, service state, product, and credential kind.
 
 Use `seed --count 250` for a larger dataset (minimum 100, maximum 131070 per
-type). The command refuses a nonempty database: it never clears or merges
-existing recon data. To start another dataset, choose a fresh `PENRECON_DATA`
-directory. Normal `serve` does not generate data.
+type **per engagement**). Every invocation creates ten new engagements with
+fresh IDs; it never clears, merges, or populates existing engagements. The command
+prints each new engagement's UUID and row counts. It does not accept an
+`--engagement` argument. Normal `serve` does not generate data.
 
 All records are synthetic: IPs use the benchmark-only `198.18.0.0/15` range,
 hostnames end in `.mock.test`, and secrets are labeled as mock values.
@@ -153,10 +180,10 @@ from an existing enumeration database:
 
 ```sh
 amass subs -d example.com -names -ip -nocolor -o amass.txt
-uv run penrecon ingest amass.txt --tool amass
+uv run penrecon ingest amass.txt --tool amass --engagement <uuid>
 ```
 
-Alternatively, upload the export on `/scans` with **amass** selected.
+Alternatively, upload the export on the engagement's Scans page with **amass** selected.
 The text format is one hostname followed by comma-separated IPv4/IPv6 addresses:
 
 ```text

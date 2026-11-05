@@ -1,3 +1,4 @@
+import { ScopedLink } from "../common";
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -186,13 +187,9 @@ function OperationFields({ operation }: { operation?: Operation }) {
       {operation?.attachment_name && (
         <div className="stack col-span-full gap-2 rounded-md border bg-muted/30 p-3">
           <span className="text-sm font-medium">Current attachment</span>
-          <a
-            href={`/operations/${operation.id}/attachment`}
-            className="break-all text-sm underline underline-offset-4"
-            download
-          >
-            {operation.attachment_name}
-          </a>
+          <ScopedLink href={`/operations/${operation.id}/attachment`}
+          className="break-all text-sm underline underline-offset-4"
+          download>{operation.attachment_name}</ScopedLink>
           <label htmlFor={removeId} className="flex items-center gap-2 text-sm">
             <input
               id={removeId}
@@ -377,14 +374,10 @@ function OperationDetails({ operation }: { operation: Operation }) {
         </section>
       )}
       {operation.attachment_name && (
-        <a
-          href={`/operations/${operation.id}/attachment`}
-          className="flex items-center gap-2 break-all"
-          download
-        >
-          <Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
-          {operation.attachment_name}
-        </a>
+        <ScopedLink href={`/operations/${operation.id}/attachment`}
+        className="flex items-center gap-2 break-all"
+        download><Paperclip className="size-3.5 shrink-0" aria-hidden="true" />
+        {operation.attachment_name}</ScopedLink>
       )}
       <p className="muted text-xs">
         Recorded {operation.created_at.replace("T", " ").slice(0, 16)}
@@ -428,7 +421,7 @@ export function OperationsPage({ data }: { data: PageData }) {
           {data.q && (
             <Button
               variant="ghost"
-              render={<a href={`/operations?per=${data.per ?? "25"}`} />}
+              render={<ScopedLink href={`/operations?per=${data.per ?? "25"}`} />}
             >
               Reset
             </Button>

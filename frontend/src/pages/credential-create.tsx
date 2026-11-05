@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Field, MutationForm } from "../common";
+import { Field, MutationForm, engagementUrl } from "../common";
 import type { Host, PageData, Service } from "../types";
 
 const HOSTS_PER_PAGE = 50;
@@ -23,7 +23,7 @@ function HostServices({ host, selected, onSelect, onReady }: {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(`/hosts/${host.id}?per=all`, {
+        const response = await fetch(engagementUrl(`/hosts/${host.id}?per=all`), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         if (!response.ok) throw new Error("Unable to load services.");

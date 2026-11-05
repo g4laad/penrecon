@@ -1,3 +1,4 @@
+import { ScopedLink } from "../common";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,12 +30,10 @@ export function ScansPage({ data }: { data: PageData }) {
         title="Scans"
         description="Imports preserve notes, annotations, and credentials."
       >
-        <a
-          href="/diff"
-          className="text-[13px] font-medium underline underline-offset-4"
-        >
+        <ScopedLink href="/diff"
+        className="text-[13px] font-medium underline underline-offset-4">
           Compare scans
-        </a>
+        </ScopedLink>
       </PageHeader>
       <Section title="Import scan" id="scan-import">
         <MutationForm
@@ -112,12 +111,10 @@ export function DiffPage({ data }: { data: PageData }) {
         title="Diff scans"
         description="Compare immutable observations."
       >
-        <a
-          href="/scans"
-          className="text-[13px] font-medium underline underline-offset-4"
-        >
+        <ScopedLink href="/scans"
+        className="text-[13px] font-medium underline underline-offset-4">
           Scan history
-        </a>
+        </ScopedLink>
       </PageHeader>
       {scans.length ? (
         <Filters>
@@ -138,9 +135,9 @@ export function DiffPage({ data }: { data: PageData }) {
       ) : (
         <Empty>
           Import scans before comparing their observations.{" "}
-          <a href="/scans" className="underline underline-offset-4">
+          <ScopedLink href="/scans" className="underline underline-offset-4">
             Upload a scan
-          </a>
+          </ScopedLink>
           .
         </Empty>
       )}

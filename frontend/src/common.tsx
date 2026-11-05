@@ -7,6 +7,7 @@ import {
   Fragment,
   type ReactNode,
   type InputHTMLAttributes,
+  type ComponentProps,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,19 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import type { PageData } from "./types";
+
+/** Scope domain URLs to this tab's explicit engagement URL, never global state. */
+export function engagementUrl(url: string): string {
+  if (!url.startsWith("/") || url.startsWith("//") ||
+      /^\/(?:e|engagements)(?:\/|[?#]|$)/.test(url)) return url;
+  const match = location.pathname.match(/^\/e\/([^/]+)(?:\/|$)/);
+  if (!match) throw new Error("Domain navigation requires an engagement");
+  return `/e/${match[1]}${url}`;
+}
+
+export function ScopedLink({ href, ...props }: ComponentProps<"a">) {
+  return <a {...props} href={href === undefined ? undefined : engagementUrl(href)} />;
+}
 
 export const PageContext = createContext<{
   data: PageData;
@@ -137,7 +151,7 @@ export function MutationForm({
   const [error, setError] = useState("");
   return (
     <form
-      action={action}
+      action={engagementUrl(action)}
       method="post"
       encType="multipart/form-data"
       className={className}
@@ -149,7 +163,7 @@ export function MutationForm({
         setBusy(true);
         setError("");
         try {
-          const response = await fetch(action, {
+          const response = await fetch(engagementUrl(action), {
             method: "POST",
             body,
             headers: { Accept: "application/json" },

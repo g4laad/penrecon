@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
@@ -19,15 +20,15 @@ def _scan(ip: str, hostnames: list[str]) -> bytes:
 
 def test_multiple_hostnames_accumulate_and_dedup(session: Session) -> None:
     # scan A: one hostname; scan B: a second (plus the first again)
-    ingest_scan(session, _scan("10.0.0.1", ["a.example"]), "a.xml", "nmap")
-    ingest_scan(session, _scan("10.0.0.1", ["b.example", "a.example"]), "b.xml", "nmap")
+    ingest_scan(session, _scan("10.0.0.1", ["a.example"]), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    ingest_scan(session, _scan("10.0.0.1", ["b.example", "a.example"]), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
     # re-ingest A again to prove dedup on repeat
-    ingest_scan(session, _scan("10.0.0.1", ["a.example"]), "a.xml", "nmap")
+    ingest_scan(session, _scan("10.0.0.1", ["a.example"]), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
 
     host = session.exec(select(Host).where(Host.ip == "10.0.0.1")).one()
     assert host.id is not None
 
-    names = _hostnames_for(session, host.id)
+    names = _hostnames_for(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
     assert sorted(names) == ["a.example", "b.example"]  # both kept, no overwrite
 
     # exactly one link per (host, hostname) — no duplicates

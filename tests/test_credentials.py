@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session
 
 from penrecon.models import (
@@ -14,7 +15,7 @@ from penrecon.queries import credential_views, credentials_for_host
 
 
 def _host(session: Session, ip: str) -> Host:
-    h = Host(ip=ip)
+    h = Host(ip=ip, engagement_id=TEST_ENGAGEMENT_ID)
     session.add(h)
     session.commit()
     session.refresh(h)
@@ -22,7 +23,7 @@ def _host(session: Session, ip: str) -> Host:
 
 
 def _service(session: Session, host_id: int, port: int, name: str | None = None) -> Service:
-    s = Service(host_id=host_id, port=port, proto="tcp", m_service_name=name)
+    s = Service(host_id=host_id, port=port, proto="tcp", m_service_name=name, engagement_id=TEST_ENGAGEMENT_ID)
     session.add(s)
     session.commit()
     session.refresh(s)
@@ -32,15 +33,15 @@ def _service(session: Session, host_id: int, port: int, name: str | None = None)
 def test_credential_view_lists_host_and_service_links(session: Session) -> None:
     h = _host(session, "10.0.0.1")
     svc = _service(session, h.id, 22, "ssh")  # type: ignore[arg-type]
-    c = Credential(kind=CredKind.password, username="root", secret="toor")
+    c = Credential(kind=CredKind.password, username="root", secret="toor", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(c)
     session.commit()
     session.refresh(c)
-    session.add(CredentialHost(credential_id=c.id, host_id=h.id))  # type: ignore[arg-type]
-    session.add(CredentialService(credential_id=c.id, service_id=svc.id))  # type: ignore[arg-type]
+    session.add(CredentialHost(credential_id=c.id, host_id=h.id, engagement_id=TEST_ENGAGEMENT_ID))  # type: ignore[arg-type]
+    session.add(CredentialService(credential_id=c.id, service_id=svc.id, engagement_id=TEST_ENGAGEMENT_ID))  # type: ignore[arg-type]
     session.commit()
 
-    views = credential_views(session)
+    views = credential_views(session, engagement_id=TEST_ENGAGEMENT_ID)
     assert len(views) == 1
     v = views[0]
     assert (v.username, v.secret) == ("root", "toor")
@@ -51,19 +52,19 @@ def test_credential_view_lists_host_and_service_links(session: Session) -> None:
 def test_credentials_for_host_includes_service_only_links(session: Session) -> None:
     h = _host(session, "10.0.0.2")
     svc = _service(session, h.id, 445, "microsoft-ds")  # type: ignore[arg-type]
-    c = Credential(kind=CredKind.hash, secret="aad3b435:31d6cfe0")
+    c = Credential(kind=CredKind.hash, secret="aad3b435:31d6cfe0", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(c)
     session.commit()
     session.refresh(c)
-    session.add(CredentialService(credential_id=c.id, service_id=svc.id))  # type: ignore[arg-type]
+    session.add(CredentialService(credential_id=c.id, service_id=svc.id, engagement_id=TEST_ENGAGEMENT_ID))  # type: ignore[arg-type]
     session.commit()
 
     # tied to the host only through its service, never linked to the host directly
-    got = credentials_for_host(session, h.id)  # type: ignore[arg-type]
+    got = credentials_for_host(session, h.id, engagement_id=TEST_ENGAGEMENT_ID)  # type: ignore[arg-type]
     assert len(got) == 1 and got[0].secret == "aad3b435:31d6cfe0"
 
     other = _host(session, "10.0.0.3")
-    assert credentials_for_host(session, other.id) == []  # type: ignore[arg-type]
+    assert credentials_for_host(session, other.id, engagement_id=TEST_ENGAGEMENT_ID) == []  # type: ignore[arg-type]
 
 
 def test_pickable_services_scoped_to_linked_hosts(session: Session) -> None:
@@ -73,20 +74,20 @@ def test_pickable_services_scoped_to_linked_hosts(session: Session) -> None:
     h2 = _host(session, "10.0.0.11")
     _service(session, h2.id, 3389, "rdp")  # unlinked host — must not appear  # type: ignore[arg-type]
 
-    c = Credential(kind=CredKind.password, username="root", secret="toor")
+    c = Credential(kind=CredKind.password, username="root", secret="toor", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(c)
     session.commit()
     session.refresh(c)
-    session.add(CredentialHost(credential_id=c.id, host_id=h1.id))  # type: ignore[arg-type]
-    session.add(CredentialService(credential_id=c.id, service_id=s_linked.id))  # type: ignore[arg-type]
+    session.add(CredentialHost(credential_id=c.id, host_id=h1.id, engagement_id=TEST_ENGAGEMENT_ID))  # type: ignore[arg-type]
+    session.add(CredentialService(credential_id=c.id, service_id=s_linked.id, engagement_id=TEST_ENGAGEMENT_ID))  # type: ignore[arg-type]
     session.commit()
 
-    v = credential_views(session)[0]
+    v = credential_views(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
     # only h1's services, minus the already-linked one → just s_pick
     assert [s.service_id for s in v.pickable_services] == [s_pick.id]
 
     # a credential with no host linked can pick nothing
-    c2 = Credential(kind=CredKind.password, username="x", secret="y")
+    c2 = Credential(kind=CredKind.password, username="x", secret="y", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(c2)
     session.commit()
-    assert credential_views(session)[0].pickable_services == []
+    assert credential_views(session, engagement_id=TEST_ENGAGEMENT_ID)[0].pickable_services == []

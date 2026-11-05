@@ -14,20 +14,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from penrecon import queries
-from penrecon.db import OPERATION_ATTACHMENTS_DIR, get_session, init_db
+from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session, init_db
 from penrecon.ingest import _upsert_hostname, ingest_scan
 from penrecon.models import (
     CredKind,
     Credential,
     CredentialHost,
     CredentialService,
+    Engagement,
     Host,
     HostHostname,
     Note,
@@ -47,6 +48,8 @@ def page_response(request: Request, context: dict[str, object]) -> Response:
     """Return the same page data to JSON consumers and the local React shell."""
     data = jsonable_encoder({
         **context,
+        "engagement": getattr(request.state, "engagement", None),
+        "engagements": getattr(request.state, "engagements", []),
         "per_page_choices": [str(size) for size in queries.PER_PAGE_OPTIONS] + ["all"],
     })
     headers = {"Vary": "Accept"}
@@ -85,7 +88,82 @@ app = FastAPI(title="penrecon", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
 
-@app.get("/", response_class=HTMLResponse)
+def require_engagement(
+    request: Request, engagement_id: str, session: Session = Depends(get_session)
+) -> str:
+    engagement = session.get(Engagement, engagement_id)
+    if engagement is None:
+        raise HTTPException(status_code=404, detail="engagement not found")
+    request.state.engagement = engagement
+    request.state.engagements = session.exec(
+        select(Engagement).order_by(col(Engagement.created_at).desc())
+    ).all()
+    return engagement_id
+
+
+scoped = APIRouter(prefix="/e/{engagement_id}")
+
+
+@app.get("/")
+def landing() -> RedirectResponse:
+    return RedirectResponse("/engagements", status_code=303)
+
+
+@app.get("/engagements", response_class=HTMLResponse)
+def engagements_page(request: Request, session: Session = Depends(get_session)) -> Response:
+    sort = request.query_params.get("sort", "created_at")
+    if sort not in ("name", "created_at"):
+        sort = "created_at"
+    direction = request.query_params.get("dir", "")
+    if direction not in ("asc", "desc"):
+        direction = "asc" if sort == "name" else "desc"
+    order = col(Engagement.name).collate("NOCASE") if sort == "name" else col(Engagement.created_at)
+    request.state.engagements = session.exec(
+        select(Engagement).order_by(
+            order.desc() if direction == "desc" else order.asc(),
+            col(Engagement.id).asc(),
+        )
+    ).all()
+    return page_response(request, {"sort": sort, "direction": direction})
+
+
+@app.post("/engagements")
+def create_engagement(
+    name: str = Form(""),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+) -> Response:
+    clean_name = name.strip()
+    if not clean_name:
+        return JSONResponse({"detail": "Engagement name is required."}, status_code=400)
+    engagement = Engagement(name=clean_name, description=description.strip())
+    session.add(engagement)
+    session.commit()
+    session.refresh(engagement)
+    return RedirectResponse(f"/e/{engagement.id}/", status_code=303)
+
+
+@app.post("/engagements/{engagement_id}/edit")
+def edit_engagement(
+    engagement_id: str,
+    name: str = Form(""),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+) -> Response:
+    engagement = session.get(Engagement, engagement_id)
+    if engagement is None:
+        return JSONResponse({"detail": "engagement not found"}, status_code=404)
+    clean_name = name.strip()
+    if not clean_name:
+        return JSONResponse({"detail": "Engagement name is required."}, status_code=400)
+    engagement.name = clean_name
+    engagement.description = description.strip()
+    session.add(engagement)
+    session.commit()
+    return JSONResponse({"ok": True})
+
+
+@scoped.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
     q: str = "",
@@ -97,6 +175,7 @@ def index(
     dir: str = "",
     page: str = "1",
     per: str = "",
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     port_val = int(port) if port.strip().isdigit() else None
@@ -106,7 +185,7 @@ def index(
     fit = request.query_params.get("fit", "")
     if len(fit) <= 2 and fit.isascii() and fit.isdecimal() and 1 <= int(fit) <= 50:
         per_limit = int(fit)
-    all_rows = queries.host_rows(session)
+    all_rows = queries.host_rows(session, engagement_id=engagement_id)
     rows = queries.filter_hosts(
         all_rows, q=q, port=port_val, tag=tag, status=status, change=change
     )
@@ -121,18 +200,18 @@ def index(
     return page_response(request, ctx)
 
 
-@app.get("/search", response_class=HTMLResponse)
-def search_page(request: Request, q: str = "", session: Session = Depends(get_session)) -> Response:
-    return page_response(request, {"q": q.strip(), "results": queries.search(session, q)})
+@scoped.get("/search", response_class=HTMLResponse)
+def search_page(request: Request, q: str = "", engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    return page_response(request, {"q": q.strip(), "results": queries.search(session, q, engagement_id=engagement_id)})
 
 
-@app.get("/export/hosts.csv")
-def export_hosts_csv(session: Session = Depends(get_session)) -> Response:
+@scoped.get("/export/hosts.csv")
+def export_hosts_csv(engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     """Full host/service inventory as CSV — one row per service."""
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=queries.EXPORT_COLUMNS)
     writer.writeheader()
-    writer.writerows(queries.export_rows(session))
+    writer.writerows(queries.export_rows(session, engagement_id=engagement_id))
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     return Response(
         buf.getvalue(),
@@ -144,10 +223,11 @@ def export_hosts_csv(session: Session = Depends(get_session)) -> Response:
 def _services_ctx(
     session: Session, host: Host, sort: str, dir: str, page: str,
     f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
+    *, engagement_id: str,
 ) -> dict[str, object]:
     """Filtered, sorted, server-paginated services; svc_total is the matched count."""
     assert host.id is not None
-    services = queries.host_services(session, host.id)
+    services = queries.host_services(session, host.id, engagement_id=engagement_id)
     services = queries.filter_services(services, f_port, f_state, f_service, f_status)
     direction = dir if dir in ("asc", "desc") else queries.SERVICE_SORT_DEFAULT_DIR.get(sort, "asc")
     services = queries.sort_services(services, sort, direction)
@@ -162,7 +242,7 @@ def _services_ctx(
             "statuses": list(Status), "states": list(ObsState)}
 
 
-@app.get("/hosts/{host_id}", response_class=HTMLResponse)
+@scoped.get("/hosts/{host_id}", response_class=HTMLResponse)
 def host_detail(
     request: Request,
     host_id: int,
@@ -174,64 +254,67 @@ def host_detail(
     f_service: str = "",
     f_status: str = "",
     per: str = "",
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    host = session.get(Host, host_id)
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
-    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
+    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
     return page_response(request, {
-        "hostnames": queries.host_hostnames(session, host_id),
-        "host_ann": queries.get_annotation(session, host_id=host_id),
-        "host_notes": queries.notes_for(session, host_id),
-        "host_credentials": queries.credentials_for_host(session, host_id),
+        "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
+        "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
+        "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
+        "host_credentials": queries.credentials_for_host(session, host_id, engagement_id=engagement_id),
         "kinds": list(CredKind),
         **svc_ctx,
     })
 
 
-def _hostnames_response(request: Request, session: Session, host: Host) -> Response:
+def _hostnames_response(request: Request, session: Session, host: Host, *, engagement_id: str) -> Response:
     assert host.id is not None
-    return page_response(request, {"host": host, "hostnames": queries.host_hostnames(session, host.id)})
+    return page_response(request, {"host": host, "hostnames": queries.host_hostnames(session, host.id, engagement_id=engagement_id)})
 
 
 def _services_response(
     request: Request, session: Session, host: Host,
     sort: str = "port", dir: str = "", page: str = "1",
     f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
+    *, engagement_id: str,
 ) -> Response:
     return page_response(
-        request, _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
+        request, _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
     )
 
 
-@app.post("/hosts/{host_id}/hostnames", response_class=JSONResponse)
+@scoped.post("/hosts/{host_id}/hostnames", response_class=JSONResponse)
 def add_hostname(
     request: Request,
     host_id: int,
     name: str = Form(...),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    host = session.get(Host, host_id)
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
     clean = name.strip().lower()  # normalize so manual adds dedup against scan data
     if clean:
-        _upsert_hostname(session, host_id, clean, datetime.now(UTC))
+        _upsert_hostname(session, host_id, clean, datetime.now(UTC), engagement_id=engagement_id)
         session.commit()
-    return _hostnames_response(request, session, host)
+    return _hostnames_response(request, session, host, engagement_id=engagement_id)
 
 
-@app.post("/hosts/{host_id}/hostnames/{hostname_id}/delete", response_class=JSONResponse)
-def delete_hostname(request: Request, host_id: int, hostname_id: int, session: Session = Depends(get_session)) -> Response:
-    host = session.get(Host, host_id)
+@scoped.post("/hosts/{host_id}/hostnames/{hostname_id}/delete", response_class=JSONResponse)
+def delete_hostname(request: Request, host_id: int, hostname_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
-    link = session.get(HostHostname, (host_id, hostname_id))
+    link = queries.get_owned(session, HostHostname, (host_id, hostname_id), engagement_id=engagement_id)
     if link is not None:
         link.hidden = True  # sticky: a re-scan won't bring it back
         session.commit()
-    return _hostnames_response(request, session, host)
+    return _hostnames_response(request, session, host, engagement_id=engagement_id)
 
 
 # --- manual host + service CRUD -----------------------------------------------
@@ -258,59 +341,59 @@ def _duplicate_ip_response(norm: str) -> JSONResponse:
     )
 
 
-@app.post("/hosts")
+@scoped.post("/hosts")
 def create_host(
-    ip: str = Form(...), session: Session = Depends(get_session)
+    ip: str = Form(...), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
     clean = ip.strip()
     if not clean:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
     norm = _normalize_ip(clean)
     if norm is None:
         return _invalid_ip_response(clean)
-    existing = session.exec(select(Host).where(Host.ip == norm)).first()
+    existing = session.exec(select(Host).where(Host.engagement_id == engagement_id).where(Host.ip == norm)).first()
     if existing is not None:
-        return RedirectResponse(f"/hosts/{existing.id}", status_code=303)
+        return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{existing.id}", status_code=303)
     now = datetime.now(UTC)
-    host = Host(ip=norm, first_seen=now, last_seen=now)
+    host = Host(ip=norm, first_seen=now, last_seen=now, engagement_id=engagement_id)
     session.add(host)
     session.commit()
     session.refresh(host)
-    return RedirectResponse(f"/hosts/{host.id}", status_code=303)
+    return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{host.id}", status_code=303)
 
 
-@app.post("/hosts/{host_id}/edit")
+@scoped.post("/hosts/{host_id}/edit")
 def edit_host(
-    host_id: int, ip: str = Form(...), session: Session = Depends(get_session)
+    host_id: int, ip: str = Form(...), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
-    host = session.get(Host, host_id)
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
     clean = ip.strip()
     if not clean:  # empty = leave the IP unchanged
-        return RedirectResponse(f"/hosts/{host_id}", status_code=303)
+        return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{host_id}", status_code=303)
     norm = _normalize_ip(clean)
     if norm is None:
         return _invalid_ip_response(clean)
     if norm != host.ip:
-        dup = session.exec(select(Host).where(Host.ip == norm)).first()
+        dup = session.exec(select(Host).where(Host.engagement_id == engagement_id).where(Host.ip == norm)).first()
         if dup is not None:
             return _duplicate_ip_response(norm)
         host.ip = norm
         session.commit()
-    return RedirectResponse(f"/hosts/{host_id}", status_code=303)
+    return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{host_id}", status_code=303)
 
 
-@app.post("/hosts/{host_id}/delete")
-def delete_host(host_id: int, session: Session = Depends(get_session)) -> RedirectResponse:
-    host = session.get(Host, host_id)
+@scoped.post("/hosts/{host_id}/delete")
+def delete_host(host_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> RedirectResponse:
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
     # ON DELETE CASCADE (FKs on) sweeps services, observations, hostname links,
     # notes, annotations and credential links; credentials themselves survive.
     session.delete(host)
     session.commit()
-    return RedirectResponse("/", status_code=303)
+    return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
 
 
 def _clean(value: str) -> str | None:
@@ -318,7 +401,7 @@ def _clean(value: str) -> str | None:
     return v or None
 
 
-@app.post("/hosts/{host_id}/services", response_class=JSONResponse)
+@scoped.post("/hosts/{host_id}/services", response_class=JSONResponse)
 def add_service(
     request: Request,
     host_id: int,
@@ -336,28 +419,29 @@ def add_service(
     f_service: str = Form(""),
     f_status: str = Form(""),
     per: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    host = session.get(Host, host_id)
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
     svc = session.exec(
-        select(Service).where(
+        select(Service).where(Service.engagement_id == engagement_id).where(
             Service.host_id == host_id, Service.port == port, Service.proto == proto.strip().lower()
         )
     ).first()
     if svc is None:
-        svc = Service(host_id=host_id, port=port, proto=proto.strip().lower())
+        svc = Service(host_id=host_id, port=port, proto=proto.strip().lower(), engagement_id=engagement_id)
         session.add(svc)
     svc.m_state = ObsState(state) if state else ObsState.open
     svc.m_service_name = _clean(service_name)
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
     session.commit()
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
+    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
 
 
-@app.post("/services/{service_id}/edit", response_class=JSONResponse)
+@scoped.post("/services/{service_id}/edit", response_class=JSONResponse)
 def edit_service(
     request: Request,
     service_id: int,
@@ -375,9 +459,10 @@ def edit_service(
     f_service: str = Form(""),
     f_status: str = Form(""),
     per: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    svc = session.get(Service, service_id)
+    svc = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if svc is None:
         return JSONResponse({"detail": "service not found"}, status_code=404)
     svc.m_state = ObsState(state) if state else None  # blank reverts to scan value
@@ -387,13 +472,13 @@ def edit_service(
     session.commit()
     # one Save persists both the scan overrides and the triage annotation
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, status, tag_list, service_id=service_id)
-    host = session.get(Host, svc.host_id)
+    queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
+    host = queries.get_owned(session, Host, svc.host_id, engagement_id=engagement_id)
     assert host is not None
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
+    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
 
 
-@app.post("/services/{service_id}/delete", response_class=JSONResponse)
+@scoped.post("/services/{service_id}/delete", response_class=JSONResponse)
 def delete_service(
     request: Request,
     service_id: int,
@@ -405,19 +490,20 @@ def delete_service(
     f_service: str = Form(""),
     f_status: str = Form(""),
     per: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    svc = session.get(Service, service_id)
+    svc = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if svc is None:
         return JSONResponse({"detail": "service not found"}, status_code=404)
-    host = session.get(Host, svc.host_id)
+    host = queries.get_owned(session, Host, svc.host_id, engagement_id=engagement_id)
     assert host is not None
     # hard delete: the service and everything tied to it. A later scan that sees
     # this port re-creates it fresh, as if it had never been deleted. The FK
     # cascade drops the annotation and credential links; observations key off
     # (host, port, proto) rather than service_id, so clear them by hand.
     for obs in session.exec(
-        select(Observation).where(
+        select(Observation).where(Observation.engagement_id == engagement_id).where(
             Observation.host_id == svc.host_id,
             Observation.port == svc.port,
             Observation.proto == svc.proto,
@@ -426,27 +512,27 @@ def delete_service(
         session.delete(obs)
     session.delete(svc)
     session.commit()
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per)
+    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
 
 
 # --- credentials --------------------------------------------------------------
 
-def _credentials_response(request: Request, session: Session) -> Response:
+def _credentials_response(request: Request, session: Session, *, engagement_id: str) -> Response:
     return page_response(request, {
-        "credentials": queries.credential_views(session),
-        "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
+        "credentials": queries.credential_views(session, engagement_id=engagement_id),
+        "hosts": session.exec(select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)).all(),
     })
 
 
-def _host_credentials_response(request: Request, session: Session, host_id: int) -> Response:
+def _host_credentials_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
     return page_response(request, {
-        "host": session.get(Host, host_id),
-        "host_credentials": queries.credentials_for_host(session, host_id),
+        "host": queries.get_owned(session, Host, host_id, engagement_id=engagement_id),
+        "host_credentials": queries.credentials_for_host(session, host_id, engagement_id=engagement_id),
         "kinds": list(CredKind),
     })
 
 
-@app.post("/credentials/{cred_id}/edit", response_class=JSONResponse)
+@scoped.post("/credentials/{cred_id}/edit", response_class=JSONResponse)
 def edit_credential(
     request: Request,
     cred_id: int,
@@ -455,33 +541,37 @@ def edit_credential(
     secret: str = Form(""),
     notes: str = Form(""),
     host_id: int | None = Form(None),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    cred = session.get(Credential, cred_id)
-    if cred is not None:
-        try:
-            cred.kind = CredKind(kind)
-        except ValueError:
-            cred.kind = CredKind.password
-        cred.username = username.strip()
-        cred.secret = secret.strip()
-        cred.notes = notes.strip()
-        session.commit()
+    cred = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    if cred is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if host_id is not None and queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
+    try:
+        cred.kind = CredKind(kind)
+    except ValueError:
+        cred.kind = CredKind.password
+    cred.username = username.strip()
+    cred.secret = secret.strip()
+    cred.notes = notes.strip()
+    session.commit()
     if host_id is not None:
-        return _host_credentials_response(request, session, host_id)
-    return _credentials_response(request, session)
+        return _host_credentials_response(request, session, host_id, engagement_id=engagement_id)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.get("/credentials", response_class=HTMLResponse)
-def credentials_page(request: Request, session: Session = Depends(get_session)) -> Response:
+@scoped.get("/credentials", response_class=HTMLResponse)
+def credentials_page(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     return page_response(request, {
-        "credentials": queries.credential_views(session),
-        "hosts": session.exec(select(Host).order_by(Host.ip)).all(),
+        "credentials": queries.credential_views(session, engagement_id=engagement_id),
+        "hosts": session.exec(select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)).all(),
         "kinds": list(CredKind),
     })
 
 
-@app.post("/credentials", response_class=JSONResponse)
+@scoped.post("/credentials", response_class=JSONResponse)
 def create_credential(
     request: Request,
     kind: str = Form("password"),
@@ -490,6 +580,7 @@ def create_credential(
     notes: str = Form(""),
     host_ids: list[int] = Form([]),
     service_ids: list[int] = Form([]),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     user, sec = username.strip(), secret.strip()
@@ -498,10 +589,10 @@ def create_credential(
     selected_hosts = set(host_ids)
     selected_services = set(service_ids)
     for host_id in selected_hosts:
-        if session.get(Host, host_id) is None:
+        if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
             return JSONResponse({"detail": "host not found"}, status_code=422)
     for service_id in selected_services:
-        service = session.get(Service, service_id)
+        service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
         if service is None:
             return JSONResponse({"detail": "service not found"}, status_code=422)
         if service.host_id not in selected_hosts:
@@ -510,195 +601,230 @@ def create_credential(
         k = CredKind(kind)
     except ValueError:
         k = CredKind.password
-    credential = Credential(kind=k, username=user, secret=sec, notes=notes.strip())
+    credential = Credential(kind=k, username=user, secret=sec, notes=notes.strip(), engagement_id=engagement_id)
     session.add(credential)
     session.flush()
     assert credential.id is not None
     for host_id in selected_hosts:
-        session.add(CredentialHost(credential_id=credential.id, host_id=host_id))
+        session.add(CredentialHost(credential_id=credential.id, host_id=host_id, engagement_id=engagement_id))
     for service_id in selected_services:
-        session.add(CredentialService(credential_id=credential.id, service_id=service_id))
+        session.add(CredentialService(credential_id=credential.id, service_id=service_id, engagement_id=engagement_id))
     session.commit()
-    return _credentials_response(request, session)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.post("/credentials/{cred_id}/delete", response_class=JSONResponse)
+@scoped.post("/credentials/{cred_id}/delete", response_class=JSONResponse)
 def delete_credential(
     request: Request,
     cred_id: int,
     host_id: int | None = Form(None),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    cred = session.get(Credential, cred_id)
-    if cred is not None:
-        session.delete(cred)  # FK cascade drops its host/service link rows
-        session.commit()
+    cred = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    if cred is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if host_id is not None and queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
+    session.delete(cred)  # FK cascade drops its host/service link rows
+    session.commit()
     if host_id is not None:
-        return _host_credentials_response(request, session, host_id)
-    return _credentials_response(request, session)
+        return _host_credentials_response(request, session, host_id, engagement_id=engagement_id)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.post("/credentials/{cred_id}/link/host", response_class=JSONResponse)
-def link_cred_host(request: Request, cred_id: int, host_id: str = Form(""), session: Session = Depends(get_session)) -> Response:
+@scoped.post("/credentials/{cred_id}/link/host", response_class=JSONResponse)
+def link_cred_host(request: Request, cred_id: int, host_id: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     hid = int(host_id) if host_id.strip().isdigit() else None
-    valid = hid is not None and session.get(Credential, cred_id) is not None and session.get(Host, hid) is not None
-    if valid and hid is not None and session.get(CredentialHost, (cred_id, hid)) is None:
-        session.add(CredentialHost(credential_id=cred_id, host_id=hid))  # ignore duplicate links
+    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if hid is None or queries.get_owned(session, Host, hid, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
+    if queries.get_owned(session, CredentialHost, (cred_id, hid), engagement_id=engagement_id) is None:
+        session.add(CredentialHost(credential_id=cred_id, host_id=hid, engagement_id=engagement_id))  # ignore duplicate links
         session.commit()
-    return _credentials_response(request, session)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.post("/credentials/{cred_id}/unlink/host/{host_id}", response_class=JSONResponse)
-def unlink_cred_host(request: Request, cred_id: int, host_id: int, session: Session = Depends(get_session)) -> Response:
+@scoped.post("/credentials/{cred_id}/unlink/host/{host_id}", response_class=JSONResponse)
+def unlink_cred_host(request: Request, cred_id: int, host_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
     service_links = session.exec(
-        select(CredentialService)
+        select(CredentialService).where(CredentialService.engagement_id == engagement_id)
         .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
         .where(CredentialService.credential_id == cred_id, Service.host_id == host_id)
     ).all()
     for service_link in service_links:
         session.delete(service_link)
-    link = session.get(CredentialHost, (cred_id, host_id))
+    link = queries.get_owned(session, CredentialHost, (cred_id, host_id), engagement_id=engagement_id)
     if link is not None:
         session.delete(link)
     session.commit()
-    return _credentials_response(request, session)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.post("/credentials/{cred_id}/link/service", response_class=JSONResponse)
+@scoped.post("/credentials/{cred_id}/link/service", response_class=JSONResponse)
 def link_cred_service(
     request: Request,
     cred_id: int,
     service_id: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     sid = int(service_id) if service_id.strip().isdigit() else None
-    svc = session.get(Service, sid) if sid is not None else None
+    svc = queries.get_owned(session, Service, sid, engagement_id=engagement_id) if sid is not None else None
+    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if svc is None:
+        raise HTTPException(status_code=404, detail="service not found")
     # only services of a host already linked to this credential may be linked
-    scoped = svc is not None and session.get(CredentialHost, (cred_id, svc.host_id)) is not None
-    valid = sid is not None and session.get(Credential, cred_id) is not None and scoped
-    if valid and sid is not None and session.get(CredentialService, (cred_id, sid)) is None:
-        session.add(CredentialService(credential_id=cred_id, service_id=sid))
+    linked_host = queries.get_owned(
+        session, CredentialHost, (cred_id, svc.host_id), engagement_id=engagement_id
+    )
+    if linked_host is not None and sid is not None and queries.get_owned(session, CredentialService, (cred_id, sid), engagement_id=engagement_id) is None:
+        session.add(CredentialService(credential_id=cred_id, service_id=sid, engagement_id=engagement_id))
         session.commit()
-    return _credentials_response(request, session)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.post("/credentials/{cred_id}/unlink/service/{service_id}", response_class=JSONResponse)
-def unlink_cred_service(request: Request, cred_id: int, service_id: int, session: Session = Depends(get_session)) -> Response:
-    link = session.get(CredentialService, (cred_id, service_id))
+@scoped.post("/credentials/{cred_id}/unlink/service/{service_id}", response_class=JSONResponse)
+def unlink_cred_service(request: Request, cred_id: int, service_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="credential not found")
+    if queries.get_owned(session, Service, service_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="service not found")
+    link = queries.get_owned(session, CredentialService, (cred_id, service_id), engagement_id=engagement_id)
     if link is not None:
         session.delete(link)
         session.commit()
-    return _credentials_response(request, session)
+    return _credentials_response(request, session, engagement_id=engagement_id)
 
 
-@app.get("/scans", response_class=HTMLResponse)
-def scans(request: Request, session: Session = Depends(get_session)) -> Response:
-    rows = session.exec(select(Scan).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
+@scoped.get("/scans", response_class=HTMLResponse)
+def scans(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    rows = session.exec(select(Scan).where(Scan.engagement_id == engagement_id).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
     return page_response(request, {"scans": rows, "tools": sorted(PARSERS)})
 
 
-@app.post("/scans")
+@scoped.post("/scans")
 async def upload_scan(
-    file: UploadFile, tool: str = Form("nmap"), session: Session = Depends(get_session)
+    file: UploadFile, tool: str = Form("nmap"), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> RedirectResponse:
     data = await file.read()
-    ingest_scan(session, data, file.filename or "upload", tool)
-    return RedirectResponse("/scans", status_code=303)
+    ingest_scan(session, data, file.filename or "upload", tool, engagement_id=engagement_id)
+    return RedirectResponse(f"/e/{engagement_id}" + "/scans", status_code=303)
 
 
-@app.get("/diff", response_class=HTMLResponse)
+@scoped.get("/diff", response_class=HTMLResponse)
 def diff(
     request: Request,
     a: int | None = None,
     b: int | None = None,
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    all_scans = session.exec(select(Scan).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
-    result = queries.diff_scans(session, a, b) if a and b else None
+    all_scans = session.exec(select(Scan).where(Scan.engagement_id == engagement_id).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
+    for scan_id in (a, b):
+        if scan_id is not None and queries.get_owned(session, Scan, scan_id, engagement_id=engagement_id) is None:
+            raise HTTPException(status_code=404, detail="scan not found")
+    result = queries.diff_scans(session, a, b, engagement_id=engagement_id) if a and b else None
     return page_response(request, {"scans": all_scans, "result": result, "a": a, "b": b})
 
 
-def _annotation_response(request: Request, session: Session, host_id: int, saved: bool = False) -> Response:
+def _annotation_response(request: Request, session: Session, host_id: int, saved: bool = False, *, engagement_id: str) -> Response:
+    if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
     return page_response(request, {
         "host_id": host_id,
-        "ann": queries.get_annotation(session, host_id=host_id),
+        "ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "statuses": list(Status),
         "saved": saved,
     })
 
 
-@app.get("/annotation", response_class=HTMLResponse)
+@scoped.get("/annotation", response_class=HTMLResponse)
 def annotation_get(
     request: Request,
     host_id: int,
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    return _annotation_response(request, session, host_id)
+    return _annotation_response(request, session, host_id, engagement_id=engagement_id)
 
 
-@app.post("/annotation", response_class=JSONResponse)
+@scoped.post("/annotation", response_class=JSONResponse)
 def annotation_post(
     request: Request,
     host_id: int = Form(...),
     status: Status = Form(Status.new),
     tags: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
+    if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
-    queries.upsert_annotation(session, status, tag_list, host_id=host_id)
-    return _annotation_response(request, session, host_id, saved=True)
+    queries.upsert_annotation(session, status, tag_list, host_id=host_id, engagement_id=engagement_id)
+    return _annotation_response(request, session, host_id, saved=True, engagement_id=engagement_id)
 
 
 # --- notes: any number of titled notes per host -------------------------------
 
-def _notes_response(request: Request, session: Session, host_id: int) -> Response:
+def _notes_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
     return page_response(request, {
         "host_id": host_id,
-        "notes": queries.notes_for(session, host_id),
+        "notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
     })
 
 
-@app.post("/notes", response_class=JSONResponse)
+@scoped.post("/notes", response_class=JSONResponse)
 def note_create(
     request: Request,
     host_id: int = Form(...),
     title: str = Form(""),
     body_md: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
+    if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="host not found")
     clean_title = title.strip() or "Untitled"  # a note always has a title
-    session.add(Note(host_id=host_id, title=clean_title, body_md=body_md))
+    session.add(Note(host_id=host_id, title=clean_title, body_md=body_md, engagement_id=engagement_id))
     session.commit()
-    return _notes_response(request, session, host_id)
+    return _notes_response(request, session, host_id, engagement_id=engagement_id)
 
 
-@app.post("/notes/{note_id}/edit", response_class=JSONResponse)
+@scoped.post("/notes/{note_id}/edit", response_class=JSONResponse)
 def note_edit(
     request: Request,
     note_id: int,
     title: str = Form(""),
     body_md: str = Form(""),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    note = session.get(Note, note_id)
+    note = queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
     if note is None:
         return JSONResponse({"detail": "note not found"}, status_code=404)
     note.title = title.strip() or "Untitled"
     note.body_md = body_md
     note.updated_at = datetime.now(UTC)
     session.commit()
-    return _notes_response(request, session, note.host_id)
+    return _notes_response(request, session, note.host_id, engagement_id=engagement_id)
 
 
-@app.post("/notes/{note_id}/delete", response_class=JSONResponse)
-def note_delete(request: Request, note_id: int, session: Session = Depends(get_session)) -> Response:
-    note = session.get(Note, note_id)
+@scoped.post("/notes/{note_id}/delete", response_class=JSONResponse)
+def note_delete(request: Request, note_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+    note = queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
     if note is None:
         return JSONResponse({"detail": "note not found"}, status_code=404)
     host_id = note.host_id
     session.delete(note)
     session.commit()
-    return _notes_response(request, session, host_id)
+    return _notes_response(request, session, host_id, engagement_id=engagement_id)
 
 
 # --- operation log ------------------------------------------------------------
@@ -781,37 +907,40 @@ def _operation_bad_request(message: str) -> JSONResponse:
     return JSONResponse({"detail": message}, status_code=400)
 
 
-def _safe_attachment_path(stored_path: str | None) -> Path | None:
+def _safe_attachment_path(stored_path: str | None, *, engagement_id: str) -> Path | None:
     if stored_path is None:
         return None
-    root = OPERATION_ATTACHMENTS_DIR.resolve()
+    root = engagement_attachments_dir(engagement_id).resolve()
     try:
-        path = Path(stored_path).resolve()
+        if Path(stored_path).is_absolute():
+            return None
+        path = (DATA_DIR / stored_path).resolve()
         path.relative_to(root)
     except (OSError, ValueError):
         return None
     return path
 
 
-def _remove_operation_attachment(stored_path: str | None) -> None:
-    path = _safe_attachment_path(stored_path)
+def _remove_operation_attachment(stored_path: str | None, *, engagement_id: str) -> None:
+    path = _safe_attachment_path(stored_path, engagement_id=engagement_id)
     if path is not None:
         path.unlink(missing_ok=True)
 
 
-def _save_operation_attachment(upload: UploadFile) -> tuple[str, str, str | None]:
+def _save_operation_attachment(upload: UploadFile, *, engagement_id: str) -> tuple[str, str, str | None]:
     original_name = Path(upload.filename or "").name
     if not original_name:
         raise ValueError("Attachment filename is required.")
-    OPERATION_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
-    destination = OPERATION_ATTACHMENTS_DIR / uuid4().hex
+    directory = engagement_attachments_dir(engagement_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / uuid4().hex
     try:
         with destination.open("xb") as target:
             shutil.copyfileobj(upload.file, target)
     except Exception:
         destination.unlink(missing_ok=True)
         raise
-    return original_name, str(destination), upload.content_type
+    return original_name, str(destination.relative_to(DATA_DIR)), upload.content_type
 
 
 def _operation_form_values(
@@ -845,12 +974,13 @@ def _operation_form_values(
         return _operation_bad_request(str(exc))
 
 
-@app.get("/operations", response_class=HTMLResponse)
+@scoped.get("/operations", response_class=HTMLResponse)
 def operations_page(
     request: Request,
     q: str = "",
     page: int = 1,
     per: str = "25",
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     normalized_per = (
@@ -858,7 +988,7 @@ def operations_page(
         if per == "all" or (per.isdigit() and int(per) in queries.PER_PAGE_OPTIONS)
         else "25"
     )
-    matches = queries.operation_logs(session, q)
+    matches = queries.operation_logs(session, q, engagement_id=engagement_id)
     page_rows, page, pages = queries.paginate(
         matches, page, queries.resolve_per_page(normalized_per)
     )
@@ -873,7 +1003,7 @@ def operations_page(
     return page_response(request, context)
 
 
-@app.post("/operations")
+@scoped.post("/operations")
 def create_operation(
     started_at: str = Form(""),
     ended_at: str = Form(""),
@@ -887,6 +1017,7 @@ def create_operation(
     comments: str = Form(""),
     tags: str = Form(""),
     attachment: UploadFile | None = File(None),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     values = _operation_form_values(
@@ -904,28 +1035,28 @@ def create_operation(
     )
     if isinstance(values, JSONResponse):
         return values
-    operation = OperationLog(command=values.command)
+    operation = OperationLog(command=values.command, engagement_id=engagement_id)
     _apply_operation_form(operation, values)
     new_path: str | None = None
     try:
         if attachment is not None and attachment.filename:
-            name, new_path, media_type = _save_operation_attachment(attachment)
+            name, new_path, media_type = _save_operation_attachment(attachment, engagement_id=engagement_id)
             operation.attachment_name = name
             operation.attachment_path = new_path
             operation.attachment_media_type = media_type
         session.add(operation)
         session.commit()
     except ValueError as exc:
-        _remove_operation_attachment(new_path)
+        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         return _operation_bad_request(str(exc))
     except Exception:
         session.rollback()
-        _remove_operation_attachment(new_path)
+        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         raise
-    return RedirectResponse("/operations", status_code=303)
+    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
 
 
-@app.post("/operations/{operation_id}/edit")
+@scoped.post("/operations/{operation_id}/edit")
 def edit_operation(
     operation_id: int,
     started_at: str = Form(""),
@@ -941,9 +1072,10 @@ def edit_operation(
     tags: str = Form(""),
     remove_attachment: bool = Form(False),
     attachment: UploadFile | None = File(None),
+    engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    operation = session.get(OperationLog, operation_id)
+    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
     has_replacement = attachment is not None and bool(attachment.filename)
@@ -974,7 +1106,7 @@ def edit_operation(
     try:
         if has_replacement:
             assert attachment is not None
-            name, new_path, media_type = _save_operation_attachment(attachment)
+            name, new_path, media_type = _save_operation_attachment(attachment, engagement_id=engagement_id)
             operation.attachment_name = name
             operation.attachment_path = new_path
             operation.attachment_media_type = media_type
@@ -986,40 +1118,40 @@ def edit_operation(
         session.commit()
     except ValueError as exc:
         session.rollback()
-        _remove_operation_attachment(new_path)
+        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         return _operation_bad_request(str(exc))
     except Exception:
         session.rollback()
-        _remove_operation_attachment(new_path)
+        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         raise
 
     if has_replacement or remove_attachment:
-        _remove_operation_attachment(old_path)
-    return RedirectResponse("/operations", status_code=303)
+        _remove_operation_attachment(old_path, engagement_id=engagement_id)
+    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
 
 
-@app.post("/operations/{operation_id}/delete")
+@scoped.post("/operations/{operation_id}/delete")
 def delete_operation(
-    operation_id: int, session: Session = Depends(get_session)
+    operation_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
-    operation = session.get(OperationLog, operation_id)
+    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
     old_path = operation.attachment_path
     session.delete(operation)
     session.commit()
-    _remove_operation_attachment(old_path)
-    return RedirectResponse("/operations", status_code=303)
+    _remove_operation_attachment(old_path, engagement_id=engagement_id)
+    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
 
 
-@app.get("/operations/{operation_id}/attachment")
+@scoped.get("/operations/{operation_id}/attachment")
 def download_operation_attachment(
-    operation_id: int, session: Session = Depends(get_session)
+    operation_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
-    operation = session.get(OperationLog, operation_id)
+    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None or not operation.attachment_name:
         return JSONResponse({"detail": "attachment not found"}, status_code=404)
-    path = _safe_attachment_path(operation.attachment_path)
+    path = _safe_attachment_path(operation.attachment_path, engagement_id=engagement_id)
     if path is None or not path.is_file():
         return JSONResponse({"detail": "attachment not found"}, status_code=404)
     return FileResponse(
@@ -1027,3 +1159,6 @@ def download_operation_attachment(
         filename=operation.attachment_name,
         media_type=operation.attachment_media_type or "application/octet-stream",
     )
+
+
+app.include_router(scoped)

@@ -1,3 +1,6 @@
+import { ScopedLink, engagementUrl } from "./common";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -6,6 +9,7 @@ import {
   KeyRound,
   ListFilter,
   Network,
+  Pencil,
   Plus,
   Radar,
   Search,
@@ -80,13 +84,9 @@ function HostTable({
               )}
             </TableCell>
             <TableCell>
-              <a
-                className="mono font-semibold text-primary hover:underline"
-                href={"/hosts/" + row.id}
-                title={[row.ip, ...row.hostnames].join(" · ")}
-              >
-                {row.ip}
-              </a>
+              <ScopedLink className="mono font-semibold text-primary hover:underline"
+              href={"/hosts/" + row.id}
+              title={[row.ip, ...row.hostnames].join(" · ")}>{row.ip}</ScopedLink>
               {!!row.hostnames.length && (
                 <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
                   {row.hostnames.join(" · ")}
@@ -95,9 +95,8 @@ function HostTable({
             </TableCell>
             <TableCell>
               {sortable && row.open_count > 0 && (
-                <a href={`/hosts/${row.id}#services`} className="block text-xs">
-                  {row.open_count} open
-                </a>
+                <ScopedLink href={`/hosts/${row.id}#services`} className="block text-xs">{row.open_count} open
+                                </ScopedLink>
               )}
               <div
                 className="flex max-w-xl flex-wrap gap-1"
@@ -106,16 +105,12 @@ function HostTable({
                   .join(", ")}
               >
                 {row.open_services.map(([port, name]) => (
-                  <a
-                    key={port}
-                    href={"/hosts/" + row.id + "#services"}
-                    className="rounded border bg-muted/40 px-1 text-xs"
-                  >
-                    <span className="mono font-medium">{port}</span>
-                    {name && (
-                      <span className="ml-1 text-muted-foreground">{name}</span>
-                    )}
-                  </a>
+                  <ScopedLink key={port}
+                  href={"/hosts/" + row.id + "#services"}
+                  className="rounded border bg-muted/40 px-1 text-xs"><span className="mono font-medium">{port}</span>
+                  {name && (
+                    <span className="ml-1 text-muted-foreground">{name}</span>
+                  )}</ScopedLink>
                 ))}
                 {!row.open_count && (
                   <span className="muted">No open services</span>
@@ -193,7 +188,7 @@ function Inventory({ data }: { data: PageData }) {
     }
     params.set("fit", String(capacity));
     params.delete("per");
-    void fetch(`/?${params}`, {
+    void fetch(engagementUrl(`/?${params}`), {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     })
@@ -203,7 +198,7 @@ function Inventory({ data }: { data: PageData }) {
         const next = (await response.json()) as PageData;
         if (controller.signal.aborted) return;
         params.set("page", String(next.page ?? 1));
-        history.replaceState(null, "", `/?${params}`);
+        history.replaceState(null, "", engagementUrl(`/?${params}`));
         setError("");
         setResult({ source: data, data: next, capacity });
       })
@@ -280,14 +275,14 @@ function Inventory({ data }: { data: PageData }) {
             </Button>
           </Filters>
         </Modal>
-        <Button variant="outline" render={<a href="/" />}>
+        <Button variant="outline" render={<ScopedLink href="/" />}>
           <RotateCcw />
           Reset
         </Button>
         <PageHeader title="Hosts">
           <Button
             variant="outline"
-            render={<a href="/export/hosts.csv" download />}
+            render={<ScopedLink href="/export/hosts.csv" download />}
           >
             <ArrowDownToLine />
             Export CSV
@@ -354,10 +349,8 @@ function Inventory({ data }: { data: PageData }) {
             nativeButton={false}
             disabled={!ready || (current.page ?? 1) <= 1}
             render={
-              <a
-                href={pageUrl((current.page ?? 1) - 1)}
-                aria-label="Previous page"
-              />
+              <ScopedLink href={pageUrl((current.page ?? 1) - 1)}
+              aria-label="Previous page" />
             }
           >
             Previous
@@ -367,10 +360,8 @@ function Inventory({ data }: { data: PageData }) {
             nativeButton={false}
             disabled={!ready || (current.page ?? 1) >= (current.pages ?? 1)}
             render={
-              <a
-                href={pageUrl((current.page ?? 1) + 1)}
-                aria-label="Next page"
-              />
+              <ScopedLink href={pageUrl((current.page ?? 1) + 1)}
+              aria-label="Next page" />
             }
           >
             Next
@@ -422,12 +413,8 @@ function SearchPage({ data }: { data: PageData }) {
               <div className="divide-y">
                 {results.notes.map((note, index) => (
                   <article key={index} className="py-2 text-[13px]">
-                    <a
-                      className="font-medium text-primary hover:underline"
-                      href={note.href}
-                    >
-                      {note.title}
-                    </a>
+                    <ScopedLink className="font-medium text-primary hover:underline"
+                    href={note.href}>{note.title}</ScopedLink>
                     <p className="mono mt-1 text-xs text-muted-foreground">
                       {note.where}
                     </p>
@@ -461,22 +448,16 @@ function SearchPage({ data }: { data: PageData }) {
                       </TableCell>
                       <TableCell>
                         {cred.hosts.map((host) => (
-                          <a
-                            key={host.host_id}
-                            className="mono mr-3 text-primary"
-                            href={"/hosts/" + host.host_id}
-                          >
-                            {host.ip}
-                          </a>
+                          <ScopedLink key={host.host_id}
+                          className="mono mr-3 text-primary"
+                          href={"/hosts/" + host.host_id}>{host.ip}</ScopedLink>
                         ))}
                       </TableCell>
                       <TableCell>
-                        <a
-                          href={"/credentials#credential-" + cred.id}
-                          className="text-primary hover:underline"
-                        >
+                        <ScopedLink href={"/credentials#credential-" + cred.id}
+                        className="text-primary hover:underline">
                           View credential
-                        </a>
+                        </ScopedLink>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -489,6 +470,55 @@ function SearchPage({ data }: { data: PageData }) {
     </>
   );
 }
+function EngagementsPage({ data }: { data: PageData }) {
+  return (
+    <div className="engagements-page">
+      <PageHeader title="Engagements" description="Create or open an isolated recon workspace.">
+        <Modal title="Create engagement" trigger={<Button><Plus />Create engagement</Button>}>
+          <MutationForm action="/engagements">
+            <Field label="Name" name="name" required />
+            <Field label="Description"><Textarea name="description" rows={3} /></Field>
+            <div className="flex justify-end"><Button type="submit">Create engagement</Button></div>
+          </MutationForm>
+        </Modal>
+      </PageHeader>
+      <Section title="Engagements" id="engagement-catalog">
+        {data.engagements.length ? (
+          <div className="engagement-table">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead aria-sort={data.sort === "name" ? (data.direction === "desc" ? "descending" : "ascending") : "none"}><SortLink column="name">Name</SortLink></TableHead><TableHead>Description</TableHead>
+              <TableHead aria-sort={data.sort === "created_at" ? (data.direction === "desc" ? "descending" : "ascending") : "none"}><SortLink column="created_at">Created</SortLink></TableHead>
+              <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
+            </TableRow></TableHeader>
+            <TableBody>{data.engagements.map((engagement) => (
+              <TableRow key={engagement.id}>
+                <TableCell className="max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/e/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
+                <TableCell className="min-w-48 max-w-xl whitespace-pre-wrap [overflow-wrap:anywhere]">{engagement.description}</TableCell>
+                <TableCell className="mono"><time dateTime={engagement.created_at}>{engagement.created_at.replace("T", " ").slice(0, 16)}</time></TableCell>
+                <TableCell className="text-right">
+                  <Modal title="Edit engagement" trigger={
+                    <Button variant="ghost" size="icon" aria-label={`Edit ${engagement.name}`} title={`Edit ${engagement.name}`}>
+                      <Pencil />
+                    </Button>
+                  }>
+                    <MutationForm action={`/engagements/${engagement.id}/edit`}>
+                      <Field label="Name" name="name" defaultValue={engagement.name} required />
+                      <Field label="Description"><Textarea name="description" defaultValue={engagement.description} rows={3} /></Field>
+                      <div className="flex justify-end"><Button type="submit">Save changes</Button></div>
+                    </MutationForm>
+                  </Modal>
+                </TableCell>
+              </TableRow>
+            ))}</TableBody>
+          </Table>
+          </div>
+        ) : <Empty>No engagements yet. Use Create engagement to start importing scans and recording recon.</Empty>}
+      </Section>
+    </div>
+  );
+}
+
 const navigation = [
   { href: "/", label: "Hosts", icon: Network },
   { href: "/credentials", label: "Credentials", icon: KeyRound },
@@ -503,7 +533,7 @@ export default function App() {
         document.getElementById("page-data")?.textContent ?? "{}",
       ) as PageData,
   );
-  const path = location.pathname;
+  const path = location.pathname.replace(/^\/e\/[^/]+/, "") || "/";
   const refresh = async () => {
     const response = await fetch(location.pathname + location.search, {
       headers: { Accept: "application/json" },
@@ -512,7 +542,7 @@ export default function App() {
     setData((await response.json()) as PageData);
   };
   const navigate = (url: string) => {
-    location.assign(url);
+    location.assign(engagementUrl(url));
   };
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -531,13 +561,11 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
   useEffect(() => {
-    const title =
-      data.host?.ip ??
-      (path === "/search"
-        ? "Search"
-        : (navigation.find((item) => item.href === path)?.label ?? "Hosts"));
-    document.title = `${title} — penrecon`;
-  }, [data.host?.ip, path]);
+    const title = path === "/engagements" ? "Engagements" :
+      data.host?.ip ?? (path === "/search" ? "Search" :
+        (navigation.find((item) => item.href === path)?.label ?? "Hosts"));
+    document.title = `${title}${data.engagement ? ` — ${data.engagement.name}` : ""} — penrecon`;
+  }, [data.host?.ip, data.engagement?.name, path]);
   const active = path.startsWith("/hosts/") ? "/" : path;
   return (
     <PageContext.Provider value={{ data, refresh, navigate }}>
@@ -548,43 +576,49 @@ export default function App() {
             : path.startsWith("/hosts/") ||
                 path === "/credentials" ||
                 path === "/operations" ||
-                path === "/scans"
+                path === "/scans" ||
+                path === "/engagements"
               ? "workbench-shell"
               : undefined
         }
       >
-        <a className="skip-link" href="#main">
+        <ScopedLink className="skip-link" href="#main">
           Skip to content
-        </a>
+        </ScopedLink>
         <header className="site-header">
           <div className="shell flex min-h-12 flex-wrap items-center gap-2 py-2">
-            <a
-              href="/"
-              className="mr-4 flex items-center gap-2 text-base font-semibold tracking-tight"
-            >
+            <ScopedLink href="/engagements" className="mr-4 flex items-center gap-2 text-base font-semibold tracking-tight">
               <Activity className="size-5 text-primary" />
               penrecon
-            </a>
+            </ScopedLink>
+            {data.engagement && (
+              <>
+                <label className="sr-only" htmlFor="engagement-selector">Engagement</label>
+                <NativeSelect id="engagement-selector" value={data.engagement.id}
+                  onChange={(event) => location.assign(`/e/${event.target.value}/`)}>
+                  {data.engagements.map((engagement) => (
+                    <NativeSelectOption key={engagement.id} value={engagement.id}>{engagement.name}</NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </>
+            )}
+            {data.engagement && <>
             <nav
               aria-label="Primary"
               className="flex flex-wrap items-center gap-1"
             >
               {navigation.map((item) => (
-                <a
-                  key={item.href}
-                  href={item.href}
-                  aria-current={active === item.href ? "page" : undefined}
-                  className={
-                    "nav-link " + (active === item.href ? "active" : "")
-                  }
-                >
-                  <item.icon className="size-4" />
-                  {item.label}
-                </a>
+                <ScopedLink key={item.href}
+                href={item.href}
+                aria-current={active === item.href ? "page" : undefined}
+                className={
+                  "nav-link " + (active === item.href ? "active" : "")
+                }><item.icon className="size-4" />
+                {item.label}</ScopedLink>
               ))}
             </nav>
             <form
-              action="/search"
+              action={engagementUrl("/search")}
               method="get"
               className="ml-auto flex items-center gap-2"
               role="search"
@@ -605,10 +639,13 @@ export default function App() {
                 Find
               </Button>
             </form>
+            </>}
           </div>
         </header>
         <main id="main" className="shell py-4" tabIndex={-1}>
-          {path.startsWith("/hosts/") ? (
+          {path === "/engagements" ? (
+            <EngagementsPage data={data} />
+          ) : path.startsWith("/hosts/") ? (
             <HostPage data={data} />
           ) : path === "/credentials" ? (
             <CredentialsPage data={data} />

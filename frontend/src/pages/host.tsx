@@ -1,3 +1,4 @@
+import { ScopedLink } from "../common";
 import { useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
@@ -599,9 +600,7 @@ function ServiceFilters({ data }: { data: PageData }) {
           <Button
             variant="outline"
             render={
-              <a
-                href={`/hosts/${data.host!.id}?per=${encodeURIComponent(data.per ?? "25")}`}
-              />
+              <ScopedLink href={`/hosts/${data.host!.id}?per=${encodeURIComponent(data.per ?? "25")}`} />
             }
           >
             <RotateCcw />
@@ -633,7 +632,7 @@ export function HostPage({ data }: { data: PageData }) {
   if (!host)
     return (
       <Empty>
-        Host not found. <a href="/">Return to hosts</a>.
+        Host not found. <ScopedLink href="/">Return to hosts</ScopedLink>.
       </Empty>
     );
   const services = data.services ?? [];
@@ -656,9 +655,9 @@ export function HostPage({ data }: { data: PageData }) {
     <div className="host-workbench-page">
       <header className="space-y-2 border-b pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <a href="/" className="muted text-xs hover:underline">
+          <ScopedLink href="/" className="muted text-xs hover:underline">
             ← Host inventory
-          </a>
+          </ScopedLink>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <Network className="size-4 muted" aria-hidden="true" />
@@ -881,12 +880,10 @@ export function HostPage({ data }: { data: PageData }) {
             <p className="muted text-sm">
               {credentials.length} linked credentials
             </p>
-            <a
-              href="/credentials"
-              className="text-sm font-medium underline underline-offset-4"
-            >
+            <ScopedLink href="/credentials"
+            className="text-sm font-medium underline underline-offset-4">
               Add credentials / manage links →
-            </a>
+            </ScopedLink>
           </div>
           <div className="host-inspector">
             <div
@@ -921,9 +918,9 @@ export function HostPage({ data }: { data: PageData }) {
               ) : (
                 <Empty>
                   No credentials linked yet.{" "}
-                  <a href="/credentials" className="underline">
+                  <ScopedLink href="/credentials" className="underline">
                     Add a credential and link it to this host or a service
-                  </a>
+                  </ScopedLink>
                   .
                 </Empty>
               )}

@@ -92,7 +92,15 @@ export interface Operation {
   created_at: string;
   updated_at: string;
 }
+export interface Engagement {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+}
 export interface PageData {
+  engagement?: Engagement;
+  engagements: Engagement[];
   rows?: HostRow[];
   total?: number;
   matched?: number;

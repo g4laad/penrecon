@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.fixtures import TEST_ENGAGEMENT_ID, ENGAGEMENT_PREFIX
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
@@ -32,40 +33,39 @@ def _host_id(session: Session, ip: str) -> int:
 
 
 def _seed(session: Session) -> int:
-    ingest_scan(session, _scan("10.0.0.5", "db.corp.local", "postgresql"), "a.xml", "nmap")
+    ingest_scan(session, _scan("10.0.0.5", "db.corp.local", "postgresql"), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
     hid = _host_id(session, "10.0.0.5")
     session.add(
         Annotation(
             host_id=hid,
             status=Status.interesting,
             tags=["pivot"],  # triage tag — findable via host search
+            engagement_id=TEST_ENGAGEMENT_ID,
         )
     )
     session.add(
-        Note(
-            host_id=hid,
+        Note(host_id=hid,
             title="Postgres",
-            body_md="weak postgres creds; reuse candidate",
-        )
+            body_md="weak postgres creds; reuse candidate", engagement_id=TEST_ENGAGEMENT_ID)
     )
-    cred = Credential(kind="password", username="postgres", notes="reused on corp hosts")
+    cred = Credential(kind="password", username="postgres", notes="reused on corp hosts", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(cred)
     session.flush()
     assert cred.id is not None
-    session.add(CredentialHost(credential_id=cred.id, host_id=hid))
+    session.add(CredentialHost(credential_id=cred.id, host_id=hid, engagement_id=TEST_ENGAGEMENT_ID))
     session.commit()
     return hid
 
 
 def test_empty_query_returns_nothing(session: Session) -> None:
     _seed(session)
-    r = search(session, "   ")
+    r = search(session, "   ", engagement_id=TEST_ENGAGEMENT_ID)
     assert r.total == 0
 
 
 def test_matches_across_all_three_sources(session: Session) -> None:
     _seed(session)
-    r = search(session, "postgres")  # service name, note body, credential username
+    r = search(session, "postgres", engagement_id=TEST_ENGAGEMENT_ID)  # service name, note body, credential username
     assert len(r.hosts) == 1
     assert len(r.notes) == 1
     assert len(r.credentials) == 1
@@ -74,16 +74,16 @@ def test_matches_across_all_three_sources(session: Session) -> None:
 
 def test_hostname_and_tag_and_cred_notes(session: Session) -> None:
     _seed(session)
-    assert len(search(session, "corp").hosts) == 1  # hostname db.corp.local
-    assert len(search(session, "corp").credentials) == 1  # "reused on corp hosts"
-    tag_hit = search(session, "pivot")  # a triage tag surfaces its host, not a note
+    assert len(search(session, "corp", engagement_id=TEST_ENGAGEMENT_ID).hosts) == 1  # hostname db.corp.local
+    assert len(search(session, "corp", engagement_id=TEST_ENGAGEMENT_ID).credentials) == 1  # "reused on corp hosts"
+    tag_hit = search(session, "pivot", engagement_id=TEST_ENGAGEMENT_ID)  # a triage tag surfaces its host, not a note
     assert len(tag_hit.hosts) == 1 and not tag_hit.notes
 
 
 def test_note_hit_links_back_to_host(session: Session) -> None:
     hid = _seed(session)
-    note = search(session, "candidate").notes[0]  # matched on note body
-    assert note.href == f"/hosts/{hid}"
+    note = search(session, "candidate", engagement_id=TEST_ENGAGEMENT_ID).notes[0]  # matched on note body
+    assert note.href == ENGAGEMENT_PREFIX + f"/hosts/{hid}"
     assert note.kind == "host"
     assert note.title == "Postgres"
     assert "10.0.0.5" in note.where
@@ -91,9 +91,9 @@ def test_note_hit_links_back_to_host(session: Session) -> None:
 
 def test_deleting_host_cascades_its_note_out_of_search(session: Session) -> None:
     hid = _seed(session)
-    assert len(search(session, "postgres").notes) == 1
+    assert len(search(session, "postgres", engagement_id=TEST_ENGAGEMENT_ID).notes) == 1
     host = session.get(Host, hid)
     assert host is not None
     session.delete(host)  # FK ON DELETE CASCADE drops the note with the host
     session.commit()
-    assert search(session, "postgres").notes == []
+    assert search(session, "postgres", engagement_id=TEST_ENGAGEMENT_ID).notes == []

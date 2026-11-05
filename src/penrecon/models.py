@@ -10,8 +10,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Column, Text, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, Column, ForeignKeyConstraint, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -32,7 +33,19 @@ class ObsState(StrEnum):
     filtered = "filtered"
 
 
-class Scan(SQLModel, table=True):
+class Engagement(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    name: str
+    description: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class EngagementOwned(SQLModel):
+    engagement_id: str = Field(foreign_key="engagement.id", ondelete="CASCADE", index=True)
+
+
+class Scan(EngagementOwned, table=True):
+    __table_args__ = (UniqueConstraint("engagement_id", "id"),)
     id: int | None = Field(default=None, primary_key=True)
     filename: str
     tool: str
@@ -42,27 +55,39 @@ class Scan(SQLModel, table=True):
     raw_path: str | None = None
 
 
-class Host(SQLModel, table=True):
+class Host(EngagementOwned, table=True):
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "id"),
+        UniqueConstraint("engagement_id", "ip"),
+    )
     id: int | None = Field(default=None, primary_key=True)
-    ip: str = Field(unique=True, index=True)
+    ip: str = Field(index=True)
     first_seen: datetime = Field(default_factory=_now)
     last_seen: datetime = Field(default_factory=_now)
 
 
-class Hostname(SQLModel, table=True):
+class Hostname(EngagementOwned, table=True):
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "id"),
+        UniqueConstraint("engagement_id", "name"),
+    )
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(unique=True, index=True)
+    name: str = Field(index=True)
 
 
-class HostHostname(SQLModel, table=True):
+class HostHostname(EngagementOwned, table=True):
     __tablename__ = "host_hostname"
-    host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", primary_key=True)
-    hostname_id: int = Field(foreign_key="hostname.id", ondelete="CASCADE", primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "hostname_id"], ["hostname.engagement_id", "hostname.id"], ondelete="CASCADE"),
+    )
+    host_id: int = Field(primary_key=True)
+    hostname_id: int = Field(primary_key=True)
     last_seen: datetime = Field(default_factory=_now)
     hidden: bool = False  # manually deleted; sticky across re-scans
 
 
-class Service(SQLModel, table=True):
+class Service(EngagementOwned, table=True):
     """Stable service identity. Annotations point here.
 
     Manual overrides (m_*) win over the latest Observation for display, so a
@@ -70,9 +95,13 @@ class Service(SQLModel, table=True):
     (row + its notes); a later scan re-creates it fresh.
     """
 
-    __table_args__ = (UniqueConstraint("host_id", "port", "proto"),)
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "id"),
+        UniqueConstraint("engagement_id", "host_id", "port", "proto"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
     id: int | None = Field(default=None, primary_key=True)
-    host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", index=True)
+    host_id: int = Field(index=True)
     port: int
     proto: str
     m_state: ObsState | None = None
@@ -81,12 +110,16 @@ class Service(SQLModel, table=True):
     m_version: str | None = None
 
 
-class Observation(SQLModel, table=True):
+class Observation(EngagementOwned, table=True):
     """One (host, port, proto) as seen by one scan. The snapshot record."""
 
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
     id: int | None = Field(default=None, primary_key=True)
-    scan_id: int = Field(foreign_key="scan.id", ondelete="CASCADE", index=True)
-    host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", index=True)
+    scan_id: int = Field(index=True)
+    host_id: int = Field(index=True)
     port: int
     proto: str
     state: ObsState = ObsState.open
@@ -97,7 +130,7 @@ class Observation(SQLModel, table=True):
     observed_at: datetime = Field(default_factory=_now)
 
 
-class Annotation(SQLModel, table=True):
+class Annotation(EngagementOwned, table=True):
     """Triage state (status/tags) on a host or service. Never modified by
     ingest. Freeform notes live in :class:`Note`.
 
@@ -110,33 +143,36 @@ class Annotation(SQLModel, table=True):
         CheckConstraint(
             "(host_id IS NULL) <> (service_id IS NULL)", name="annotation_one_target"
         ),
+        UniqueConstraint("engagement_id", "host_id"),
+        UniqueConstraint("engagement_id", "service_id"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
     )
     id: int | None = Field(default=None, primary_key=True)
-    host_id: int | None = Field(
-        default=None, foreign_key="host.id", ondelete="CASCADE", unique=True
-    )
-    service_id: int | None = Field(
-        default=None, foreign_key="service.id", ondelete="CASCADE", unique=True
-    )
+    host_id: int | None = None
+    service_id: int | None = None
     status: Status = Status.new
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     updated_at: datetime = Field(default_factory=_now)
 
 
-class Note(SQLModel, table=True):
+class Note(EngagementOwned, table=True):
     """A titled freeform note on a host. Any number per host. Pure user data —
     like annotations, ingest never touches it; the FK's ON DELETE CASCADE drops
     a host's notes with the host."""
 
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
     id: int | None = Field(default=None, primary_key=True)
-    host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", index=True)
+    host_id: int = Field(index=True)
     title: str
     body_md: str = ""
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
 
-class OperationLog(SQLModel, table=True):
+class OperationLog(EngagementOwned, table=True):
     __tablename__ = "operation_log"
 
     id: int | None = Field(default=None, primary_key=True)
@@ -166,10 +202,11 @@ class CredKind(StrEnum):
     other = "other"
 
 
-class Credential(SQLModel, table=True):
+class Credential(EngagementOwned, table=True):
     """A found secret. Linked M:N to any number of hosts and services (none is
     fine). Pure user data — like annotations, ingest never touches it."""
 
+    __table_args__ = (UniqueConstraint("engagement_id", "id"),)
     id: int | None = Field(default=None, primary_key=True)
     kind: CredKind = CredKind.password
     username: str = ""
@@ -178,13 +215,21 @@ class Credential(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
-class CredentialHost(SQLModel, table=True):
+class CredentialHost(EngagementOwned, table=True):
     __tablename__ = "credential_host"
-    credential_id: int = Field(foreign_key="credential.id", ondelete="CASCADE", primary_key=True)
-    host_id: int = Field(foreign_key="host.id", ondelete="CASCADE", primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "credential_id"], ["credential.engagement_id", "credential.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
+    credential_id: int = Field(primary_key=True)
+    host_id: int = Field(primary_key=True)
 
 
-class CredentialService(SQLModel, table=True):
+class CredentialService(EngagementOwned, table=True):
     __tablename__ = "credential_service"
-    credential_id: int = Field(foreign_key="credential.id", ondelete="CASCADE", primary_key=True)
-    service_id: int = Field(foreign_key="service.id", ondelete="CASCADE", primary_key=True)
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "credential_id"], ["credential.engagement_id", "credential.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
+    )
+    credential_id: int = Field(primary_key=True)
+    service_id: int = Field(primary_key=True)

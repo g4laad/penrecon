@@ -167,6 +167,13 @@
   .scan-history-table { flex: 1; min-height: 0; overflow: hidden; }
   .scan-history-table [data-slot="table-container"] { height: 100%; overflow: auto; overscroll-behavior: contain; }
   .scan-history-table thead { position: sticky; top: 0; z-index: 1; background: var(--card); }
+  .engagements-page { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
+  .engagements-page > header { flex: none; }
+  #engagement-catalog { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; margin: 0; }
+  #engagement-catalog > :first-child { flex: none; }
+  .engagement-table { flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+  .engagement-table [data-slot="table-container"] { height: 100%; overflow: auto; overscroll-behavior: contain; }
+  .engagement-table thead { position: sticky; top: 0; z-index: 1; background: var(--card); }
   .credential-workbench-page > :not(.credential-workbench), .host-workbench-page > header, .host-tabs { flex: none; }
   .host-workbench-tabs > [role=tabpanel]:not([hidden]) { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .host-workbench-tabs > [role=tabpanel] > :not(.host-inspector) { flex: none; }

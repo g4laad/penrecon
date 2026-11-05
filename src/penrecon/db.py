@@ -1,7 +1,7 @@
 """Database engine, session, and on-disk data locations.
 
-Everything lives under ./data (override with PENRECON_DATA): the SQLite file
-and the retained raw scans.
+Everything lives under ./data (override with PENRECON_DATA): one shared SQLite
+file and engagement-specific retained scans and operation attachments.
 """
 
 from __future__ import annotations
@@ -14,9 +14,16 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
 DATA_DIR: Path = Path(os.environ.get("PENRECON_DATA", "data")).resolve()
-RAW_SCANS_DIR: Path = DATA_DIR / "scans"  # retained raw upload bytes (Scan.raw_path)
-OPERATION_ATTACHMENTS_DIR: Path = DATA_DIR / "operation-attachments"
 DB_PATH: Path = DATA_DIR / "penrecon.db"
+
+
+def engagement_scans_dir(engagement_id: str) -> Path:
+    return DATA_DIR / "engagements" / engagement_id / "scans"
+
+
+def engagement_attachments_dir(engagement_id: str) -> Path:
+    return DATA_DIR / "engagements" / engagement_id / "operation-attachments"
+
 
 def enable_sqlite_fks(engine: object) -> None:
     """Turn on FK enforcement for every connection of ``engine``. SQLite defaults
@@ -35,13 +42,12 @@ enable_sqlite_fks(engine)
 
 
 def init_db() -> None:
-    """Create data dirs and tables from the models. Idempotent.
+    """Create the data root and tables without altering an existing schema.
 
-    No migrations: this is a local single-user DB. If the schema changes,
-    delete ./data/penrecon.db and re-ingest.
+    Schema changes require an explicit manual database reset; existing data is
+    never migrated or removed automatically.
     """
-    RAW_SCANS_DIR.mkdir(parents=True, exist_ok=True)
-    OPERATION_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
     from penrecon import models  # noqa: F401
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+TEST_ENGAGEMENT_ID = "9fe3f60e-3a87-43cf-8f2a-4b6b016e42a1"
+ENGAGEMENT_PREFIX = f"/e/{TEST_ENGAGEMENT_ID}"
+
 
 def _host(ip: str, ports: str, hostname: str = "a.example") -> str:
     return f"""

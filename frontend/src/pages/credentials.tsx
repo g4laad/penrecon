@@ -1,3 +1,4 @@
+import { ScopedLink } from "../common";
 import { useEffect, useState } from "react";
 import { Search, Unlink } from "lucide-react";
 import { Secret } from "@/components/secret";
@@ -94,12 +95,8 @@ function CredentialLinks({
               key={host.host_id}
               className="actions rounded-md border px-2 py-0.5"
             >
-              <a
-                href={`/hosts/${host.host_id}`}
-                className="mono text-[13px] underline underline-offset-4"
-              >
-                {host.ip}
-              </a>
+              <ScopedLink href={`/hosts/${host.host_id}`}
+              className="mono text-[13px] underline underline-offset-4">{host.ip}</ScopedLink>
               <MutationForm
                 action={`/credentials/${credential.id}/unlink/host/${host.host_id}`}
                 confirm={`Unlink host ${host.ip} from this credential?`}
@@ -150,13 +147,9 @@ function CredentialLinks({
               key={service.service_id}
               className="actions rounded-md border px-2 py-0.5"
             >
-              <a
-                href={`/hosts/${service.host_id}`}
-                className="mono text-[13px] underline underline-offset-4"
-              >
-                {service.ip}:{service.port}/{service.proto}
-                {service.name ? ` ${service.name}` : ""}
-              </a>
+              <ScopedLink href={`/hosts/${service.host_id}`}
+              className="mono text-[13px] underline underline-offset-4">{service.ip}:{service.port}/{service.proto}
+              {service.name ? ` ${service.name}` : ""}</ScopedLink>
               <MutationForm
                 action={`/credentials/${credential.id}/unlink/service/${service.service_id}`}
                 confirm={`Unlink ${service.ip}:${service.port}/${service.proto} from this credential?`}
@@ -411,53 +404,49 @@ export function CredentialsPage({ data }: { data: PageData }) {
               Identity / scope
             </h2>
             {credentials.map((credential) => (
-              <a
-                key={credential.id}
-                href={`?${currentUrl.searchParams}#credential-${credential.id}`}
-                aria-current={
-                  credential.id === selected.id ? "true" : undefined
-                }
-                className="credential-choice"
-                onClick={(event) => {
-                  if (
-                    event.button !== 0 ||
-                    event.metaKey ||
-                    event.ctrlKey ||
-                    event.shiftKey ||
-                    event.altKey
-                  )
-                    return;
-                  event.preventDefault();
-                  const next = new URL(location.href);
-                  next.hash = `credential-${credential.id}`;
-                  history.pushState(null, "", next);
-                  setUrl(next.href);
-                }}
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span className="mono truncate text-[13px] font-semibold">
-                    {credential.username || "No username"}
-                  </span>
-                  <Badge variant="outline">{credential.kind}</Badge>
+              <ScopedLink key={credential.id}
+              href={`?${currentUrl.searchParams}#credential-${credential.id}`}
+              aria-current={
+                credential.id === selected.id ? "true" : undefined
+              }
+              className="credential-choice"
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                const next = new URL(location.href);
+                next.hash = `credential-${credential.id}`;
+                history.pushState(null, "", next);
+                setUrl(next.href);
+              }}><span className="flex items-center justify-between gap-2">
+                <span className="mono truncate text-[13px] font-semibold">
+                  {credential.username || "No username"}
                 </span>
-                <span className="muted mt-1 block text-xs">
-                  {[
-                    credential.hosts.length
-                      ? `${credential.hosts.length} hosts`
-                      : "",
-                    credential.services.length
-                      ? `${credential.services.length} services`
-                      : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || "Unlinked"}
+                <Badge variant="outline">{credential.kind}</Badge>
+              </span>
+              <span className="muted mt-1 block text-xs">
+                {[
+                  credential.hosts.length
+                    ? `${credential.hosts.length} hosts`
+                    : "",
+                  credential.services.length
+                    ? `${credential.services.length} services`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ") || "Unlinked"}
+              </span>
+              {credential.notes && (
+                <span className="muted mt-1 block truncate text-xs">
+                  {credential.notes}
                 </span>
-                {credential.notes && (
-                  <span className="muted mt-1 block truncate text-xs">
-                    {credential.notes}
-                  </span>
-                )}
-              </a>
+              )}</ScopedLink>
             ))}
           </section>
           <CredentialDetail

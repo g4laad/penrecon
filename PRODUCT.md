@@ -14,6 +14,11 @@ quickly, spot what changed since the last scan, and jot triage notes without
 friction. Not a team, not a client-facing deliverable — a personal operator
 tool.
 
+One local instance can hold multiple engagements. The operator creates or
+selects one before working; each keeps independent inventory, observations,
+notes, credentials, and activity, even when target IPs overlap. Selection is
+explicit in each page URL, so different tabs can work on different engagements.
+
 ## Product Purpose
 
 Ingest recon tool output (nmap XML today; masscan/httpx/nuclei/subfinder next),

@@ -4,9 +4,9 @@ import os
 import tempfile
 
 # Point all runtime data (sqlite db + retained raw scan bytes) at a throwaway
-# dir BEFORE importing penrecon — db.py binds DATA_DIR/RAW_SCANS_DIR at import
-# time. Keeps the suite (and ingest's raw-file writes) off the real ./data.
-os.environ.setdefault("PENRECON_DATA", tempfile.mkdtemp(prefix="penrecon-test-"))
+# dir BEFORE importing penrecon — db.py binds DATA_DIR at import time.
+# Always override external settings so the suite cannot touch a user database.
+os.environ["PENRECON_DATA"] = tempfile.mkdtemp(prefix="penrecon-test-")
 
 from collections.abc import Iterator
 
@@ -18,6 +18,8 @@ from starlette.testclient import TestClient
 import penrecon.models  # noqa: F401  (register tables)
 from penrecon.db import enable_sqlite_fks, get_session
 from penrecon.web.app import app
+from penrecon.models import Engagement
+from tests.fixtures import TEST_ENGAGEMENT_ID
 
 
 @pytest.fixture
@@ -28,6 +30,8 @@ def session() -> Iterator[Session]:
     enable_sqlite_fks(engine)  # match prod: FKs + ON DELETE CASCADE enforced
     SQLModel.metadata.create_all(engine)
     with Session(engine) as s:
+        s.add(Engagement(id=TEST_ENGAGEMENT_ID, name="Test engagement"))
+        s.commit()
         yield s
 
 
@@ -39,6 +43,9 @@ def client() -> Iterator[TestClient]:
     )
     enable_sqlite_fks(engine)
     SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        s.add(Engagement(id=TEST_ENGAGEMENT_ID, name="Test engagement"))
+        s.commit()
 
     def _override() -> Iterator[Session]:
         with Session(engine) as s:

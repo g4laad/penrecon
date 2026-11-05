@@ -12,6 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TypeVar
 
+from sqlalchemy import inspect
 from sqlmodel import Session, col, select
 
 from penrecon.models import (
@@ -19,6 +20,7 @@ from penrecon.models import (
     Credential,
     CredentialHost,
     CredentialService,
+    EngagementOwned,
     Host,
     Hostname,
     HostHostname,
@@ -79,7 +81,7 @@ class DiffResult:
 
 @dataclass
 class NoteHit:
-    """One note matched by a global search, with a link back to its target."""
+    """One note matched by an engagement-wide search, linked back to its target."""
 
     href: str
     where: str  # human label of the annotated entity (IP, IP·port/proto, hostname)
@@ -100,19 +102,49 @@ class SearchResults:
         return len(self.hosts) + len(self.notes) + len(self.credentials)
 
 
+_Owned = TypeVar("_Owned", bound=EngagementOwned)
+
+
+def get_owned(
+    session: Session,
+    model: type[_Owned],
+    identity: int | tuple[int, ...],
+    *,
+    engagement_id: str,
+) -> _Owned | None:
+    """Fetch an entity or link by its existing primary key within an engagement."""
+    values = identity if isinstance(identity, tuple) else (identity,)
+    mapper = inspect(model)
+    assert mapper is not None
+    primary_key = mapper.primary_key
+    if len(values) != len(primary_key):
+        raise ValueError("identity does not match the model primary key")
+    return session.exec(
+        select(model).where(
+            model.engagement_id == engagement_id,
+            *(column == value for column, value in zip(primary_key, values, strict=True)),
+        )
+    ).first()
+
+
 # --- annotations ---------------------------------------------------------------
 
 def get_annotation(
-    session: Session, *, host_id: int | None = None, service_id: int | None = None
+    session: Session, *, engagement_id: str,
+    host_id: int | None = None, service_id: int | None = None
 ) -> Annotation | None:
     """The triage annotation for a host or service. Pass exactly one id."""
     assert (host_id is None) != (service_id is None), "pass exactly one target id"
     if host_id is not None:
         return session.exec(
-            select(Annotation).where(Annotation.host_id == host_id)
+            select(Annotation).where(
+                Annotation.engagement_id == engagement_id, Annotation.host_id == host_id
+            )
         ).first()
     return session.exec(
-        select(Annotation).where(Annotation.service_id == service_id)
+        select(Annotation).where(
+            Annotation.engagement_id == engagement_id, Annotation.service_id == service_id
+        )
     ).first()
 
 
@@ -121,13 +153,16 @@ def upsert_annotation(
     status: Status,
     tags: list[str],
     *,
+    engagement_id: str,
     host_id: int | None = None,
     service_id: int | None = None,
 ) -> Annotation:
     """Create or update the triage annotation (status/tags) for a host or service."""
-    ann = get_annotation(session, host_id=host_id, service_id=service_id)
+    ann = get_annotation(
+        session, host_id=host_id, service_id=service_id, engagement_id=engagement_id
+    )
     if ann is None:
-        ann = Annotation(host_id=host_id, service_id=service_id)
+        ann = Annotation(engagement_id=engagement_id, host_id=host_id, service_id=service_id)
         session.add(ann)
     ann.status = status
     ann.tags = tags
@@ -135,12 +170,12 @@ def upsert_annotation(
     return ann
 
 
-def notes_for(session: Session, host_id: int) -> list[Note]:
+def notes_for(session: Session, host_id: int, *, engagement_id: str) -> list[Note]:
     """All notes on a host, oldest first."""
     return list(
         session.exec(
             select(Note)
-            .where(Note.host_id == host_id)
+            .where(Note.engagement_id == engagement_id, Note.host_id == host_id)
             .order_by(Note.created_at)  # type: ignore[arg-type]
         ).all()
     )
@@ -148,11 +183,11 @@ def notes_for(session: Session, host_id: int) -> list[Note]:
 
 # --- operation log ------------------------------------------------------------
 
-def operation_logs(session: Session, q: str = "") -> list[OperationLog]:
+def operation_logs(session: Session, q: str = "", *, engagement_id: str) -> list[OperationLog]:
     """Operation entries in timeline order, optionally filtered across their text."""
     rows = list(
         session.exec(
-            select(OperationLog).order_by(
+            select(OperationLog).where(OperationLog.engagement_id == engagement_id).order_by(
                 col(OperationLog.started_at).is_(None),
                 col(OperationLog.started_at).desc(),
                 col(OperationLog.created_at).desc(),
@@ -183,11 +218,13 @@ def operation_logs(session: Session, q: str = "") -> list[OperationLog]:
 
 # --- current-state merge -------------------------------------------------------
 
-def latest_observations(session: Session, host_id: int) -> dict[tuple[int, str], Observation]:
+def latest_observations(
+    session: Session, host_id: int, *, engagement_id: str
+) -> dict[tuple[int, str], Observation]:
     """Latest Observation per (port, proto) for one host."""
     obs = session.exec(
         select(Observation)
-        .where(Observation.host_id == host_id)
+        .where(Observation.engagement_id == engagement_id, Observation.host_id == host_id)
         .order_by(Observation.observed_at.desc())  # type: ignore[attr-defined]
     ).all()
     latest: dict[tuple[int, str], Observation] = {}
@@ -196,28 +233,40 @@ def latest_observations(session: Session, host_id: int) -> dict[tuple[int, str],
     return latest
 
 
-def _hostnames_for(session: Session, host_id: int) -> list[str]:
-    return [name for _id, name in host_hostnames(session, host_id)]
+def _hostnames_for(session: Session, host_id: int, *, engagement_id: str) -> list[str]:
+    return [
+        name for _id, name in host_hostnames(session, host_id, engagement_id=engagement_id)
+    ]
 
 
-def host_hostnames(session: Session, host_id: int) -> list[tuple[int, str]]:
+def host_hostnames(
+    session: Session, host_id: int, *, engagement_id: str
+) -> list[tuple[int, str]]:
     """(hostname_id, name) for a host, excluding manually-hidden links."""
     rows = session.exec(
         select(Hostname.id, Hostname.name)
         .join(HostHostname, HostHostname.hostname_id == Hostname.id)  # type: ignore[arg-type]
-        .where(HostHostname.host_id == host_id, HostHostname.hidden == False)  # noqa: E712
+        .where(
+            Hostname.engagement_id == engagement_id,
+            HostHostname.engagement_id == engagement_id,
+            HostHostname.host_id == host_id, HostHostname.hidden == False,  # noqa: E712
+        )
         .order_by(Hostname.name)
     ).all()
     return [(hid, name) for hid, name in rows if hid is not None]
 
 
-def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
+def resolved_services(
+    session: Session, host_id: int, *, engagement_id: str
+) -> list[ServiceView]:
     """Current services for display: manual overrides win over the latest
     observation, hidden services excluded, manual-only services included."""
-    latest = latest_observations(session, host_id)
+    latest = latest_observations(session, host_id, engagement_id=engagement_id)
     views: list[ServiceView] = []
     for svc in session.exec(
-        select(Service).where(Service.host_id == host_id).order_by(Service.port)  # type: ignore[arg-type]
+        select(Service)
+        .where(Service.engagement_id == engagement_id, Service.host_id == host_id)
+        .order_by(Service.port)  # type: ignore[arg-type]
     ).all():
         assert svc.id is not None
         o = latest.get((svc.port, svc.proto))
@@ -232,7 +281,7 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
                 product=svc.m_product or (o.product if o else None),
                 version=svc.m_version or (o.version if o else None),
                 last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
-                annotation=get_annotation(session, service_id=svc.id),
+                annotation=get_annotation(session, service_id=svc.id, engagement_id=engagement_id),
                 manual=o is None
                 or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
             )
@@ -241,7 +290,8 @@ def resolved_services(session: Session, host_id: int) -> list[ServiceView]:
 
 
 def host_change(
-    session: Session, host_id: int, *, scan_count: int, latest_scan_id: int | None
+    session: Session, host_id: int, *, engagement_id: str,
+    scan_count: int, latest_scan_id: int | None
 ) -> str:
     """Scan-delta marker for the hosts list: ``"new"`` if the host appeared for
     the first time *in the latest scan* (and a prior baseline exists),
@@ -258,7 +308,7 @@ def host_change(
     """
     obs = session.exec(
         select(Observation)
-        .where(Observation.host_id == host_id)
+        .where(Observation.engagement_id == engagement_id, Observation.host_id == host_id)
         .order_by(
             Observation.observed_at.desc(),  # type: ignore[attr-defined]
             Observation.scan_id.desc(),  # type: ignore[attr-defined]
@@ -285,23 +335,30 @@ def host_change(
     return ""
 
 
-def host_rows(session: Session) -> list[HostRow]:
+def host_rows(session: Session, *, engagement_id: str) -> list[HostRow]:
     # scan baseline for the "new" marker: how many scans exist, and which is latest
     scan_ids = session.exec(
-        select(Scan.id).order_by(Scan.imported_at.desc())  # type: ignore[attr-defined]
+        select(Scan.id)
+        .where(Scan.engagement_id == engagement_id)
+        .order_by(Scan.imported_at.desc())  # type: ignore[attr-defined]
     ).all()
     scan_count = len(scan_ids)
     latest_scan_id = scan_ids[0] if scan_ids else None
     rows: list[HostRow] = []
-    for host in session.exec(select(Host).order_by(Host.ip)).all():
+    for host in session.exec(
+        select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
+    ).all():
         assert host.id is not None
-        open_s = [s for s in resolved_services(session, host.id) if s.state == "open"]
-        ann = get_annotation(session, host_id=host.id)
+        open_s = [
+            s for s in resolved_services(session, host.id, engagement_id=engagement_id)
+            if s.state == "open"
+        ]
+        ann = get_annotation(session, host_id=host.id, engagement_id=engagement_id)
         rows.append(
             HostRow(
                 id=host.id,
                 ip=host.ip,
-                hostnames=_hostnames_for(session, host.id),
+                hostnames=_hostnames_for(session, host.id, engagement_id=engagement_id),
                 open_count=len(open_s),
                 status=(ann.status if ann else Status.new),
                 tags=(ann.tags if ann else []),
@@ -309,7 +366,8 @@ def host_rows(session: Session) -> list[HostRow]:
                 service_names=sorted({s.service_name for s in open_s if s.service_name}),
                 open_services=sorted((s.port, s.service_name) for s in open_s),
                 change=host_change(
-                    session, host.id, scan_count=scan_count, latest_scan_id=latest_scan_id
+                    session, host.id, engagement_id=engagement_id,
+                    scan_count=scan_count, latest_scan_id=latest_scan_id
                 ),
                 triaged=ann is not None,
             )
@@ -403,8 +461,8 @@ def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[Host
     return sorted(rows, key=ip_key, reverse=reverse)
 
 
-def host_services(session: Session, host_id: int) -> list[ServiceView]:
-    return resolved_services(session, host_id)
+def host_services(session: Session, host_id: int, *, engagement_id: str) -> list[ServiceView]:
+    return resolved_services(session, host_id, engagement_id=engagement_id)
 
 
 def filter_services(
@@ -479,13 +537,14 @@ class CredentialView:
     pickable_services: list[LinkedService]  # services of linked hosts, not yet linked
 
 
-def _service_name(session: Session, svc: Service) -> str | None:
+def _service_name(session: Session, svc: Service, *, engagement_id: str) -> str | None:
     """Display name for a service: manual override, else the latest observation."""
     if svc.m_service_name:
         return svc.m_service_name
     o = session.exec(
         select(Observation.service_name)
         .where(
+            Observation.engagement_id == engagement_id,
             Observation.host_id == svc.host_id,
             Observation.port == svc.port,
             Observation.proto == svc.proto,
@@ -495,17 +554,20 @@ def _service_name(session: Session, svc: Service) -> str | None:
     return o
 
 
-def credential_views(session: Session) -> list[CredentialView]:
-    """Every credential with its linked hosts and services (newest first).
+def credential_views(session: Session, *, engagement_id: str) -> list[CredentialView]:
+    """Every credential in this engagement with linked hosts/services (newest first).
     # ponytail: a couple of queries + in-Python grouping, fine for single-user local."""
     creds = session.exec(
-        select(Credential).order_by(Credential.created_at.desc())  # type: ignore[attr-defined]
+        select(Credential)
+        .where(Credential.engagement_id == engagement_id)
+        .order_by(Credential.created_at.desc())  # type: ignore[attr-defined]
     ).all()
 
     hosts_by_cred: dict[int, list[LinkedHost]] = defaultdict(list)
     for cid, hid, ip in session.exec(
         select(CredentialHost.credential_id, Host.id, Host.ip)
         .join(Host, Host.id == CredentialHost.host_id)  # type: ignore[arg-type]
+        .where(CredentialHost.engagement_id == engagement_id, Host.engagement_id == engagement_id)
         .order_by(Host.ip)
     ).all():
         if hid is not None:
@@ -516,11 +578,18 @@ def credential_views(session: Session) -> list[CredentialView]:
         select(CredentialService.credential_id, Service, Host.ip)
         .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
         .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+        .where(
+            CredentialService.engagement_id == engagement_id,
+            Service.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+        )
         .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
     ).all():
         if svc.id is not None:
             services_by_cred[cid].append(
-                LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
+                LinkedService(
+                    svc.id, svc.host_id, ip, svc.port, svc.proto,
+                    _service_name(session, svc, engagement_id=engagement_id),
+                )
             )
 
     # Services grouped by host, but only for hosts that some credential links —
@@ -532,12 +601,18 @@ def credential_views(session: Session) -> list[CredentialView]:
         for svc, ip in session.exec(
             select(Service, Host.ip)
             .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
-            .where(Service.host_id.in_(linked_host_ids))  # type: ignore[attr-defined]
+            .where(
+                Service.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+                Service.host_id.in_(linked_host_ids),  # type: ignore[attr-defined]
+            )
             .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
         ).all():
             if svc.id is not None:
                 services_by_host[svc.host_id].append(
-                    LinkedService(svc.id, svc.host_id, ip, svc.port, svc.proto, _service_name(session, svc))
+                    LinkedService(
+                        svc.id, svc.host_id, ip, svc.port, svc.proto,
+                        _service_name(session, svc, engagement_id=engagement_id),
+                    )
                 )
 
     def _pickable(cid: int) -> list[LinkedService]:
@@ -566,11 +641,13 @@ def credential_views(session: Session) -> list[CredentialView]:
     ]
 
 
-def credentials_for_host(session: Session, host_id: int) -> list[CredentialView]:
+def credentials_for_host(
+    session: Session, host_id: int, *, engagement_id: str
+) -> list[CredentialView]:
     """Credentials tied to this host directly *or* via one of its services."""
     return [
         v
-        for v in credential_views(session)
+        for v in credential_views(session, engagement_id=engagement_id)
         if any(h.host_id == host_id for h in v.hosts)
         or any(s.host_id == host_id for s in v.services)
     ]
@@ -578,11 +655,16 @@ def credentials_for_host(session: Session, host_id: int) -> list[CredentialView]
 
 # --- diff ----------------------------------------------------------------------
 
-def _obs_by_key(session: Session, scan_id: int) -> dict[tuple[str, int, str], Observation]:
+def _obs_by_key(
+    session: Session, scan_id: int, *, engagement_id: str
+) -> dict[tuple[str, int, str], Observation]:
     stmt = (
         select(Observation, Host.ip)
         .join(Host, Host.id == Observation.host_id)  # type: ignore[arg-type]
-        .where(Observation.scan_id == scan_id)
+        .where(
+            Observation.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+            Observation.scan_id == scan_id,
+        )
     )
     out: dict[tuple[str, int, str], Observation] = {}
     for obs, ip in session.exec(stmt).all():
@@ -599,14 +681,16 @@ def _summary(o: Observation) -> str:
     return " ".join(parts)
 
 
-def diff_scans(session: Session, scan_a_id: int, scan_b_id: int) -> DiffResult:
-    a = session.get(Scan, scan_a_id)
-    b = session.get(Scan, scan_b_id)
+def diff_scans(
+    session: Session, scan_a_id: int, scan_b_id: int, *, engagement_id: str
+) -> DiffResult:
+    a = get_owned(session, Scan, scan_a_id, engagement_id=engagement_id)
+    b = get_owned(session, Scan, scan_b_id, engagement_id=engagement_id)
     if a is None or b is None:
         raise ValueError("scan not found")
     result = DiffResult(scan_a=a, scan_b=b)
-    obs_a = _obs_by_key(session, scan_a_id)
-    obs_b = _obs_by_key(session, scan_b_id)
+    obs_a = _obs_by_key(session, scan_a_id, engagement_id=engagement_id)
+    obs_b = _obs_by_key(session, scan_b_id, engagement_id=engagement_id)
 
     for key in sorted(obs_b.keys() - obs_a.keys()):
         ip, port, proto = key
@@ -644,20 +728,20 @@ def _note_preview(body: str, ql: str, width: int = 200) -> str:
     return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
 
 
-def search_notes(session: Session, ql: str) -> list[NoteHit]:
+def search_notes(session: Session, ql: str, *, engagement_id: str) -> list[NoteHit]:
     """Notes whose title or body contains ``ql`` (already lowercased). Notes live
     only on hosts, and the FK cascade drops them with the host, so the host
     always exists (the None guard is just for the type checker)."""
     hits: list[NoteHit] = []
-    for note in session.exec(select(Note)).all():
+    for note in session.exec(select(Note).where(Note.engagement_id == engagement_id)).all():
         if ql not in note.title.lower() and ql not in note.body_md.lower():
             continue
-        host = session.get(Host, note.host_id)
+        host = get_owned(session, Host, note.host_id, engagement_id=engagement_id)
         if host is None:  # ponytail: unreachable under FK, keeps mypy happy
             continue
         hits.append(
             NoteHit(
-                href=f"/hosts/{host.id}", where=host.ip, kind="host",
+                href=f"/e/{engagement_id}/hosts/{host.id}", where=host.ip, kind="host",
                 title=note.title, preview=_note_preview(note.body_md, ql),
             )
         )
@@ -683,22 +767,26 @@ def _csv_safe(value: str) -> str:
     return "'" + value if value.startswith(_CSV_RISKY_PREFIXES) else value
 
 
-def export_rows(session: Session) -> list[dict[str, str]]:
+def export_rows(session: Session, *, engagement_id: str) -> list[dict[str, str]]:
     """One flat row per service across all hosts, for CSV export. A host with no
     services still yields one row (empty service columns) so nothing is dropped.
     Reflects current merged state — manual overrides win over observations,
     exactly like the host detail view."""
     rows: list[dict[str, str]] = []
-    for host in session.exec(select(Host).order_by(Host.ip)).all():
+    for host in session.exec(
+        select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
+    ).all():
         assert host.id is not None
-        ann = get_annotation(session, host_id=host.id)
+        ann = get_annotation(session, host_id=host.id, engagement_id=engagement_id)
         base = {
             "ip": _csv_safe(host.ip),
-            "hostnames": _csv_safe(" ".join(_hostnames_for(session, host.id))),
+            "hostnames": _csv_safe(
+                " ".join(_hostnames_for(session, host.id, engagement_id=engagement_id))
+            ),
             "status": ann.status.value if ann else Status.new.value,
             "tags": _csv_safe(" ".join(ann.tags) if ann else ""),
         }
-        services = resolved_services(session, host.id)
+        services = resolved_services(session, host.id, engagement_id=engagement_id)
         if not services:
             rows.append({**base, "port": "", "proto": "", "state": "",
                          "service": "", "product": "", "version": ""})
@@ -714,19 +802,19 @@ def export_rows(session: Session) -> list[dict[str, str]]:
     return rows
 
 
-def search(session: Session, q: str) -> SearchResults:
-    """Global search across hosts/hostnames/services, note bodies + tags, and
-    credentials. Empty query returns nothing (the page shows a hint instead)."""
+def search(session: Session, q: str, *, engagement_id: str) -> SearchResults:
+    """Search this engagement's hosts/hostnames/services, notes, tags and credentials.
+    Empty queries return nothing (the page shows a hint instead)."""
     ql = q.strip().lower()
     if not ql:
         return SearchResults(q="")
     creds = [
-        c for c in credential_views(session)
+        c for c in credential_views(session, engagement_id=engagement_id)
         if ql in c.username.lower() or ql in c.notes.lower()
     ]
     return SearchResults(
         q=q.strip(),
-        hosts=filter_hosts(host_rows(session), q=ql),
-        notes=search_notes(session, ql),
+        hosts=filter_hosts(host_rows(session, engagement_id=engagement_id), q=ql),
+        notes=search_notes(session, ql, engagement_id=engagement_id),
         credentials=creds,
     )

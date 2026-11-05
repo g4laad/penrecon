@@ -11,7 +11,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from penrecon.db import RAW_SCANS_DIR
+from penrecon.db import DATA_DIR, engagement_scans_dir
 from penrecon.models import (
     Host,
     Hostname,
@@ -31,10 +31,14 @@ def _obs_state(raw: str) -> ObsState:
         return ObsState.filtered
 
 
-def _upsert_host(session: Session, ip: str, now: datetime) -> Host:
-    host = session.exec(select(Host).where(Host.ip == ip)).first()
+def _upsert_host(
+    session: Session, ip: str, now: datetime, *, engagement_id: str
+) -> Host:
+    host = session.exec(
+        select(Host).where(Host.engagement_id == engagement_id, Host.ip == ip)
+    ).first()
     if host is None:
-        host = Host(ip=ip, first_seen=now, last_seen=now)
+        host = Host(engagement_id=engagement_id, ip=ip, first_seen=now, last_seen=now)
         session.add(host)
         session.flush()
     else:
@@ -42,46 +46,59 @@ def _upsert_host(session: Session, ip: str, now: datetime) -> Host:
     return host
 
 
-def _upsert_hostname(session: Session, host_id: int, name: str, now: datetime) -> None:
-    hn = session.exec(select(Hostname).where(Hostname.name == name)).first()
+def _upsert_hostname(
+    session: Session, host_id: int, name: str, now: datetime, *, engagement_id: str
+) -> None:
+    hn = session.exec(
+        select(Hostname).where(Hostname.engagement_id == engagement_id, Hostname.name == name)
+    ).first()
     if hn is None:
-        hn = Hostname(name=name)
+        hn = Hostname(engagement_id=engagement_id, name=name)
         session.add(hn)
         session.flush()
     assert hn.id is not None
     link = session.exec(
         select(HostHostname).where(
+            HostHostname.engagement_id == engagement_id,
             HostHostname.host_id == host_id, HostHostname.hostname_id == hn.id
         )
     ).first()
     if link is None:
-        session.add(HostHostname(host_id=host_id, hostname_id=hn.id, last_seen=now))
+        session.add(HostHostname(
+            engagement_id=engagement_id, host_id=host_id, hostname_id=hn.id, last_seen=now
+        ))
     else:
         link.last_seen = now
 
 
-def _upsert_service(session: Session, host_id: int, port: int, proto: str) -> None:
+def _upsert_service(
+    session: Session, host_id: int, port: int, proto: str, *, engagement_id: str
+) -> None:
     svc = session.exec(
         select(Service).where(
+            Service.engagement_id == engagement_id,
             Service.host_id == host_id, Service.port == port, Service.proto == proto
         )
     ).first()
     if svc is None:
-        session.add(Service(host_id=host_id, port=port, proto=proto))
+        session.add(Service(engagement_id=engagement_id, host_id=host_id, port=port, proto=proto))
     # a deleted service is gone from the DB; this recreates it fresh when a scan
     # sees the port again
 
 
-def _store_host(session: Session, scan_id: int, hr: HostResult, now: datetime) -> None:
-    host = _upsert_host(session, hr.ip, now)
+def _store_host(
+    session: Session, scan_id: int, hr: HostResult, now: datetime, *, engagement_id: str
+) -> None:
+    host = _upsert_host(session, hr.ip, now, engagement_id=engagement_id)
     assert host.id is not None
     for name in hr.hostnames:
         if name:
-            _upsert_hostname(session, host.id, name, now)
+            _upsert_hostname(session, host.id, name, now, engagement_id=engagement_id)
     for p in hr.ports:
-        _upsert_service(session, host.id, p.port, p.proto)
+        _upsert_service(session, host.id, p.port, p.proto, engagement_id=engagement_id)
         session.add(
             Observation(
+                engagement_id=engagement_id,
                 scan_id=scan_id,
                 host_id=host.id,
                 port=p.port,
@@ -96,12 +113,15 @@ def _store_host(session: Session, scan_id: int, hr: HostResult, now: datetime) -
         )
 
 
-def ingest_scan(session: Session, data: bytes, filename: str, tool: str) -> Scan:
+def ingest_scan(
+    session: Session, data: bytes, filename: str, tool: str, *, engagement_id: str
+) -> Scan:
     parser = get_parser(tool)
     result = parser(data)
     now = datetime.now(UTC)
 
     scan = Scan(
+        engagement_id=engagement_id,
         filename=filename,
         tool=tool,
         source_format=tool,
@@ -114,13 +134,14 @@ def ingest_scan(session: Session, data: bytes, filename: str, tool: str) -> Scan
 
     # Retain the raw bytes so a scan can be re-parsed or audited later. Strip any
     # directory components from the client-supplied filename before joining a path.
-    RAW_SCANS_DIR.mkdir(parents=True, exist_ok=True)
-    raw_dest = RAW_SCANS_DIR / f"{scan.id}_{Path(filename).name}"
+    scans_dir = engagement_scans_dir(engagement_id)
+    scans_dir.mkdir(parents=True, exist_ok=True)
+    raw_dest = scans_dir / f"{scan.id}_{Path(filename).name}"
     raw_dest.write_bytes(data)
-    scan.raw_path = str(raw_dest)
+    scan.raw_path = str(raw_dest.relative_to(DATA_DIR))
 
     for hr in result:
-        _store_host(session, scan.id, hr, now)
+        _store_host(session, scan.id, hr, now, engagement_id=engagement_id)
 
     session.commit()
     session.refresh(scan)

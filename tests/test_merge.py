@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
@@ -9,8 +10,8 @@ from tests.fixtures import SCAN_A, SCAN_B
 
 
 def test_latest_observation_wins(session: Session) -> None:
-    ingest_scan(session, SCAN_A.encode(), "a.xml", "nmap")
-    ingest_scan(session, SCAN_B.encode(), "b.xml", "nmap")
+    ingest_scan(session, SCAN_A.encode(), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    ingest_scan(session, SCAN_B.encode(), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
 
     host = session.exec(select(Host).where(Host.ip == "10.0.0.1")).one()
     assert host.id is not None
@@ -19,10 +20,10 @@ def test_latest_observation_wins(session: Session) -> None:
     services = session.exec(select(Service).where(Service.host_id == host.id)).all()
     assert sorted(s.port for s in services) == [22, 80, 443]
 
-    latest = latest_observations(session, host.id)
+    latest = latest_observations(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
     assert latest[(22, "tcp")].version == "9.0"   # scan B wins
     assert latest[(80, "tcp")].state == "closed"  # scan B wins
 
-    views = {v.port: v for v in host_services(session, host.id)}
+    views = {v.port: v for v in host_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)}
     assert views[22].version == "9.0"
     assert views[443].service_name == "https"

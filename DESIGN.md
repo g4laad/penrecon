@@ -32,7 +32,8 @@ Use `.mono` for IPs, ports, protocol/version strings, timestamps, commands,
 output, and secrets. Body and form text remain 14px; data is 13px, and secondary
 metadata/table headings are 12px. Page titles and descriptions are screen-reader
 only; visible page-level rows contain actions, without an empty row on pages
-without actions. Global navigation/search and browser titles remain unchanged.
+without actions. Browser titles include the current engagement name; navigation
+and search stay within that engagement.
 Compact section, navigation, pagination, and row spacing prioritize visible records.
 Layout has a maximum width of 1440px, responsive gutters, compact actions, and
 two-column forms collapsing on mobile. Except for the viewport-fitted Hosts
@@ -67,6 +68,18 @@ count with the result heading and display filenames as secondary metadata.
 - Buttons, inputs, textareas, badges, tables, native selects, separators, and
   dialogs come from the committed shadcn components. Interactive button/dialog
   behavior uses `@base-ui/react`.
+- `/engagements` fits the viewport with a dense, internally scrolling workspace
+  table and sticky column headings. Names link directly to their workspaces;
+  Name and Created headings toggle URL-backed ascending/descending sorting,
+  defaulting to newest first. Long names/descriptions wrap within bounded
+  columns. A single top-right Create engagement button opens a modal with a
+  required name and optional description. An empty catalog points to that action.
+  Each row has a right-aligned, labeled pencil action opening a prefilled edit
+  modal for name and description. Saving preserves workspace identity and creation
+  time, refreshes the current sorted catalog, and closes the modal on success.
+  Scoped pages show a labeled engagement selector in the header; the penrecon
+  brand links back to the catalog. Switching opens the destination host inventory with a full navigation,
+  never reusing entity IDs or page state from another engagement.
 - Global search uses matching default-height input and Find button controls.
 - `Modal` composes Base UI dialogs with a labeled title, focus trapping, Escape
   dismissal, focus restoration, scrollable content, and an accessible close button.
