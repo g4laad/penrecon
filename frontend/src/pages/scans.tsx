@@ -24,7 +24,7 @@ export function ScansPage({ data }: { data: PageData }) {
   const scans = data.scans ?? [];
   const tools = data.tools ?? [];
   return (
-    <div className="space-y-3">
+    <div className="scans-page">
       <PageHeader
         title="Scans"
         description="Imports preserve notes, annotations, and credentials."
@@ -36,7 +36,7 @@ export function ScansPage({ data }: { data: PageData }) {
           Compare scans
         </a>
       </PageHeader>
-      <Section title="Import scan">
+      <Section title="Import scan" id="scan-import">
         <MutationForm
           action="/scans"
           className="flex flex-wrap items-end gap-3"
@@ -53,9 +53,9 @@ export function ScansPage({ data }: { data: PageData }) {
           <Button type="submit">Upload &amp; ingest</Button>
         </MutationForm>
       </Section>
-      <Section title={`Import history (${scans.length})`}>
+      <Section title={`Import history (${scans.length})`} id="scan-history">
         {scans.length ? (
-          <div className="overflow-x-auto rounded-lg border bg-card">
+          <div className="scan-history-table rounded-lg border bg-card">
             <Table className="data-table">
               <TableHeader>
                 <TableRow>

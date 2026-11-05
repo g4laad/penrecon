@@ -547,7 +547,8 @@ export default function App() {
             ? "workbench-shell inventory-shell"
             : path.startsWith("/hosts/") ||
                 path === "/credentials" ||
-                path === "/operations"
+                path === "/operations" ||
+                path === "/scans"
               ? "workbench-shell"
               : undefined
         }

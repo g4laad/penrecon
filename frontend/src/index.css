@@ -159,6 +159,14 @@
   .credential-workbench-page, .host-workbench-page, .host-workbench-tabs { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
   .credential-workbench-page { gap: .75rem; }
   .host-workbench-page { gap: .75rem; }
+  .scans-page { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; gap: .75rem; }
+  .scans-page > header, #scan-import { flex: none; margin: 0; }
+  #scan-import { max-height: 32dvh; overflow-y: auto; }
+  #scan-history { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; margin: 0; }
+  #scan-history > :first-child { flex: none; }
+  .scan-history-table { flex: 1; min-height: 0; overflow: hidden; }
+  .scan-history-table [data-slot="table-container"] { height: 100%; overflow: auto; overscroll-behavior: contain; }
+  .scan-history-table thead { position: sticky; top: 0; z-index: 1; background: var(--card); }
   .credential-workbench-page > :not(.credential-workbench), .host-workbench-page > header, .host-tabs { flex: none; }
   .host-workbench-tabs > [role=tabpanel]:not([hidden]) { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .host-workbench-tabs > [role=tabpanel] > :not(.host-inspector) { flex: none; }

@@ -56,9 +56,11 @@ The decorative footer is omitted on short inventory windows to preserve row spac
 Credentials retain full discovery notes and association controls, but omit empty
 notes and zero-count scope metadata. Operations omit absent metadata while
 retaining Start/End and From/To labels, commands, tags, and attachment access.
-The scan import-safety description remains available to screen readers;
-comparisons group the difference count with the result heading and display
-filenames as secondary metadata.
+The Scans view fits the viewport: import controls stay above a bounded history
+table with internal scrolling and sticky column headings. On compact screens,
+the import section scrolls independently when needed. The scan import-safety
+description remains available to screen readers; comparisons group the difference
+count with the result heading and display filenames as secondary metadata.
 
 ## Components and interactions
 
