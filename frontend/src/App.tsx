@@ -601,7 +601,7 @@ export default function App() {
                   className="w-52 pl-8"
                 />
               </div>
-              <Button type="submit" variant="outline" size="sm">
+              <Button type="submit" variant="outline">
                 Find
               </Button>
             </form>

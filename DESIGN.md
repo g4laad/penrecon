@@ -67,6 +67,7 @@ count with the result heading and display filenames as secondary metadata.
 - Buttons, inputs, textareas, badges, tables, native selects, separators, and
   dialogs come from the committed shadcn components. Interactive button/dialog
   behavior uses `@base-ui/react`.
+- Global search uses matching default-height input and Find button controls.
 - `Modal` composes Base UI dialogs with a labeled title, focus trapping, Escape
   dismissal, focus restoration, scrollable content, and an accessible close button.
 - `MutationForm` posts real multipart form data, disables duplicate submissions,
