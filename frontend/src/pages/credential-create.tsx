@@ -62,6 +62,7 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
   const [secret, setSecret] = useState("");
   const [reveal, setReveal] = useState(false);
   const [query, setQuery] = useState("");
+  const [associationsMounted, setAssociationsMounted] = useState(false);
   const [targets, setTargets] = useState<Record<number, number[]>>({});
   const [ready, setReady] = useState<Record<number, boolean>>({});
   const secretId = useId();
@@ -106,9 +107,9 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
       <p id={hintId} className="text-xs text-muted-foreground">Username or secret required; either can stand alone.</p>
     </div>
     <Field label="Discovery notes (optional)"><Textarea name="notes" rows={3} placeholder="Where was it found? What context should you keep?" /></Field>
-    <details className="rounded-md border p-3">
+    <details className="rounded-md border p-3" onToggle={(event) => { if (event.currentTarget.open) setAssociationsMounted(true); }}>
       <summary className="cursor-pointer text-sm font-semibold">Target associations · {hostIds.length} hosts / {serviceCount} services</summary>
-      <section className="grid gap-3 pt-4" aria-label="Target associations">
+      {associationsMounted && <section className="grid gap-3 pt-4" aria-label="Target associations">
         <div><h3 className="text-sm font-semibold">Link targets <span className="font-normal text-muted-foreground">· optional</span></h3><p className="mt-1 text-xs text-muted-foreground">Choose hosts, then specific services. Links record scope, not verified access.</p></div>
         <Input type="search" aria-label="Search target hosts" placeholder="Search hosts by IP…" value={query} onChange={(event) => setQuery(event.target.value)} />
         <div className="max-h-56 overflow-y-auto rounded-md border">
@@ -120,7 +121,7 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
           {hosts.length > 0 && !hosts.some((host) => host.ip.includes(query.trim())) && <p className="p-3 text-sm text-muted-foreground">No matching hosts. Existing selections are kept.</p>}
         </div>
         <p className="text-xs text-muted-foreground" role="status">{hostIds.length} hosts · {serviceCount} services selected. {hostIds.length ? "Unchecking a host also clears its services." : "Unlinked is OK."}</p>
-      </section>
+      </section>}
     </details>
     <p className="text-xs text-muted-foreground">Credentials and their links are never changed by scan imports.</p>
     <div className="actions justify-end border-t pt-4"><Button type="submit" disabled={!valid || loading}>Add credential</Button></div>

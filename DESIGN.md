@@ -124,6 +124,8 @@ count with the result heading and display filenames as secondary metadata.
   concealed kind-aware secret entry, and discovery notes appear first; optional
   host/service associations expand below. Search filters hosts without clearing
   selections. Unchecking a host clears its selected services.
+  Association controls mount only on first expansion, then remain mounted while
+  collapsed so selected hosts/services stay in the submitted form until dismissal.
   A username or secret is required. Credential and selected links save in one
   transaction; invalid or out-of-scope targets create nothing. Service-loading
   failures remain visible with retry, and saving waits for selected hosts to load.
