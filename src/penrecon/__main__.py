@@ -1,4 +1,4 @@
-"""penrecon CLI: `serve` (web UI) and `ingest` (feed a scan file)."""
+"""penrecon CLI: serve the UI, ingest scans, or seed a mock database."""
 
 from __future__ import annotations
 
@@ -26,6 +26,20 @@ def _ingest(args: argparse.Namespace) -> None:
     print(f"ingested scan #{scan.id}: {scan.host_count} hosts from {path.name} ({args.tool})")
 
 
+def _seed(args: argparse.Namespace) -> None:
+    from penrecon.seed import seed_database
+
+    init_db()
+    with Session(engine) as session:
+        try:
+            counts = seed_database(session, args.count)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+    print("Created mock data (no network commands executed):")
+    for table, count in counts.items():
+        print(f"  {table}: {count}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="penrecon")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -39,6 +53,10 @@ def main() -> None:
     p_ingest.add_argument("file")
     p_ingest.add_argument("--tool", default="nmap")
     p_ingest.set_defaults(func=_ingest)
+
+    p_seed = sub.add_parser("seed", help="fill an empty database with linked mock data")
+    p_seed.add_argument("--count", type=int, default=100, help="rows per type (100–131070)")
+    p_seed.set_defaults(func=_seed)
 
     args = parser.parse_args()
     args.func(args)

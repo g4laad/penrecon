@@ -22,6 +22,31 @@ Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
 server is needed at runtime. Rebuild before serving or packaging a wheel.
 
+## Mock-data test mode
+
+Create a separate test database, then serve it using the same data directory:
+
+```sh
+PENRECON_DATA=./data-test uv run penrecon seed
+PENRECON_DATA=./data-test uv run penrecon serve --port 8765
+```
+
+Open `http://127.0.0.1:8765`. Seeding creates 100 hosts, hostnames, services,
+scans, observations, notes, credentials, and operation logs; 200 annotations
+(host and service triage); and 100 rows in each relationship table. Each scan
+has retained nmap XML, and each operation has a downloadable text attachment.
+Statuses, service states, service products, and credential kinds vary.
+
+Use `seed --count 250` for a larger dataset (minimum 100, maximum 131070 per
+type). The command refuses a nonempty database: it never clears or merges
+existing recon data. To start another dataset, choose a fresh `PENRECON_DATA`
+directory. Normal `serve` does not generate data.
+
+All records are synthetic: IPs use the benchmark-only `198.18.0.0/15` range,
+hostnames end in `.mock.test`, and secrets are labeled as mock values.
+Displayed commands are examples only; seeding executes no scans or network
+requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
+
 ## What it does
 
 - **Ingest** nmap `-oX` XML and Amass hostname/IP exports via web upload or CLI.
