@@ -103,6 +103,9 @@ def index(
     direction = dir if dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
     page_no = int(page) if page.strip().isdigit() else 1
     per_limit = queries.resolve_per_page(per)
+    fit = request.query_params.get("fit", "")
+    if len(fit) <= 2 and fit.isascii() and fit.isdecimal() and 1 <= int(fit) <= 50:
+        per_limit = int(fit)
     all_rows = queries.host_rows(session)
     rows = queries.filter_hosts(
         all_rows, q=q, port=port_val, tag=tag, status=status, change=change

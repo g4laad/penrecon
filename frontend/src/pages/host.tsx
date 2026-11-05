@@ -334,6 +334,22 @@ function ManageHost({ data }: { data: PageData }) {
       trigger={<Button variant="outline">Manage host</Button>}
     >
       <div className="space-y-6">
+        <dl className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div>
+            <dt className="muted">First observed</dt>
+            <dd className="mono">
+              <time dateTime={host.first_seen}>
+                {timestamp(host.first_seen)}
+              </time>
+            </dd>
+          </div>
+          <div>
+            <dt className="muted">Last observed</dt>
+            <dd className="mono">
+              <time dateTime={host.last_seen}>{timestamp(host.last_seen)}</time>
+            </dd>
+          </div>
+        </dl>
         <MutationForm action={`${path}/edit`}>
           <Field label="IP address" name="ip" defaultValue={host.ip} required />
           <div>
@@ -501,12 +517,31 @@ function ServiceFilters({ data }: { data: PageData }) {
   const filtered = Boolean(
     data.f_port || data.f_state || data.f_service || data.f_status,
   );
+  const [expanded, setExpanded] = useState(filtered);
   return (
-    <details className="host-service-filters" open={filtered || undefined}>
-      <summary className="cursor-pointer text-sm font-medium">
-        Filter and sort services{filtered ? " · Filters active" : ""}
-      </summary>
-      <div className="pt-4">
+    <>
+      <div className="host-service-toolbar">
+        <p className="muted text-xs">
+          {(data.services ?? []).length} shown · {data.svc_total ?? 0}{" "}
+          {filtered ? "matching" : "total"} services
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-expanded={expanded}
+          aria-controls="host-service-filters"
+          onClick={() => setExpanded(!expanded)}
+        >
+          <ListFilter />
+          Filter and sort{filtered ? " · Filters active" : ""}
+        </Button>
+        <AddService data={data} />
+      </div>
+      <div
+        id="host-service-filters"
+        className="host-service-filters"
+        hidden={!expanded}
+      >
         <Filters>
           <Field
             label="Port filter"
@@ -574,7 +609,7 @@ function ServiceFilters({ data }: { data: PageData }) {
           </Button>
         </Filters>
       </div>
-    </details>
+    </>
   );
 }
 
@@ -619,59 +654,33 @@ export function HostPage({ data }: { data: PageData }) {
   );
   return (
     <div className="host-workbench-page">
-      <header className="space-y-4 border-b pb-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <a href="/" className="muted text-sm hover:underline">
+      <header className="space-y-2 border-b pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <a href="/" className="muted text-xs hover:underline">
             ← Host inventory
           </a>
-          <div className="actions">
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Network className="size-4 muted" aria-hidden="true" />
+          <h1 className="sr-only">Host {host.ip}</h1>
+          <span className="mono break-all text-[13px] font-semibold">
+            {host.ip}
+          </span>
+          <Badge variant="secondary">{data.host_ann?.status ?? "new"}</Badge>
+          {!!data.hostnames?.length && (
+            <p className="mono break-all text-xs muted">
+              {data.hostnames.map(([, name]) => name).join(" · ")}
+            </p>
+          )}
+          {data.host_ann?.tags.map((tag) => (
+            <Badge key={tag} variant="outline">
+              {tag}
+            </Badge>
+          ))}
+          <div className="actions ml-auto">
             <HostTriage data={data} />
             <ManageHost data={data} />
           </div>
-        </div>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <Network className="size-5 muted" aria-hidden="true" />
-              <h1 className="mono break-all text-2xl font-semibold tracking-tight">
-                {host.ip}
-              </h1>
-              <Badge variant="secondary">
-                {data.host_ann?.status ?? "new"}
-              </Badge>
-            </div>
-            <p className="mono break-all text-sm muted">
-              {data.hostnames?.map(([, name]) => name).join(" · ") ||
-                "No linked hostnames"}
-            </p>
-            {!!data.host_ann?.tags.length && (
-              <div className="flex flex-wrap gap-1">
-                {data.host_ann.tags.map((tag) => (
-                  <Badge key={tag} variant="outline">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-          <dl className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
-            <div>
-              <dt className="muted mb-1">First observed</dt>
-              <dd className="mono">
-                <time dateTime={host.first_seen}>
-                  {timestamp(host.first_seen)}
-                </time>
-              </dd>
-            </div>
-            <div>
-              <dt className="muted mb-1">Last observed</dt>
-              <dd className="mono">
-                <time dateTime={host.last_seen}>
-                  {timestamp(host.last_seen)}
-                </time>
-              </dd>
-            </div>
-          </dl>
         </div>
       </header>
       <Tabs.Root
@@ -695,14 +704,16 @@ export function HostPage({ data }: { data: PageData }) {
           </Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="services">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="muted text-sm">
-              {services.length} shown · {data.svc_total ?? 0}{" "}
-              {filtered ? "matching" : "total"} services
-            </p>
-            <AddService data={data} />
-          </div>
-          <ServiceFilters data={data} />
+          <ServiceFilters
+            key={JSON.stringify([
+              host.id,
+              data.f_port,
+              data.f_state,
+              data.f_service,
+              data.f_status,
+            ])}
+            data={data}
+          />
           <div className="host-inspector">
             <div className="host-item-list" aria-label="Select a service">
               {services.map((item) => (
@@ -711,65 +722,81 @@ export function HostPage({ data }: { data: PageData }) {
                   type="button"
                   aria-pressed={item.service_id === service?.service_id}
                   onClick={() => setServiceId(item.service_id)}
-                  className="host-item-choice"
+                  className="host-item-choice host-service-choice"
                 >
-                  <span className="flex items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <strong className="mono">
                       {item.port}/{item.proto}
                     </strong>
+                    {item.service_name && <span>{item.service_name}</span>}
                     <span className="muted text-xs">{item.state}</span>
                   </span>
-                  <span className="mt-2 block font-medium">
-                    {item.service_name || "Unidentified service"}
-                  </span>
-                  <span className="muted mt-1 block text-xs">
-                    {item.annotation?.status ?? "No triage recorded"}
-                  </span>
+                  {(item.product ||
+                    item.version ||
+                    item.annotation?.status) && (
+                    <span className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs">
+                      {(item.product || item.version) && (
+                        <span className="mono muted">
+                          {[item.product, item.version]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </span>
+                      )}
+                      {item.annotation?.status && (
+                        <span>{item.annotation.status}</span>
+                      )}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
             <div className="host-item-detail" aria-live="polite">
               {service ? (
-                <div className="space-y-5" key={service.service_id}>
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="muted mb-2 text-xs">Selected service</p>
-                      <h2 className="mono text-xl font-semibold">
+                <div className="space-y-3 text-[13px]" key={service.service_id}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="mono text-base font-semibold">
                         {service.port}/{service.proto}
                       </h2>
-                      <p className="mt-1 font-medium">
-                        {service.service_name || "Unidentified service"}
-                      </p>
+                      {service.service_name && (
+                        <span>{service.service_name}</span>
+                      )}
+                      <Badge variant="outline">{service.state}</Badge>
+                      {service.annotation?.status && (
+                        <Badge variant="secondary">
+                          {service.annotation.status}
+                        </Badge>
+                      )}
+                      {service.manual && (
+                        <Badge variant="outline">Manual override</Badge>
+                      )}
                     </div>
                     <ServiceDetail service={service} data={data} />
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{service.state}</Badge>
-                    <Badge variant="secondary">
-                      {service.annotation?.status ?? "No triage recorded"}
-                    </Badge>
-                    {service.manual && (
-                      <Badge variant="outline">Manual override</Badge>
-                    )}
-                  </div>
-                  <dl className="space-y-4 text-sm">
-                    <div>
-                      <dt className="muted text-xs">Product / version</dt>
-                      <dd className="mono mt-1 break-words">
-                        {[service.product, service.version]
-                          .filter(Boolean)
-                          .join(" ") || "Not identified"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="muted text-xs">Last observed</dt>
-                      <dd className="mono mt-1">
-                        {service.last_seen
-                          ? timestamp(service.last_seen)
-                          : "Not scanned"}
-                      </dd>
-                    </div>
-                  </dl>
+                  {(service.product ||
+                    service.version ||
+                    service.last_seen) && (
+                    <dl className="flex flex-wrap gap-x-6 gap-y-2">
+                      {(service.product || service.version) && (
+                        <div>
+                          <dt className="muted text-xs">Product / version</dt>
+                          <dd className="mono break-words">
+                            {[service.product, service.version]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </dd>
+                        </div>
+                      )}
+                      {service.last_seen && (
+                        <div>
+                          <dt className="muted text-xs">Last observed</dt>
+                          <dd className="mono">
+                            {timestamp(service.last_seen)}
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
+                  )}
                   {!!service.annotation?.tags.length && (
                     <div className="flex flex-wrap gap-1">
                       {service.annotation.tags.map((tag) => (
@@ -779,37 +806,30 @@ export function HostPage({ data }: { data: PageData }) {
                       ))}
                     </div>
                   )}
-                  <section className="border-t pt-4">
-                    <h3 className="mb-2 text-xs font-semibold">
-                      Credentials associated with this service
-                    </h3>
-                    {associatedCredentials.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        onClick={() => {
-                          setCredentialId(item.id);
-                          setSection("credentials");
-                          location.hash = "credentials";
-                        }}
-                        className="block break-all text-left text-sm underline underline-offset-4"
-                      >
-                        <span className="mono">
-                          {item.username || "No username"}
-                        </span>{" "}
-                        · {item.kind}
-                      </button>
-                    ))}
-                    {!associatedCredentials.length && (
-                      <p className="muted text-sm">
-                        No direct service links. Host-wide credentials are in
-                        the Credentials tab.
-                      </p>
-                    )}
-                    <p className="muted mt-2 text-xs">
-                      Links indicate association, not verified access.
-                    </p>
-                  </section>
+                  {!!associatedCredentials.length && (
+                    <section className="border-t pt-3">
+                      <h3 className="mb-1 text-xs font-semibold">
+                        Linked credentials
+                      </h3>
+                      {associatedCredentials.map((item) => (
+                        <button
+                          type="button"
+                          key={item.id}
+                          onClick={() => {
+                            setCredentialId(item.id);
+                            setSection("credentials");
+                            location.hash = "credentials";
+                          }}
+                          className="block break-all text-left text-sm underline underline-offset-4"
+                        >
+                          <span className="mono">
+                            {item.username || "No username"}
+                          </span>{" "}
+                          · {item.kind}
+                        </button>
+                      ))}
+                    </section>
+                  )}
                 </div>
               ) : (
                 <Empty>

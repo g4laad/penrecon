@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -31,7 +31,6 @@ import {
   Modal,
   MutationForm,
   Filters,
-  Pager,
   SortLink,
   Empty,
   Section,
@@ -58,7 +57,7 @@ function HostTable({
   const heading = (column: string, label: string) =>
     sortable ? <SortLink column={column}>{label}</SortLink> : label;
   return (
-    <Table>
+    <Table className={sortable ? "inventory-table" : undefined}>
       <TableHeader>
         <TableRow>
           <TableHead className="w-28">{heading("change", "Change")}</TableHead>
@@ -84,22 +83,33 @@ function HostTable({
               <a
                 className="mono font-semibold text-primary hover:underline"
                 href={"/hosts/" + row.id}
+                title={[row.ip, ...row.hostnames].join(" · ")}
               >
                 {row.ip}
               </a>
-              {row.hostnames.map((name) => (
-                <div key={name} className="mt-1 text-xs text-muted-foreground">
-                  {name}
+              {!!row.hostnames.length && (
+                <div className="mt-0.5 whitespace-normal break-words text-xs text-muted-foreground">
+                  {row.hostnames.join(" · ")}
                 </div>
-              ))}
+              )}
             </TableCell>
             <TableCell>
-              <div className="flex max-w-xl flex-wrap gap-1.5">
+              {sortable && row.open_count > 0 && (
+                <a href={`/hosts/${row.id}#services`} className="block text-xs">
+                  {row.open_count} open
+                </a>
+              )}
+              <div
+                className="flex max-w-xl flex-wrap gap-1"
+                title={row.open_services
+                  .map(([port, name]) => `${port} ${name}`)
+                  .join(", ")}
+              >
                 {row.open_services.map(([port, name]) => (
                   <a
                     key={port}
                     href={"/hosts/" + row.id + "#services"}
-                    className="rounded border bg-muted/40 px-1.5 py-0.5 text-xs"
+                    className="rounded border bg-muted/40 px-1 text-xs"
                   >
                     <span className="mono font-medium">{port}</span>
                     {name && (
@@ -113,14 +123,10 @@ function HostTable({
               </div>
             </TableCell>
             <TableCell>
-              {row.triaged ? (
-                <Badge variant="outline">{row.status}</Badge>
-              ) : (
-                <span className="muted text-xs">Not triaged</span>
-              )}
+              {row.triaged && <Badge variant="outline">{row.status}</Badge>}
             </TableCell>
             <TableCell>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1" title={row.tags.join(", ")}>
                 {row.tags.map((tag) => (
                   <Badge key={tag} variant="secondary">
                     {tag}
@@ -135,97 +141,243 @@ function HostTable({
   );
 }
 function Inventory({ data }: { data: PageData }) {
+  const viewport = useRef<HTMLDivElement>(null);
+  const [capacity, setCapacity] = useState(0);
+  const [result, setResult] = useState<{
+    source: PageData;
+    data: PageData;
+    capacity: number;
+  }>();
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const current = result?.source === data ? result.data : data;
+  const ready = result?.source === data && result.capacity === capacity;
+  const filtered = Boolean(
+    data.q || data.port || data.tag || data.status || data.change,
+  );
+
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element) return;
+    const resize = () => {
+      const rowHeight = Number.parseFloat(
+        getComputedStyle(element).getPropertyValue("--inventory-row-height"),
+      );
+      const headerHeight =
+        element.querySelector("thead")?.getBoundingClientRect().height ?? 32;
+      setCapacity(
+        Math.max(
+          1,
+          Math.min(
+            50,
+            Math.floor((element.clientHeight - headerHeight - 1) / rowHeight),
+          ),
+        ),
+      );
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(element);
+    resize();
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!capacity) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams(location.search);
+    const previousSize = Number(params.get("fit"));
+    if (previousSize > 0 && previousSize !== capacity) {
+      const firstRow =
+        (Math.max(1, Number(params.get("page")) || 1) - 1) * previousSize;
+      params.set("page", String(Math.floor(firstRow / capacity) + 1));
+    }
+    params.set("fit", String(capacity));
+    params.delete("per");
+    void fetch(`/?${params}`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error(`Unable to load hosts (${response.status})`);
+        const next = (await response.json()) as PageData;
+        if (controller.signal.aborted) return;
+        params.set("page", String(next.page ?? 1));
+        history.replaceState(null, "", `/?${params}`);
+        setError("");
+        setResult({ source: data, data: next, capacity });
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error ? cause.message : "Unable to load hosts",
+          );
+        }
+      });
+    return () => controller.abort();
+  }, [capacity, data, retry]);
+
+  function pageUrl(page: number): string {
+    const params = new URLSearchParams(location.search);
+    params.set("page", String(page));
+    params.set("fit", String(capacity));
+    params.delete("per");
+    return `/?${params}`;
+  }
   return (
-    <>
-      <PageHeader
-        title="Hosts"
-        description="Current inventory · latest observations, with your triage intact."
-      >
-        <Button
-          variant="outline"
-          render={<a href="/export/hosts.csv" download />}
-        >
-          <ArrowDownToLine />
-          Export CSV
-        </Button>
+    <div className="inventory-page">
+      <div className="inventory-toolbar">
         <Modal
-          title="New host"
+          title="Filter hosts"
           trigger={
-            <Button>
-              <Plus />
-              New host
+            <Button variant="outline">
+              <ListFilter />
+              Filter hosts{filtered ? " · Active" : ""}
             </Button>
           }
         >
-          <MutationForm action="/hosts">
+          <Filters>
             <Field
-              label="IP address"
-              name="ip"
-              required
-              placeholder="10.0.0.5"
-              autoComplete="off"
+              label="Search inventory"
+              name="q"
+              type="search"
+              defaultValue={data.q}
+              placeholder="IP, hostname, service"
             />
-            <Button type="submit">Add host</Button>
-          </MutationForm>
+            <Field
+              label="Port"
+              name="port"
+              type="number"
+              defaultValue={data.port}
+              className="w-24"
+            />
+            <Field
+              label="Tag"
+              name="tag"
+              defaultValue={data.tag}
+              className="w-32"
+            />
+            <SelectField
+              label="Status"
+              name="status"
+              defaultValue={data.status}
+              empty="Any status"
+              options={data.statuses ?? []}
+            />
+            <SelectField
+              label="Change"
+              name="change"
+              defaultValue={data.change}
+              empty="Any change"
+              options={["new", "changed", "unchanged"]}
+            />
+            <input type="hidden" name="sort" value={data.sort ?? "change"} />
+            <input type="hidden" name="dir" value={data.direction ?? ""} />
+            <input type="hidden" name="fit" value={capacity || 1} />
+            <Button type="submit" variant="outline">
+              <ListFilter />
+              Apply
+            </Button>
+          </Filters>
         </Modal>
-      </PageHeader>
-      <Filters>
-        <Field
-          label="Search inventory"
-          name="q"
-          type="search"
-          defaultValue={data.q}
-          placeholder="IP, hostname, service"
-        />
-        <Field
-          label="Port"
-          name="port"
-          type="number"
-          defaultValue={data.port}
-          className="w-24"
-        />
-        <Field
-          label="Tag"
-          name="tag"
-          defaultValue={data.tag}
-          className="w-32"
-        />
-        <SelectField
-          label="Status"
-          name="status"
-          defaultValue={data.status}
-          empty="Any status"
-          options={data.statuses ?? []}
-        />
-        <SelectField
-          label="Change"
-          name="change"
-          defaultValue={data.change}
-          empty="Any change"
-          options={["new", "changed", "unchanged"]}
-        />
-        <input type="hidden" name="sort" value={data.sort ?? "change"} />
-        <input type="hidden" name="dir" value={data.direction ?? ""} />
-        <Button type="submit" variant="outline">
-          <ListFilter />
-          Apply
-        </Button>
         <Button variant="outline" render={<a href="/" />}>
           <RotateCcw />
           Reset
         </Button>
-      </Filters>
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex items-center justify-between border-b px-4 py-3 text-sm">
-          <span className="font-medium">Host inventory</span>
-          <span className="muted">
-            {data.matched ?? 0} of {data.total ?? 0} hosts
-          </span>
-        </div>
-        <HostTable rows={data.rows ?? []} sortable />
+        <PageHeader title="Hosts">
+          <Button
+            variant="outline"
+            render={<a href="/export/hosts.csv" download />}
+          >
+            <ArrowDownToLine />
+            Export CSV
+          </Button>
+          <Modal
+            title="New host"
+            trigger={
+              <Button>
+                <Plus />
+                New host
+              </Button>
+            }
+          >
+            <MutationForm action="/hosts">
+              <Field
+                label="IP address"
+                name="ip"
+                required
+                placeholder="10.0.0.5"
+                autoComplete="off"
+              />
+              <Button type="submit">Add host</Button>
+            </MutationForm>
+          </Modal>
+        </PageHeader>
       </div>
-      <Pager data={data} total={data.matched} />
-    </>
+      <div className="inventory-results rounded-lg border bg-card">
+        <div
+          className="shrink-0 border-b px-3 py-1.5 text-xs text-muted-foreground"
+          role="status"
+        >
+          {ready
+            ? `${current.matched ?? 0} of ${current.total ?? 0} hosts`
+            : "Loading hosts…"}
+        </div>
+        <div
+          className="inventory-viewport"
+          ref={viewport}
+          aria-busy={!ready && !error}
+        >
+          {error ? (
+            <div className="p-3 text-sm" role="alert">
+              {error}
+              <Button
+                variant="outline"
+                className="ml-2"
+                onClick={() => setRetry((value) => value + 1)}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : ready ? (
+            <HostTable rows={current.rows ?? []} sortable />
+          ) : null}
+        </div>
+      </div>
+      <nav aria-label="Pagination" className="inventory-pagination">
+        <span className="muted text-xs" aria-live="polite">
+          Page {current.page ?? 1} of {current.pages ?? 1}
+        </span>
+        <div className="actions">
+          <Button
+            variant="outline"
+            nativeButton={false}
+            disabled={!ready || (current.page ?? 1) <= 1}
+            render={
+              <a
+                href={pageUrl((current.page ?? 1) - 1)}
+                aria-label="Previous page"
+              />
+            }
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            disabled={!ready || (current.page ?? 1) >= (current.pages ?? 1)}
+            render={
+              <a
+                href={pageUrl((current.page ?? 1) + 1)}
+                aria-label="Next page"
+              />
+            }
+          >
+            Next
+          </Button>
+        </div>
+      </nav>
+    </div>
   );
 }
 function SearchPage({ data }: { data: PageData }) {
@@ -236,10 +388,7 @@ function SearchPage({ data }: { data: PageData }) {
     (results?.credentials.length ?? 0);
   return (
     <>
-      <PageHeader
-        title="Search"
-        description="Find hosts, notes, and credentials across your recon."
-      />
+      <PageHeader title="Search" />
       <Filters>
         <Field
           label="Search everything"
@@ -257,17 +406,22 @@ function SearchPage({ data }: { data: PageData }) {
         <Empty>Enter a search term to explore your recon.</Empty>
       ) : (
         <>
-          <p role="status" className="mb-4 text-sm text-muted-foreground">
+          <p role="status" className="mb-2 text-xs text-muted-foreground">
             {count} results for “{data.q}”
           </p>
-          <Section title={`Hosts (${results?.hosts.length ?? 0})`}>
-            <HostTable rows={results?.hosts ?? []} />
-          </Section>
-          <Section title={`Notes (${results?.notes.length ?? 0})`}>
-            {results?.notes.length ? (
+          {count === 0 && (
+            <Empty>No matching hosts, notes, or credentials.</Empty>
+          )}
+          {!!results?.hosts.length && (
+            <Section title={`Hosts (${results.hosts.length})`}>
+              <HostTable rows={results.hosts} />
+            </Section>
+          )}
+          {!!results?.notes.length && (
+            <Section title={`Notes (${results.notes.length})`}>
               <div className="divide-y">
                 {results.notes.map((note, index) => (
-                  <article key={index} className="py-3">
+                  <article key={index} className="py-2 text-[13px]">
                     <a
                       className="font-medium text-primary hover:underline"
                       href={note.href}
@@ -277,18 +431,16 @@ function SearchPage({ data }: { data: PageData }) {
                     <p className="mono mt-1 text-xs text-muted-foreground">
                       {note.where}
                     </p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm">
+                    <p className="mt-1 whitespace-pre-wrap text-[13px]">
                       {note.preview}
                     </p>
                   </article>
                 ))}
               </div>
-            ) : (
-              <Empty>No matching notes.</Empty>
-            )}
-          </Section>
-          <Section title={`Credentials (${results?.credentials.length ?? 0})`}>
-            {results?.credentials.length ? (
+            </Section>
+          )}
+          {!!results?.credentials.length && (
+            <Section title={`Credentials (${results.credentials.length})`}>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -330,10 +482,8 @@ function SearchPage({ data }: { data: PageData }) {
                   ))}
                 </TableBody>
               </Table>
-            ) : (
-              <Empty>No matching credentials.</Empty>
-            )}
-          </Section>
+            </Section>
+          )}
         </>
       )}
     </>
@@ -391,80 +541,90 @@ export default function App() {
   const active = path.startsWith("/hosts/") ? "/" : path;
   return (
     <PageContext.Provider value={{ data, refresh, navigate }}>
-      <div className={path.startsWith("/hosts/") || path === "/credentials" ? "workbench-shell" : undefined}>
-      <a className="skip-link" href="#main">
-        Skip to content
-      </a>
-      <header className="site-header">
-        <div className="shell flex min-h-16 flex-wrap items-center gap-4 py-3">
-          <a
-            href="/"
-            className="mr-4 flex items-center gap-2 text-base font-semibold tracking-tight"
-          >
-            <Activity className="size-5 text-primary" />
-            penrecon
-          </a>
-          <nav
-            aria-label="Primary"
-            className="flex flex-wrap items-center gap-1"
-          >
-            {navigation.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                aria-current={active === item.href ? "page" : undefined}
-                className={"nav-link " + (active === item.href ? "active" : "")}
-              >
-                <item.icon className="size-4" />
-                {item.label}
-              </a>
-            ))}
-          </nav>
-          <form
-            action="/search"
-            method="get"
-            className="ml-auto flex items-center gap-2"
-            role="search"
-            aria-label="Global search"
-          >
-            <div className="relative">
-              <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-              <Input
-                type="search"
-                name="q"
-                aria-label="Global search"
-                placeholder="Search everything…"
-                defaultValue={path === "/search" ? data.q : ""}
-                className="w-52 pl-8"
-              />
-            </div>
-            <Button type="submit" variant="outline" size="sm">
-              Find
-            </Button>
-          </form>
-        </div>
-      </header>
-      <main id="main" className="shell py-7" tabIndex={-1}>
-        {path.startsWith("/hosts/") ? (
-          <HostPage data={data} />
-        ) : path === "/credentials" ? (
-          <CredentialsPage data={data} />
-        ) : path === "/scans" ? (
-          <ScansPage data={data} />
-        ) : path === "/diff" ? (
-          <DiffPage data={data} />
-        ) : path === "/operations" ? (
-          <OperationsPage data={data} />
-        ) : path === "/search" ? (
-          <SearchPage data={data} />
-        ) : (
-          <Inventory data={data} />
-        )}
-      </main>
-      <footer className="shell border-t py-4 text-xs text-muted-foreground">
-        penrecon · Local recon workspace{" "}
-        <span className="float-right">Press / to focus search</span>
-      </footer>
+      <div
+        className={
+          path === "/"
+            ? "workbench-shell inventory-shell"
+            : path.startsWith("/hosts/") || path === "/credentials"
+              ? "workbench-shell"
+              : undefined
+        }
+      >
+        <a className="skip-link" href="#main">
+          Skip to content
+        </a>
+        <header className="site-header">
+          <div className="shell flex min-h-12 flex-wrap items-center gap-2 py-2">
+            <a
+              href="/"
+              className="mr-4 flex items-center gap-2 text-base font-semibold tracking-tight"
+            >
+              <Activity className="size-5 text-primary" />
+              penrecon
+            </a>
+            <nav
+              aria-label="Primary"
+              className="flex flex-wrap items-center gap-1"
+            >
+              {navigation.map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active === item.href ? "page" : undefined}
+                  className={
+                    "nav-link " + (active === item.href ? "active" : "")
+                  }
+                >
+                  <item.icon className="size-4" />
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+            <form
+              action="/search"
+              method="get"
+              className="ml-auto flex items-center gap-2"
+              role="search"
+              aria-label="Global search"
+            >
+              <div className="relative">
+                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  name="q"
+                  aria-label="Global search"
+                  placeholder="Search everything…"
+                  defaultValue={path === "/search" ? data.q : ""}
+                  className="w-52 pl-8"
+                />
+              </div>
+              <Button type="submit" variant="outline" size="sm">
+                Find
+              </Button>
+            </form>
+          </div>
+        </header>
+        <main id="main" className="shell py-4" tabIndex={-1}>
+          {path.startsWith("/hosts/") ? (
+            <HostPage data={data} />
+          ) : path === "/credentials" ? (
+            <CredentialsPage data={data} />
+          ) : path === "/scans" ? (
+            <ScansPage data={data} />
+          ) : path === "/diff" ? (
+            <DiffPage data={data} />
+          ) : path === "/operations" ? (
+            <OperationsPage data={data} />
+          ) : path === "/search" ? (
+            <SearchPage data={data} />
+          ) : (
+            <Inventory data={data} />
+          )}
+        </main>
+        <footer className="shell border-t py-2 text-xs text-muted-foreground">
+          penrecon · Local recon workspace{" "}
+          <span className="float-right">Press / to focus search</span>
+        </footer>
       </div>
     </PageContext.Provider>
   );

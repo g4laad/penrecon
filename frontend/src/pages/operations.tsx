@@ -293,77 +293,81 @@ function OperationEditor({ operation }: { operation: Operation }) {
 function OperationRow({ operation }: { operation: Operation }) {
   return (
     <TableRow>
-      <TableCell className="mono whitespace-nowrap align-top text-xs">
-        {operation.started_at ? (
-          <time dateTime={operation.started_at}>
-            {operation.started_at.replace("T", " ").slice(0, 16)}
-          </time>
-        ) : (
-          <span className="muted">No start time</span>
+      <TableCell className="mono whitespace-nowrap align-top">
+        {operation.started_at && (
+          <div>
+            <span className="muted text-xs">Start </span>
+            <time dateTime={operation.started_at}>
+              {operation.started_at.replace("T", " ").slice(0, 16)}
+            </time>
+          </div>
         )}
-        <span className="muted my-1 block">to</span>
-        {operation.ended_at ? (
-          <time dateTime={operation.ended_at}>
-            {operation.ended_at.replace("T", " ").slice(0, 16)}
-          </time>
-        ) : (
-          <span className="muted">No end time</span>
+        {operation.ended_at && (
+          <div>
+            <span className="muted text-xs">End </span>
+            <time dateTime={operation.ended_at}>
+              {operation.ended_at.replace("T", " ").slice(0, 16)}
+            </time>
+          </div>
         )}
       </TableCell>
-      <TableCell className="mono max-w-56 align-top break-words">
-        <div>{operation.source || "—"}</div>
-        <div className="muted" aria-label="to">
-          →
-        </div>
-        <div>{operation.destination || "—"}</div>
+      <TableCell className="mono max-w-56 align-top whitespace-normal break-words">
+        {operation.source && (
+          <div>
+            <span className="muted text-xs">From </span>
+            {operation.source}
+          </div>
+        )}
+        {operation.destination && (
+          <div>
+            <span className="muted text-xs">To </span>
+            {operation.destination}
+          </div>
+        )}
       </TableCell>
-      <TableCell className="mono align-top">
-        {operation.tool || <span className="muted">—</span>}
-      </TableCell>
-      <TableCell className="mono max-w-40 align-top break-words">
-        {operation.user_context || <span className="muted">—</span>}
+      <TableCell className="mono align-top">{operation.tool}</TableCell>
+      <TableCell className="mono max-w-40 align-top whitespace-normal break-words">
+        {operation.user_context}
       </TableCell>
       <TableCell className="min-w-56 max-w-md align-top">
         <pre
-          className="mono line-clamp-4 whitespace-pre-wrap break-all text-sm"
+          className="mono line-clamp-4 whitespace-pre-wrap break-all text-[13px]"
           title={operation.command}
         >
           {operation.command}
         </pre>
         {operation.description && (
-          <p className="muted mt-2 line-clamp-2 whitespace-pre-wrap text-xs">
+          <p className="muted mt-1 line-clamp-2 whitespace-pre-wrap">
             {operation.description}
           </p>
         )}
-        <div className="muted mt-2 flex flex-wrap gap-x-3 text-xs">
-          {operation.output && <span>Output recorded</span>}
-          {operation.comments && <span>Comments recorded</span>}
-        </div>
+        {(operation.output || operation.comments) && (
+          <div className="muted mt-1 flex flex-wrap gap-x-3 text-xs">
+            {operation.output && <span>Output recorded</span>}
+            {operation.comments && <span>Comments recorded</span>}
+          </div>
+        )}
       </TableCell>
       <TableCell className="max-w-48 align-top">
-        <div className="flex flex-wrap gap-1">
-          {operation.tags.length ? (
-            operation.tags.map((tag, index) => (
+        {!!operation.tags.length && (
+          <div className="flex flex-wrap gap-1">
+            {operation.tags.map((tag, index) => (
               <Badge key={`${tag}-${index}`} variant="secondary">
                 {tag}
               </Badge>
-            ))
-          ) : (
-            <span className="muted">—</span>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </TableCell>
-      <TableCell className="max-w-48 align-top">
-        {operation.attachment_name ? (
+      <TableCell className="max-w-48 align-top whitespace-normal">
+        {operation.attachment_name && (
           <a
             href={`/operations/${operation.id}/attachment`}
-            className="break-all text-sm underline underline-offset-4"
+            className="break-all text-[13px] underline underline-offset-4"
             download
           >
             {operation.attachment_name}
           </a>
-        ) : (
-          <span className="muted">—</span>
         )}
       </TableCell>
       <TableCell className="align-top">
@@ -374,6 +378,7 @@ function OperationRow({ operation }: { operation: Operation }) {
               type="button"
               variant="outline"
               size="sm"
+              className="text-[13px]"
               aria-label={`View or edit operation ${operation.id}`}
             >
               View / edit
@@ -390,11 +395,8 @@ function OperationRow({ operation }: { operation: Operation }) {
 export function OperationsPage({ data }: { data: PageData }) {
   const operations = data.operations ?? [];
   return (
-    <div className="stack">
-      <PageHeader
-        title="Operation log"
-        description="A searchable timeline of commands, context, output, and evidence."
-      >
+    <div className="stack gap-3">
+      <PageHeader title="Operation log">
         <Modal
           title="Add operation"
           trigger={<Button type="button">Add operation</Button>}
@@ -436,7 +438,7 @@ export function OperationsPage({ data }: { data: PageData }) {
           </a>
         )}
       </Filters>
-      <p className="muted text-sm" role="status">
+      <p className="muted text-xs" role="status">
         {data.total ?? operations.length} matched operation
         {(data.total ?? operations.length) === 1 ? "" : "s"}
       </p>
@@ -467,7 +469,7 @@ export function OperationsPage({ data }: { data: PageData }) {
           {data.q ? (
             <>No operations match “{data.q}”.</>
           ) : (
-            "No operations recorded yet. Add the command or action that started your timeline."
+            "No operations recorded yet."
           )}
         </Empty>
       )}

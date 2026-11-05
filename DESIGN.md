@@ -29,10 +29,36 @@ for legibility. Status and diff badges remain neutral and always include text;
 destructive actions retain red.
 
 Use `.mono` for IPs, ports, protocol/version strings, timestamps, commands,
-output, and secrets. Body text is 14px; headings distinguish page and section
-hierarchy without oversized chrome. Layout has a maximum width of 1440px,
-responsive gutters, compact actions, and two-column forms collapsing on mobile.
-Tables scroll horizontally rather than crushing technical content.
+output, and secrets. Body and form text remain 14px; data is 13px, and secondary
+metadata/table headings are 12px. Page titles and descriptions are screen-reader
+only; visible page-level rows contain actions, without an empty row on pages
+without actions. Global navigation/search and browser titles remain unchanged.
+Compact section, navigation, pagination, and row spacing prioritize visible records.
+Layout has a maximum width of 1440px, responsive gutters, compact actions, and
+two-column forms collapsing on mobile. Except for the viewport-fitted Hosts
+inventory, tables scroll horizontally rather than crushing technical content.
+Page-data table density overrides component utility defaults outside the
+component layer, without changing dialog/form typography.
+Inventory combines linked hostnames and omits unassigned triage placeholders;
+search displays populated result categories or one meaningful no-results state.
+The Hosts inventory stays within the viewport with no document or table scroll.
+Its 56px summary rows use fixed-width columns, ellipsized hostnames, and bounded
+service/tag previews; the complete record remains reachable through host links,
+with full summary values in hover titles and explicit open-service counts.
+On narrow screens, change/tags columns and service names give way to host identity,
+port previews, and triage. Filters open in a dialog; Reset stays beside the filter
+trigger, while export and creation right-align in the same wrapping toolbar.
+Pagination stays visible and automatically fits 1–50 rows to the available height.
+The `fit` query parameter supplies that bounded server-side page size, overriding
+manual `per` choices; filtering/sorting still apply before pagination. Resizing
+retains the first visible host on the resized page, with ordinary server clamping.
+The decorative footer is omitted on short inventory windows to preserve row space.
+Credentials retain full discovery notes and association controls, but omit empty
+notes and zero-count scope metadata. Operations omit absent metadata while
+retaining Start/End and From/To labels, commands, tags, and attachment access.
+The scan import-safety description remains available to screen readers;
+comparisons group the difference count with the result heading and display
+filenames as secondary metadata.
 
 ## Components and interactions
 
@@ -49,8 +75,9 @@ Tables scroll horizontally rather than crushing technical content.
   No custom hour/minute selectors or forced time format.
 - Inventory/service filters, sorting, pagination, scan comparison, and search
   use addressable query parameters. Page URLs can be bookmarked and reloaded.
-  Pagination buttons bottom-align with the rows selector and page input, not
-  with the combined height of their labels and controls.
+  Inventory uses automatic viewport-sized pagination with Previous/Next controls.
+  Other pagination buttons bottom-align with their rows selector and page input,
+  not with the combined height of their labels and controls.
   Inventory and host-service filters use outline Apply and Reset buttons with
   filter and rotate-back icons. Reset clears filters; host-service reset keeps
   the current rows-per-page setting.
@@ -94,9 +121,20 @@ Tables scroll horizontally rather than crushing technical content.
   Active tabs use `#services`, `#notes`, and `#credentials` and survive reloads
   and browser history. Selection stays intact across tab changes; deletion or
   filtering falls back to the first available item.
-- Host identity, status, tags, hostnames, and observation dates stay above the
-  workbench. Host triage and host management are secondary dialog actions;
-  management contains rename, hostname links, and confirmed deletion.
+- Host identity remains visible as 13px data, with status, linked hostnames, and
+  tags in a compact wrapping row; its page heading is screen-reader only.
+  Observation dates live in Manage host rather than the
+  main header; absent hostnames do not create a placeholder row.
+  Service data uses 13px text and 12px secondary metadata, compact two-line list
+  entries where content fits, and reduced pane padding. State and assigned triage
+  remain visible; missing product/version, dates, and triage omit placeholder text.
+  The selected service combines its identity and badges in one header; credential
+  links appear only when present. Forms retain their existing typography.
+  Service count, filter toggle, and creation share a wrapping toolbar; active
+  filters are labeled and initially expanded, with addressable query parameters.
+  Host triage and host management right-align on the host identity row, wrapping
+  when needed on narrow screens. Both open secondary dialogs; management contains
+  observation dates, rename, hostname links, and confirmed deletion.
   Service editing/reset/deletion, note creation/editing/deletion, and linked
   credential editing retain the existing mutation and validation contracts.
   Service filtering, sorting, and pagination remain server-side and addressable

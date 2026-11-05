@@ -214,14 +214,12 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && (
-          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-        )}
+    <header className={children ? "mb-2 flex justify-end" : "sr-only"}>
+      <div className="sr-only">
+        <h1>{title}</h1>
+        {description && <p>{description}</p>}
       </div>
-      <div className="actions">{children}</div>
+      {children && <div className="actions">{children}</div>}
     </header>
   );
 }
@@ -238,8 +236,8 @@ export function Section({
 }) {
   return (
     <section id={id} className="page-section">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">{title}</h2>
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
         {action}
       </div>
       {children}
@@ -253,7 +251,7 @@ export function Filters({ children }: { children: ReactNode }) {
   return (
     <form
       method="get"
-      className="mb-5 flex flex-wrap items-end gap-3"
+      className="mb-3 flex flex-wrap items-end gap-2"
       role="search"
     >
       {children}
@@ -304,7 +302,7 @@ export function Pager({
   return (
     <nav
       aria-label="Pagination"
-      className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm"
+      className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs"
     >
       <span className="muted" aria-live="polite">
         {total !== undefined ? `${total} results · ` : ""}Page {page} of {pages}

@@ -24,14 +24,14 @@ export function ScansPage({ data }: { data: PageData }) {
   const scans = data.scans ?? [];
   const tools = data.tools ?? [];
   return (
-    <div className="stack">
+    <div className="space-y-3">
       <PageHeader
         title="Scans"
-        description="Import scan results into the current inventory. Existing notes, annotations, and credentials stay intact."
+        description="Imports preserve notes, annotations, and credentials."
       >
         <a
           href="/diff"
-          className="text-sm font-medium underline underline-offset-4"
+          className="text-[13px] font-medium underline underline-offset-4"
         >
           Compare scans
         </a>
@@ -107,14 +107,14 @@ export function DiffPage({ data }: { data: PageData }) {
     label: `#${scan.id} ${scan.filename} (${scan.imported_at.replace("T", " ").slice(0, 16)})`,
   }));
   return (
-    <div className="stack">
+    <div className="space-y-3">
       <PageHeader
         title="Diff scans"
-        description="Compare immutable scan observations, from scan A to scan B."
+        description="Compare immutable observations."
       >
         <a
           href="/scans"
-          className="text-sm font-medium underline underline-offset-4"
+          className="text-[13px] font-medium underline underline-offset-4"
         >
           Scan history
         </a>
@@ -145,11 +145,17 @@ export function DiffPage({ data }: { data: PageData }) {
         </Empty>
       )}
       {result ? (
-        <Section title={`#${result.scan_a.id} → #${result.scan_b.id}`}>
-          <p className="muted mb-3 text-sm break-words">
-            {result.scan_a.filename} → {result.scan_b.filename} ·{" "}
-            {result.entries.length} difference
-            {result.entries.length === 1 ? "" : "s"}
+        <Section
+          title={`#${result.scan_a.id} → #${result.scan_b.id}`}
+          action={
+            <span className="muted text-xs">
+              {result.entries.length} difference
+              {result.entries.length === 1 ? "" : "s"}
+            </span>
+          }
+        >
+          <p className="muted mb-2 text-xs break-words">
+            {result.scan_a.filename} → {result.scan_b.filename}
           </p>
           {result.entries.length ? (
             <div className="overflow-x-auto rounded-lg border bg-card">
@@ -203,11 +209,6 @@ export function DiffPage({ data }: { data: PageData }) {
             <Empty>No differences between these scans.</Empty>
           )}
         </Section>
-      ) : scans.length > 0 ? (
-        <Empty>
-          Select two scans and compare to see added, removed, and changed
-          services.
-        </Empty>
       ) : null}
     </div>
   );

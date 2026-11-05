@@ -83,20 +83,20 @@ function CredentialLinks({
     (host) => !credential.hosts.some((link) => link.host_id === host.id),
   );
   return (
-    <div className="grid items-start gap-4 md:grid-cols-2">
+    <div className="grid items-start gap-3 md:grid-cols-2">
       <div className="stack gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide">
           Linked hosts
         </h3>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {credential.hosts.map((host) => (
             <div
               key={host.host_id}
-              className="actions rounded-md border px-2 py-1"
+              className="actions rounded-md border px-2 py-0.5"
             >
               <a
                 href={`/hosts/${host.host_id}`}
-                className="mono text-sm underline underline-offset-4"
+                className="mono text-[13px] underline underline-offset-4"
               >
                 {host.ip}
               </a>
@@ -117,7 +117,7 @@ function CredentialLinks({
             </div>
           ))}
           {!credential.hosts.length && (
-            <span className="muted text-sm">No linked hosts.</span>
+            <span className="muted text-xs">No linked hosts.</span>
           )}
         </div>
         {availableHosts.length > 0 && (
@@ -144,15 +144,15 @@ function CredentialLinks({
         <h3 className="text-xs font-semibold uppercase tracking-wide">
           Linked services
         </h3>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {credential.services.map((service) => (
             <div
               key={service.service_id}
-              className="actions rounded-md border px-2 py-1"
+              className="actions rounded-md border px-2 py-0.5"
             >
               <a
                 href={`/hosts/${service.host_id}`}
-                className="mono text-sm underline underline-offset-4"
+                className="mono text-[13px] underline underline-offset-4"
               >
                 {service.ip}:{service.port}/{service.proto}
                 {service.name ? ` ${service.name}` : ""}
@@ -174,7 +174,7 @@ function CredentialLinks({
             </div>
           ))}
           {!credential.services.length && (
-            <span className="muted text-sm">No linked services.</span>
+            <span className="muted text-xs">No linked services.</span>
           )}
         </div>
         {!credential.hosts.length ? (
@@ -218,18 +218,24 @@ function CredentialDetail({
 }) {
   return (
     <article className="credential-detail" aria-labelledby="credential-title">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b pb-4">
-        <div className="min-w-0">
-          <p className="credential-label mb-2">Credential detail</p>
-          <h2 id="credential-title" className="mono break-all text-lg font-semibold">
+      <header className="flex flex-wrap items-start justify-between gap-2 border-b pb-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2
+            id="credential-title"
+            className="mono break-all text-[13px] font-semibold"
+          >
             {credential.username || "No username"}
           </h2>
+          <Badge variant="secondary">{credential.kind}</Badge>
         </div>
         <div className="actions">
-          <Badge variant="secondary">{credential.kind}</Badge>
           <Modal
             title="Edit credential"
-            trigger={<Button type="button" variant="outline" size="sm">Edit credential</Button>}
+            trigger={
+              <Button type="button" variant="outline" size="sm">
+                Edit credential
+              </Button>
+            }
           >
             <MutationForm action={`/credentials/${credential.id}/edit`}>
               <CredentialFields credential={credential} kinds={kinds} />
@@ -241,31 +247,46 @@ function CredentialDetail({
         </div>
       </header>
       <section className="stack gap-2" aria-labelledby="credential-secret">
-        <h3 id="credential-secret" className="credential-label">Secret</h3>
-        <div className="rounded-md border bg-muted/30 p-3">
+        <h3 id="credential-secret" className="credential-label text-xs">
+          Secret
+        </h3>
+        <div className="rounded-md border bg-muted/30 p-2 text-[13px]">
           <Secret key={credential.secret} value={credential.secret} />
         </div>
       </section>
-      <section className="stack gap-3" aria-labelledby="credential-scope">
-        <h3 id="credential-scope" className="credential-label">Scope</h3>
+      <section className="stack gap-2" aria-labelledby="credential-scope">
+        <h3 id="credential-scope" className="credential-label text-xs">
+          Scope
+        </h3>
         <CredentialLinks credential={credential} hosts={hosts} />
         <p className="muted text-xs">
           Associations only; links do not establish that access was verified.
         </p>
       </section>
-      <section aria-labelledby="credential-notes">
-        <h3 id="credential-notes" className="credential-label mb-2">Discovery notes</h3>
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-          {credential.notes || <span className="muted">No discovery notes recorded.</span>}
+      {credential.notes && (
+        <section aria-labelledby="credential-notes">
+          <h3 id="credential-notes" className="credential-label mb-1 text-xs">
+            Discovery notes
+          </h3>
+          <p className="whitespace-pre-wrap break-words text-[13px]">
+            {credential.notes}
+          </p>
+        </section>
+      )}
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t pt-2">
+        <p className="muted text-xs">
+          Added <time className="mono">{credential.created_at}</time>
         </p>
-      </section>
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-        <p className="muted text-xs">Added <time className="mono">{credential.created_at}</time></p>
         <MutationForm
           action={`/credentials/${credential.id}/delete`}
           confirm={`Delete credential ${credential.username || "(no username)"} and all its links? This cannot be undone.`}
         >
-          <Button type="submit" variant="ghost" size="sm" className="text-destructive">
+          <Button
+            type="submit"
+            variant="ghost"
+            size="sm"
+            className="text-destructive"
+          >
             Delete credential
           </Button>
         </MutationForm>
@@ -293,19 +314,31 @@ export function CredentialsPage({ data }: { data: PageData }) {
   const kinds = data.kinds ?? [];
   const hosts = data.hosts ?? [];
   const credentials = all.filter((credential) => {
-    const linked = Boolean(credential.hosts.length || credential.services.length);
+    const linked = Boolean(
+      credential.hosts.length || credential.services.length,
+    );
     const text = [
-      credential.username, credential.kind, credential.notes,
+      credential.username,
+      credential.kind,
+      credential.notes,
       ...credential.hosts.map((host) => host.ip),
-      ...credential.services.map((service) =>
-        `${service.ip}:${service.port}/${service.proto} ${service.name ?? ""}`),
-    ].join(" ").toLowerCase();
-    return (!kind || credential.kind === kind)
-      && (!scope || (scope === "linked" ? linked : !linked))
-      && text.includes(query.toLowerCase());
+      ...credential.services.map(
+        (service) =>
+          `${service.ip}:${service.port}/${service.proto} ${service.name ?? ""}`,
+      ),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return (
+      (!kind || credential.kind === kind) &&
+      (!scope || (scope === "linked" ? linked : !linked)) &&
+      text.includes(query.toLowerCase())
+    );
   });
-  const selected = credentials.find((credential) =>
-    currentUrl.hash === `#credential-${credential.id}`) ?? credentials[0];
+  const selected =
+    credentials.find(
+      (credential) => currentUrl.hash === `#credential-${credential.id}`,
+    ) ?? credentials[0];
   function filter(values: Record<string, string>) {
     const next = new URL(location.href);
     for (const [key, value] of Object.entries(values)) {
@@ -318,71 +351,139 @@ export function CredentialsPage({ data }: { data: PageData }) {
   }
   return (
     <div className="credential-workbench-page">
-      <PageHeader
-        title="Credentials"
-        description="Find an identity. Inspect its secret, discovery notes, and target associations."
-      >
-        <Modal title="Add credential" trigger={<Button type="button">Add credential</Button>}>
+      <PageHeader title="Credentials">
+        <Modal
+          title="Add credential"
+          trigger={<Button type="button">Add credential</Button>}
+        >
           <CredentialCreateForm kinds={kinds} hosts={hosts} />
         </Modal>
       </PageHeader>
-      <div className="credential-filters" role="search" aria-label="Filter credentials">
+      <div
+        className="credential-filters"
+        role="search"
+        aria-label="Filter credentials"
+      >
         <label className="relative min-w-0">
-          <Search size={15} className="pointer-events-none absolute top-2.5 left-3 text-muted-foreground" aria-hidden="true" />
+          <Search
+            size={15}
+            className="pointer-events-none absolute top-2.5 left-3 text-muted-foreground"
+            aria-hidden="true"
+          />
           <span className="sr-only">Filter credentials</span>
-          <Input type="search" className="pl-9" placeholder="Filter username, notes, IP or service…"
-            value={query} onChange={(event) => filter({ filter: event.target.value })} />
+          <Input
+            type="search"
+            className="pl-9"
+            placeholder="Filter username, notes, IP or service…"
+            value={query}
+            onChange={(event) => filter({ filter: event.target.value })}
+          />
         </label>
-        <NativeSelect aria-label="Credential kind" value={kind}
-          onChange={(event) => filter({ kind: event.target.value })}>
+        <NativeSelect
+          aria-label="Credential kind"
+          value={kind}
+          onChange={(event) => filter({ kind: event.target.value })}
+        >
           <option value="">All kinds</option>
-          {kinds.map((value) => <option key={value} value={value}>{value}</option>)}
+          {kinds.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
         </NativeSelect>
-        <NativeSelect aria-label="Credential scope" value={scope}
-          onChange={(event) => filter({ scope: event.target.value })}>
+        <NativeSelect
+          aria-label="Credential scope"
+          value={scope}
+          onChange={(event) => filter({ scope: event.target.value })}
+        >
           <option value="">All associations</option>
           <option value="linked">Linked</option>
           <option value="unlinked">Unlinked</option>
         </NativeSelect>
-        <span className="muted text-xs" role="status">{credentials.length} of {all.length} credentials</span>
+        <span className="muted text-xs" role="status">
+          {credentials.length} of {all.length} credentials
+        </span>
       </div>
       {selected ? (
         <div className="credential-workbench rounded-lg border bg-card">
           <section className="credential-list" aria-label="Credential list">
-            <h2 className="credential-label border-b bg-muted/40 px-4 py-3">Identity / scope</h2>
+            <h2 className="credential-label border-b bg-muted/40 px-2.5 py-2 text-xs">
+              Identity / scope
+            </h2>
             {credentials.map((credential) => (
-              <a key={credential.id} href={`?${currentUrl.searchParams}#credential-${credential.id}`}
-                aria-current={credential.id === selected.id ? "true" : undefined}
+              <a
+                key={credential.id}
+                href={`?${currentUrl.searchParams}#credential-${credential.id}`}
+                aria-current={
+                  credential.id === selected.id ? "true" : undefined
+                }
                 className="credential-choice"
                 onClick={(event) => {
-                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  if (
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  )
+                    return;
                   event.preventDefault();
                   const next = new URL(location.href);
                   next.hash = `credential-${credential.id}`;
                   history.pushState(null, "", next);
                   setUrl(next.href);
-                }}>
+                }}
+              >
                 <span className="flex items-center justify-between gap-2">
-                  <span className="mono truncate font-semibold">{credential.username || "No username"}</span>
+                  <span className="mono truncate text-[13px] font-semibold">
+                    {credential.username || "No username"}
+                  </span>
                   <Badge variant="outline">{credential.kind}</Badge>
                 </span>
-                <span className="muted mt-2 block text-xs">
-                  {credential.hosts.length} hosts · {credential.services.length} services
-                  {!credential.hosts.length && !credential.services.length ? " · Unlinked" : ""}
+                <span className="muted mt-1 block text-xs">
+                  {[
+                    credential.hosts.length
+                      ? `${credential.hosts.length} hosts`
+                      : "",
+                    credential.services.length
+                      ? `${credential.services.length} services`
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "Unlinked"}
                 </span>
-                <span className="muted mt-2 block truncate text-xs">{credential.notes || "No discovery notes"}</span>
+                {credential.notes && (
+                  <span className="muted mt-1 block truncate text-xs">
+                    {credential.notes}
+                  </span>
+                )}
               </a>
             ))}
           </section>
-          <CredentialDetail key={selected.id} credential={selected} kinds={kinds} hosts={hosts} />
+          <CredentialDetail
+            key={selected.id}
+            credential={selected}
+            kinds={kinds}
+            hosts={hosts}
+          />
         </div>
       ) : (
         <Empty>
-          {all.length ? <>
-            <p>No credentials match these filters.</p>
-            <Button type="button" variant="outline" className="mt-3"
-              onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>
-          </> : "No credentials yet. Add one as you find it."}
+          {all.length ? (
+            <>
+              <p>No credentials match these filters.</p>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3"
+                onClick={() => filter({ filter: "", kind: "", scope: "" })}
+              >
+                Clear filters
+              </Button>
+            </>
+          ) : (
+            "No credentials yet."
+          )}
         </Empty>
       )}
     </div>
