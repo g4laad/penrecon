@@ -23,7 +23,8 @@ Data (SQLite db + attachments) lives under `./data` — override with
 Open `/engagements` to create or select an engagement. The header selector switches
 to the selected engagement's host inventory. Every domain URL starts with
 `/e/<uuid>/`; separate tabs can work on different engagements independently.
-Upload files from the selected engagement's Scans page.
+Upload files from the selected engagement's Scans page. Use the sidebar's
+Scans and Scan diff entries to switch between import history and comparisons.
 
 One shared SQLite database stores all engagements. Hosts, hostnames, services,
 scans, notes, triage, credentials, and operations are engagement-owned; the same

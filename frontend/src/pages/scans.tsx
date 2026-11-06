@@ -29,12 +29,7 @@ export function ScansPage({ data }: { data: PageData }) {
       <PageHeader
         title="Scans"
         description="Imports preserve notes, annotations, and credentials."
-      >
-        <ScopedLink href="/diff"
-        className="text-[13px] font-medium underline underline-offset-4">
-          Compare scans
-        </ScopedLink>
-      </PageHeader>
+      />
       <Section title="Import scan" id="scan-import">
         <MutationForm
           action="/scans"
@@ -110,12 +105,7 @@ export function DiffPage({ data }: { data: PageData }) {
       <PageHeader
         title="Diff scans"
         description="Compare immutable observations."
-      >
-        <ScopedLink href="/scans"
-        className="text-[13px] font-medium underline underline-offset-4">
-          Scan history
-        </ScopedLink>
-      </PageHeader>
+      />
       {scans.length ? (
         <Filters>
           <SelectField
