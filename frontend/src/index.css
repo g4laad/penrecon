@@ -139,9 +139,6 @@
 @layer components {
   .shell { width: min(1440px, calc(100% - 3rem)); margin-inline: auto; }
   .site-header { position: sticky; top: 0; z-index: 30; border-bottom: 1px solid var(--border); background: var(--background); }
-  .nav-link { display: inline-flex; align-items: center; gap: .5rem; padding: .375rem .625rem; border-radius: .4rem; color: var(--muted-foreground); font-size: .8125rem; font-weight: 500; }
-  .nav-link:hover, .nav-link.active { color: var(--foreground); background: var(--muted); }
-  .nav-link.active { color: var(--primary); background: var(--accent); box-shadow: inset 0 -2px var(--primary); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
   .muted { color: var(--muted-foreground); }
   .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
@@ -217,6 +214,34 @@
   .operation-metadata { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
   .operation-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .8125rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: .3125rem; padding: .75rem; }
 }
+  .app-shell { --sidebar-width: 224px; min-height: 100dvh; }
+  .app-shell[data-scoped=true] { padding-left: var(--sidebar-width); }
+  .app-shell[data-collapsed=true] { --sidebar-width: 56px; }
+  .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: var(--sidebar-width); display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 12px; background: var(--background); border-right: 1px solid var(--border); }
+  .sidebar-brand-row { min-height: 38px; display: flex; align-items: center; padding: 0 8px; margin-bottom: 20px; }
+  .sidebar-brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.025em; }
+  .app-sidebar svg { flex: none; }
+  .sidebar-heading { padding: 0 10px 8px; font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); }
+  .sidebar-navigation { display: flex; flex-direction: column; gap: 4px; }
+  .sidebar-navigation a, .sidebar-catalog { display: flex; align-items: center; gap: 12px; white-space: nowrap; border-radius: 6px; padding: 10px; font-size: 13px; color: var(--muted-foreground); }
+  .sidebar-navigation a:hover, .sidebar-catalog:hover { background: var(--muted); color: var(--foreground); }
+  .sidebar-navigation a[aria-current=page] { background: var(--accent); color: var(--primary); font-weight: 600; box-shadow: inset 2px 0 var(--primary); }
+  .sidebar-bottom { margin-top: auto; padding-top: 24px; display: grid; gap: 8px; }
+  .sidebar-toggle { justify-content: flex-start; width: 100%; padding: 10px; gap: 12px; height: 36px; color: var(--muted-foreground); font-size: 12px; }
+  [data-collapsed=true] > .app-sidebar { padding: 10px; }
+  [data-collapsed=true] .sidebar-brand-row { padding: 0; justify-content: center; }
+  [data-collapsed=true] .app-sidebar :is(a, button) > span, [data-collapsed=true] .sidebar-heading { display: none; }
+  [data-collapsed=true] :is(.sidebar-navigation a, .sidebar-catalog, .sidebar-toggle) { justify-content: center; padding: 10px; }
+  .workspace-toolbar { display: flex; align-items: center; gap: 16px; min-height: 58px; padding-block: 10px; }
+  .workspace-selector { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .workspace-selector > span { color: var(--muted-foreground); font-size: 11px; }
+  .workspace-selector [data-slot=native-select-wrapper] { max-width: 240px; min-width: 0; }
+  .workspace-search { margin-left: auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .workspace-search-field { position: relative; min-width: 0; }
+  .workspace-search-field > svg { position: absolute; top: 8px; left: 9px; color: var(--muted-foreground); pointer-events: none; }
+  .workspace-search-field input { width: 280px; padding-left: 32px; padding-right: 28px; }
+  .workspace-search-field kbd { position: absolute; right: 8px; top: 6px; border: 1px solid var(--border); padding-inline: 4px; border-radius: 3px; font-size: 11px; color: var(--muted-foreground); pointer-events: none; }
+  .sidebar-backdrop { position: fixed; inset: 0 0 0 var(--sidebar-width); z-index: 39; background: #0003; }
 /* Shared filter/header spacing must not offset controls inside one toolbar. */
 .operation-toolbar > form, .operation-toolbar > header { margin-bottom: 0; }
 /* Page data is denser than form controls, including component utility defaults. */
@@ -273,6 +298,11 @@ main a[class*="border"]:not([data-slot="button"]):not(.credential-choice):hover 
   .credential-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .credential-filters > label, .credential-filters > [role='status'] { grid-column: 1 / -1; }
 }
+@media (max-width: 1000px) {
+  .workspace-toolbar { flex-wrap: wrap; gap: 8px; }
+  .workspace-selector > span { display: none; }
+  .workspace-search-field input { width: 220px; }
+}
 /* Bound chrome on compact screens instead of making the workspace scroll. */
 @media (max-width: 700px), (max-height: 750px) {
   .workbench-shell > main { padding-block: .75rem; }
@@ -287,6 +317,12 @@ main a[class*="border"]:not([data-slot="button"]):not(.credential-choice):hover 
 @media (max-width: 700px) {
   .shell { width: calc(100% - 1.5rem); }
   .site-header { position: static; }
+  .app-shell[data-scoped=true] { padding-left: 56px; }
+  .app-sidebar[aria-modal=true] { box-shadow: 8px 0 24px #0001; }
+  .workspace-selector, .workspace-selector [data-slot=native-select-wrapper] { width: 100%; max-width: 100%; }
+  .workspace-search { width: 100%; }
+  .workspace-search-field { flex: 1; }
+  .workspace-search-field input { width: 100%; }
   .form-grid { grid-template-columns: minmax(0, 1fr); }
   .credential-workbench { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 2fr); }
   .credential-list { border-right: 0; border-bottom: 1px solid var(--border); }

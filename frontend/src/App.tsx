@@ -1,24 +1,16 @@
 import { ScopedLink, engagementUrl } from "./common";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef, useState } from "react";
 import {
-  Activity,
   ArrowDownToLine,
-  GitCompareArrows,
-  KeyRound,
   ListFilter,
-  Network,
   Pencil,
   Plus,
-  Radar,
   Search,
   RotateCcw,
-  Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableHeader,
@@ -44,6 +36,7 @@ import { HostPage } from "./pages/host";
 import { CredentialsPage } from "./pages/credentials";
 import { ScansPage, DiffPage } from "./pages/scans";
 import { OperationsPage } from "./pages/operations";
+import { AppShell, navigation } from "./components/app-shell";
 
 function HostTable({
   rows,
@@ -519,13 +512,6 @@ function EngagementsPage({ data }: { data: PageData }) {
   );
 }
 
-const navigation = [
-  { href: "/", label: "Hosts", icon: Network },
-  { href: "/credentials", label: "Credentials", icon: KeyRound },
-  { href: "/operations", label: "Operations", icon: Terminal },
-  { href: "/scans", label: "Scans", icon: Radar },
-  { href: "/diff", label: "Scan diff", icon: GitCompareArrows },
-];
 export default function App() {
   const [data, setData] = useState<PageData>(
     () =>
@@ -548,6 +534,8 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       if (
+        !event.defaultPrevented &&
+        !target.closest('[aria-modal="true"]') &&
         event.key === "/" &&
         !target.closest("input,textarea,select,[contenteditable]")
       ) {
@@ -564,12 +552,11 @@ export default function App() {
     const title = path === "/engagements" ? "Engagements" :
       data.host?.ip ?? (path === "/search" ? "Search" :
         (navigation.find((item) => item.href === path)?.label ?? "Hosts"));
-    document.title = `${title}${data.engagement ? ` — ${data.engagement.name}` : ""} — penrecon`;
+    document.title = `${title}${data.engagement?.name ? ` — ${data.engagement.name}` : ""} — penrecon`;
   }, [data.host?.ip, data.engagement?.name, path]);
-  const active = path.startsWith("/hosts/") ? "/" : path;
   return (
     <PageContext.Provider value={{ data, refresh, navigate }}>
-      <div
+      <AppShell data={data} path={path}
         className={
           path === "/"
             ? "workbench-shell inventory-shell"
@@ -582,66 +569,6 @@ export default function App() {
               : undefined
         }
       >
-        <ScopedLink className="skip-link" href="#main">
-          Skip to content
-        </ScopedLink>
-        <header className="site-header">
-          <div className="shell flex min-h-12 flex-wrap items-center gap-2 py-2">
-            <ScopedLink href="/engagements" className="mr-4 flex items-center gap-2 text-base font-semibold tracking-tight">
-              <Activity className="size-5 text-primary" />
-              penrecon
-            </ScopedLink>
-            {data.engagement && (
-              <>
-                <label className="sr-only" htmlFor="engagement-selector">Engagement</label>
-                <NativeSelect id="engagement-selector" value={data.engagement.id}
-                  onChange={(event) => location.assign(`/e/${event.target.value}/`)}>
-                  {data.engagements.map((engagement) => (
-                    <NativeSelectOption key={engagement.id} value={engagement.id}>{engagement.name}</NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </>
-            )}
-            {data.engagement && <>
-            <nav
-              aria-label="Primary"
-              className="flex flex-wrap items-center gap-1"
-            >
-              {navigation.map((item) => (
-                <ScopedLink key={item.href}
-                href={item.href}
-                aria-current={active === item.href ? "page" : undefined}
-                className={
-                  "nav-link " + (active === item.href ? "active" : "")
-                }><item.icon className="size-4" />
-                {item.label}</ScopedLink>
-              ))}
-            </nav>
-            <form
-              action={engagementUrl("/search")}
-              method="get"
-              className="ml-auto flex items-center gap-2"
-              role="search"
-              aria-label="Global search"
-            >
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-                <Input
-                  type="search"
-                  name="q"
-                  aria-label="Global search"
-                  placeholder="Search everything…"
-                  defaultValue={path === "/search" ? data.q : ""}
-                  className="w-52 pl-8"
-                />
-              </div>
-              <Button type="submit" variant="outline">
-                Find
-              </Button>
-            </form>
-            </>}
-          </div>
-        </header>
         <main id="main" className="shell py-4" tabIndex={-1}>
           {path === "/engagements" ? (
             <EngagementsPage data={data} />
@@ -665,7 +592,7 @@ export default function App() {
           penrecon · Local recon workspace{" "}
           <span className="float-right">Press / to focus search</span>
         </footer>
-      </div>
+      </AppShell>
     </PageContext.Provider>
   );
 }

@@ -5,8 +5,9 @@
 React, TypeScript, Tailwind CSS 4, and shadcn/ui's `base-nova` style with
 **Base UI**, not Radix. `frontend/components.json` configures component generation.
 Components live in `frontend/src/components/ui`; shared application behavior
-lives in `common.tsx`, pages in `pages/`, and the shell/inventory/search in
-`App.tsx`. Theme tokens and application layout are in `frontend/src/index.css`.
+lives in `common.tsx`, pages in `pages/`, inventory/search in `App.tsx`, and the
+application shell in `components/app-shell.tsx`. Theme tokens and application
+layout are in `frontend/src/index.css`.
 Build assets with `npm --prefix frontend run build`; FastAPI serves them locally.
 Geist Variable fonts are bundled locally, with system monospace for technical data.
 
@@ -81,6 +82,18 @@ count with the result heading and display filenames as secondary metadata.
   brand links back to the catalog. Switching opens the destination host inventory with a full navigation,
   never reusing entity IDs or page state from another engagement.
 - Global search uses matching default-height input and Find button controls.
+- Navigation uses approved **A / Classic sidebar**: a 224px left navigation,
+  collapsing to a 56px labeled-accessible icon rail. Bottom-left chevrons toggle
+  it; desktop collapse preference survives navigation and reload in tab-local
+  session storage. Engagement selection and scoped search remain above the page.
+  The catalog has no sidebar. Active host-detail pages highlight Hosts.
+- At widths up to 700px the sidebar starts collapsed; expanding overlays the page
+  without squeezing its content. The mobile overlay traps keyboard focus, makes
+  the underlying page inert, closes on Escape or outside click, and restores
+  focus to the toggle. Resizing back to desktop restores its separate preference.
+- Navigation reference: `prototype/navbar-choices` at `2ae1d65` preserves the
+  A/B/C sidebar comparison. The user approved A; production has only the classic
+  sidebar, normal scoped links, and no variant parameters or comparison controls.
 - `Modal` composes Base UI dialogs with a labeled title, focus trapping, Escape
   dismissal, focus restoration, scrollable content, and an accessible close button.
   Dialogs use an unblurred dim backdrop and a 75 ms opacity-only entrance, with
