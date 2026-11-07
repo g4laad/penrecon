@@ -403,6 +403,12 @@ icons. Add components with `npx shadcn@latest add <component> -c frontend`.
 Existing page URLs return the React shell, or the same page context as JSON
 with `Accept: application/json`. Mutations retain their form endpoints and
 refresh page data after success.
+Page-data responses project only consumer-facing fields: storage paths,
+engagement ownership columns, and query-only filtering metadata stay server-side.
+Row-count choices live in the frontend; responses do not include
+`per_page_choices`. Host selectors use ID/address pairs, and host credential
+responses include only associations for that host. Database models retain their
+full metadata for internal queries and persistence.
 
 ### Shared feature seams
 

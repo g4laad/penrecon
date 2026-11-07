@@ -11,7 +11,7 @@ import { associationReadiness, credentialDraftValidity, initialAssociations, tra
 const HOSTS_PER_PAGE = 50;
 
 function HostServices({ host, target, dispatch }: {
-  host: Host;
+  host: Pick<Host, "id" | "ip">;
   target: CredentialTarget;
   dispatch: Dispatch<AssociationEvent>;
 }) {
@@ -59,7 +59,7 @@ function HostServices({ host, target, dispatch }: {
   </div>;
 }
 
-export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: string[] }) {
+export function CredentialCreateForm({ hosts, kinds }: { hosts: Pick<Host, "id" | "ip">[]; kinds: string[] }) {
   const [kind, setKind] = useState(() => kinds.includes("password") ? "password" : kinds[0] ?? "");
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");

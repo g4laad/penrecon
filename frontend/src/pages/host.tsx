@@ -17,7 +17,7 @@ import {
   SelectField,
   usePage,
 } from "../common";
-import type { Credential, Note, PageData, Service } from "../types";
+import type { HostCredential, Note, PageData, Service } from "../types";
 import {
   describeHostCommand,
   initialHostView,
@@ -195,7 +195,7 @@ function CredentialDetail({
   data,
   hostId,
 }: {
-  credential: Credential;
+  credential: HostCredential;
   data: PageData;
   hostId: number;
 }) {

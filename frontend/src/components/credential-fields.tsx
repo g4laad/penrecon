@@ -21,7 +21,7 @@ export function CredentialFields({
   credential,
   kinds,
 }: {
-  credential?: Credential;
+  credential?: Pick<Credential, "kind" | "username" | "secret" | "notes">;
   kinds: string[];
 }) {
   const [{ kind, secret }, dispatch] = useReducer(transitionCredentialDraft, {

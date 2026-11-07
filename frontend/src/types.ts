@@ -15,8 +15,6 @@ export interface HostRow {
   open_count: number;
   status: string;
   tags: string[];
-  open_ports: number[];
-  service_names: string[];
   open_services: [number, string | null][];
   change: string;
   triaged: boolean;
@@ -57,22 +55,22 @@ export interface Credential {
   services: LinkedService[];
   pickable_services: LinkedService[];
 }
+export type HostCredential = Pick<Credential, "id" | "kind" | "username" | "secret" | "notes"> & {
+  hosts: Pick<LinkedHost, "host_id">[];
+  services: Omit<LinkedService, "ip">[];
+};
 export interface Note {
   id: number;
-  host_id: number;
   title: string;
   body_md: string;
-  created_at: string;
   updated_at: string;
 }
 export interface Scan {
   id: number;
   filename: string;
   tool: string;
-  source_format: string;
   imported_at: string;
   host_count: number;
-  raw_path: string | null;
 }
 export interface TimelineState {
   state: string;
@@ -99,7 +97,6 @@ export interface TimelineEntry {
   filename: string;
   tool: string;
   occurred_at: string;
-  imported_at: string;
   time_source: "scan" | "import" | "manual";
   first_seen: boolean;
   coverage_known: boolean;
@@ -128,8 +125,6 @@ export interface Operation {
   comments: string;
   tags: string[];
   attachment_name: string | null;
-  attachment_path: string | null;
-  attachment_media_type: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -140,7 +135,7 @@ export interface Engagement {
   created_at: string;
 }
 export interface PageData {
-  engagement?: Engagement;
+  engagement?: Pick<Engagement, "id" | "name">;
   engagements: Engagement[];
   rows?: HostRow[];
   total?: number;
@@ -148,8 +143,6 @@ export interface PageData {
   page?: number;
   pages?: number;
   per?: string;
-  per_page?: number;
-  per_page_choices?: string[];
   q?: string;
   port?: string;
   tag?: string;
@@ -161,11 +154,11 @@ export interface PageData {
   states?: string[];
   kinds?: string[];
   host?: Host;
-  hosts?: Host[];
+  hosts?: Pick<Host, "id" | "ip">[];
   hostnames?: [number, string][];
   host_ann?: Annotation | null;
   host_notes?: Note[];
-  host_credentials?: Credential[];
+  host_credentials?: HostCredential[];
   host_timeline?: HostTimeline;
   services?: Service[];
   svc_total?: number;
@@ -179,8 +172,8 @@ export interface PageData {
   a?: number | null;
   b?: number | null;
   result?: {
-    scan_a: Scan;
-    scan_b: Scan;
+    scan_a: Pick<Scan, "id" | "filename">;
+    scan_b: Pick<Scan, "id" | "filename">;
     entries: {
       ip: string;
       port: number;
@@ -192,12 +185,10 @@ export interface PageData {
   } | null;
   operations?: Operation[];
   results?: {
-    q: string;
     hosts: HostRow[];
     notes: {
       href: string;
       where: string;
-      kind: string;
       title: string;
       preview: string;
     }[];

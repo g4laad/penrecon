@@ -16,7 +16,6 @@ from enum import StrEnum
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, col, select
@@ -39,17 +38,21 @@ from penrecon.models import (
     Status,
 )
 from penrecon.parsers import PARSERS
+from penrecon.web.serialization import encode_page, host_credential
 
 _HERE = Path(__file__).parent
 
 
 def page_response(request: Request, context: dict[str, object]) -> Response:
     """Return the same page data to JSON consumers and the local React shell."""
-    data = jsonable_encoder({
+    data = encode_page({
         **context,
-        "engagement": getattr(request.state, "engagement", None),
+        "engagement": (
+            {"id": engagement.id, "name": engagement.name}
+            if (engagement := getattr(request.state, "engagement", None)) is not None
+            else None
+        ),
         "engagements": getattr(request.state, "engagements", []),
-        "per_page_choices": [str(size) for size in queries.PER_PAGE_OPTIONS] + ["all"],
     })
     headers = {"Vary": "Accept"}
     if "application/json" in request.headers.get("accept", "").lower():
@@ -200,8 +203,7 @@ def index(
     matched = len(rows)
     page_rows, page_no, pages = queries.paginate(rows, page_no, per_limit)
     ctx: dict[str, object] = {"rows": page_rows, "total": len(all_rows), "matched": matched,
-           "page": page_no, "pages": pages, "per_page": per_limit or matched,
-           "per": "all" if per_limit is None else str(per_limit),
+           "page": page_no, "pages": pages,
            "q": q, "port": port, "tag": tag, "status": status, "change": change,
            "sort": sort, "direction": direction, "statuses": list(Status)}
     return page_response(request, ctx)
@@ -299,7 +301,10 @@ def host_detail(
         "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
-        "host_credentials": queries.credentials_for_host(session, host_id, engagement_id=engagement_id),
+        "host_credentials": [
+            host_credential(credential, host_id)
+            for credential in queries.credentials_for_host(session, host_id, engagement_id=engagement_id)
+        ],
         "host_timeline": queries.host_timeline(
             session, host_id, engagement_id=engagement_id,
             page=timeline_page, show_unchanged=timeline_unchanged,
@@ -533,7 +538,12 @@ def delete_service(
 def _credential_context(session: Session, *, engagement_id: str) -> dict[str, object]:
     return {
         "credentials": queries.credential_views(session, engagement_id=engagement_id),
-        "hosts": session.exec(select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)).all(),
+        "hosts": [
+            {"id": host.id, "ip": host.ip}
+            for host in session.exec(
+                select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
+            ).all()
+        ],
     }
 
 
@@ -544,7 +554,10 @@ def _credentials_response(request: Request, session: Session, *, engagement_id: 
 def _host_credentials_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
     return page_response(request, {
         "host": queries.get_owned(session, Host, host_id, engagement_id=engagement_id),
-        "host_credentials": queries.credentials_for_host(session, host_id, engagement_id=engagement_id),
+        "host_credentials": [
+            host_credential(credential, host_id)
+            for credential in queries.credentials_for_host(session, host_id, engagement_id=engagement_id)
+        ],
         "kinds": list(CredKind),
     })
 

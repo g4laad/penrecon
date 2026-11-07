@@ -187,6 +187,9 @@ def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: Test
     assert response.status_code == 303
     after = _attachment_files()
     assert len(after - before) == 1
+    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    assert operation["attachment_name"] == "evidence notes.txt"
+    assert {"attachment_path", "engagement_id"}.isdisjoint(operation)
 
     operation_id = _only_operation_id(client)
     download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")

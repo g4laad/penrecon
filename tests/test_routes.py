@@ -91,7 +91,12 @@ def test_page_json_contexts(client: TestClient, path: str, key: str) -> None:
     assert data["engagement"]["id"] == ENGAGEMENT_PREFIX.rsplit("/", 1)[1]
     assert any(item["id"] == data["engagement"]["id"] for item in data["engagements"])
     assert "request" not in data
-    assert data["per_page_choices"] == ["10", "25", "50", "all"]
+    assert "per_page_choices" not in data
+    html = client.get(path, headers={"Accept": "text/html"})
+    assert html.status_code == 200
+    match = re.search(r'<script id="page-data" type="application/json">(.*?)</script>', html.text)
+    assert match is not None
+    assert "per_page_choices" not in json.loads(match.group(1))
 
 
 def test_missing_host_404(client: TestClient) -> None:
@@ -231,7 +236,6 @@ def test_upload_scan_then_host_appears(client: TestClient) -> None:
     row = client.get(ENGAGEMENT_PREFIX + "/").json()["rows"][0]
     assert row["ip"] == "10.0.0.1"
     assert row["hostnames"] == ["a.example"]
-    assert row["open_ports"] == [22, 80]
     assert row["open_services"] == [[22, "ssh"], [80, "http"]]
     detail = client.get(ENGAGEMENT_PREFIX + f'/hosts/{row["id"]}').json()
     assert [service["port"] for service in detail["services"]] == [22, 80]
@@ -240,6 +244,30 @@ def test_upload_scan_then_host_appears(client: TestClient) -> None:
     scan = client.get(ENGAGEMENT_PREFIX + "/scans").json()["scans"][0]
     assert scan["filename"] == "a.xml"
     assert scan["imported_at"]
+    assert {"raw_path", "engagement_id"}.isdisjoint(scan)
+
+
+@pytest.mark.parametrize(
+    ("params", "expected_ips"),
+    [
+        ({"q": "SSH"}, ["10.0.0.1"]),
+        ({"port": "22"}, ["10.0.0.1"]),
+        ({"q": "ssh", "port": "443"}, []),
+        ({"q": "missing-service"}, []),
+    ],
+)
+def test_inventory_filters_use_private_service_metadata(
+    client: TestClient, params: dict[str, str], expected_ips: list[str],
+) -> None:
+    _upload(client, SCAN_A, "a.xml")
+    other_path = _create_host(client)
+    client.post(f"{other_path}/services", data={"port": "443", "service_name": "https"})
+
+    data = client.get(ENGAGEMENT_PREFIX + "/", params=params).json()
+    assert [row["ip"] for row in data["rows"]] == expected_ips
+    assert {"per", "per_page"}.isdisjoint(data)
+    for row in data["rows"]:
+        assert {"open_ports", "service_names"}.isdisjoint(row)
 
 
 def test_diff_serializes_scans_and_changes(client: TestClient) -> None:
@@ -252,6 +280,8 @@ def test_diff_serializes_scans_and_changes(client: TestClient) -> None:
     assert data["b"] == ids["b.xml"]
     assert data["result"]["scan_a"]["filename"] == "a.xml"
     assert data["result"]["scan_b"]["filename"] == "b.xml"
+    for scan in [*scans, data["result"]["scan_a"], data["result"]["scan_b"]]:
+        assert {"raw_path", "engagement_id"}.isdisjoint(scan)
     changes = {entry["port"]: entry for entry in data["result"]["entries"]}
     assert changes[22]["kind"] == "changed"
     assert changes[443]["kind"] == "added"
@@ -303,6 +333,9 @@ def test_service_mutations_return_resolved_json(client: TestClient) -> None:
     assert resolved["product"] == "nginx"
     assert resolved["annotation"]["status"] == "interesting"
     assert resolved["annotation"]["tags"] == ["web", "tls"]
+    assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(resolved["annotation"])
+    persisted = client.get(path).json()["services"][0]["annotation"]
+    assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(persisted)
     deleted = client.post(ENGAGEMENT_PREFIX + f"/services/{service_id}/delete")
     assert deleted.status_code == 200
     assert deleted.json()["services"] == []
@@ -316,7 +349,7 @@ def test_notes_and_annotation_round_trip_in_host_context(client: TestClient) -> 
     note = created.json()["notes"][0]
     assert note["title"] == "Recon"
     assert note["body_md"] == "raw\nbody"
-    assert note["created_at"]
+    assert note["updated_at"]
     edited = client.post(ENGAGEMENT_PREFIX + f'/notes/{note["id"]}/edit', data={"title": "Updated", "body_md": "new body"})
     assert edited.json()["notes"][0]["body_md"] == "new body"
     saved = client.post(ENGAGEMENT_PREFIX + "/annotation", data={"host_id": host_id, "status": "interesting", "tags": "pivot, web"})
@@ -325,9 +358,12 @@ def test_notes_and_annotation_round_trip_in_host_context(client: TestClient) -> 
     annotation = client.get(ENGAGEMENT_PREFIX + "/annotation", params={"host_id": host_id})
     assert annotation.status_code == 200
     assert annotation.json()["ann"]["tags"] == ["pivot", "web"]
+    for ann in [saved.json()["ann"], annotation.json()["ann"]]:
+        assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(ann)
     detail = client.get(path).json()
     assert detail["host_notes"][0]["title"] == "Updated"
     assert detail["host_ann"]["status"] == "interesting"
+    assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(detail["host_ann"])
     deleted = client.post(ENGAGEMENT_PREFIX + f'/notes/{note["id"]}/delete')
     assert deleted.status_code == 200
     assert deleted.json()["notes"] == []
@@ -481,12 +517,12 @@ def test_credential_service_requires_explicit_host_link(client: TestClient) -> N
     assert len(client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["services"]) == 1
 
 
-def test_annotation_edit_advances_timestamp_and_allows_free_classification(client: TestClient) -> None:
+def test_annotation_allows_reclassification(client: TestClient) -> None:
     host_id = _create_host(client).rsplit("/", 1)[1]
     route = ENGAGEMENT_PREFIX + "/annotation"
     first = client.post(route, data={"host_id": host_id, "status": "exploited"}).json()["ann"]
     second = client.post(route, data={"host_id": host_id, "status": "new"}).json()["ann"]
-    assert second["updated_at"] > first["updated_at"]
+    assert first["status"] == "exploited"
     assert second["status"] == "new"
 
 
