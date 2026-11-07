@@ -5,6 +5,8 @@
 !pyproject.toml
 !uv.lock
 !README.md
+!flake.nix
+!flake.lock
 !src/
 src/**
 !src/penrecon/

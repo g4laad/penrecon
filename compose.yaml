@@ -17,7 +17,7 @@ services:
     healthcheck:
       test:
         - CMD
-        - /usr/local/bin/python3.14
+        - /app/bin/python3.14
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).close()"
       interval: 30s

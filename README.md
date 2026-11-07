@@ -110,8 +110,12 @@ ssh -N -L 8765:127.0.0.1:8765 user@server
 
 ## Docker (distroless)
 
-Docker Engine with the Compose plugin is sufficient; Python and Node.js are
-only used in build stages:
+Docker Engine with the Compose plugin is sufficient. A Nix builder uses the
+locked flake to build both the frontend and Python environment; no host Nix
+installation or `dockerTools` is required:
+
+Base image references are registry-qualified so Podman does not need
+short-name aliases or an unqualified-search registry configuration.
 
 ```sh
 docker compose up --build -d
@@ -125,10 +129,11 @@ Open `http://127.0.0.1:8000`. To use another host port:
 PENRECON_PORT=8765 docker compose up --build -d
 ```
 
-The image builds the frontend with `npm ci` and installs locked Python 3.14
-dependencies with `uv`. The final `distroless/base-debian13:nonroot` image
-contains Python, its native libraries, and the installed app/assets, but no
-shell, pip, uv, npm, or OS package manager. It runs as UID/GID `65532:65532`.
+The final `distroless/base-debian13:nonroot` image contains the Nix application's
+runtime closure under `/nix/store`, exposed at `/app`, and runs as UID/GID
+`65532:65532`. Nix, its database, Node.js, npm, uv, and compilers stay in the
+builder. This is not a shell-free image: Nix's Python runtime depends on Bash,
+which is retained in the closure even though it is not on `PATH`.
 Compose drops all capabilities, prevents privilege escalation, and makes the
 root filesystem read-only; `/tmp` is a temporary writable filesystem.
 
@@ -149,7 +154,7 @@ Upload scans through an engagement's Scans page, or run the CLI without a shell:
 ```sh
 docker compose run --rm -v "$PWD/scan.xml:/input/scan.xml:ro" \
   penrecon -m penrecon ingest /input/scan.xml --tool nmap --engagement <uuid>
-docker compose exec penrecon /usr/local/bin/python3.14 -m penrecon --help
+docker compose exec penrecon /app/bin/python3.14 -m penrecon --help
 ```
 
 For a consistent backup, stop the app before copying the entire data directory
