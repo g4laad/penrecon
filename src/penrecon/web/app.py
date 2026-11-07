@@ -337,7 +337,8 @@ def _normalize_ip(raw: str) -> str | None:
 
 
 def _invalid_ip_response(raw: str) -> JSONResponse:
-    return JSONResponse({"detail": f'"{raw}" is not a valid IPv4 or IPv6 address.'}, status_code=400)
+    message = f'"{raw}" is not a valid IPv4 or IPv6 address.'
+    return JSONResponse({"detail": message, "field_errors": {"ip": message}}, status_code=400)
 
 
 def _duplicate_ip_response(norm: str) -> JSONResponse:

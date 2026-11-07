@@ -118,7 +118,7 @@ def test_create_host_redirects_to_detail(client: TestClient) -> None:
 def test_create_host_rejects_bad_ip(client: TestClient) -> None:
     response = client.post(ENGAGEMENT_PREFIX + "/hosts", data={"ip": "not-an-ip"}, follow_redirects=False)
     assert response.status_code == 400
-    assert "not a valid" in response.json()["detail"]
+    assert set(response.json()["field_errors"]) == {"ip"}
 
 
 def test_delete_host_redirects_home(client: TestClient) -> None:

@@ -53,8 +53,13 @@ Its 56px summary rows use fixed-width columns, ellipsized hostnames, and bounded
 service/tag previews; the complete record remains reachable through host links,
 with full summary values in hover titles and explicit open-service counts.
 On narrow screens, change/tags columns and service names give way to host identity,
-port previews, and triage. Filters open in a dialog; Reset stays beside the filter
-trigger, while export and creation right-align in the same wrapping toolbar.
+port previews, and triage. At widths up to 480px, each 104px row places host identity
+above services and triage; a 64px header preserves complete column labels.
+Filters open in a dialog; Reset stays beside the filter trigger, while export
+and creation right-align in the same wrapping toolbar. Filtered-empty results
+direct the operator to Reset; an empty inventory points to import or New host.
+Load failures replace the loading summary and offer Retry. Sortable headers
+expose their active direction with `aria-sort`.
 Pagination stays visible and automatically fits 1–50 rows to the available height.
 The `fit` query parameter supplies that bounded server-side page size, overriding
 manual `per` choices; filtering/sorting still apply before pagination. Resizing
@@ -108,7 +113,7 @@ count with the result heading and display filenames as secondary metadata.
   no zoom or exit animation. Reduced-motion preferences disable the entrance fade.
 - `MutationForm` posts real multipart form data, disables duplicate submissions,
   surfaces errors, refreshes page data, and closes its modal on success.
-  Engagement-name validation returns `field_errors` keyed by input name; shared
+  Engagement-name and host-IP validation return `field_errors` keyed by input name; shared
   fields render associated inline errors, expose invalid state, and receive focus
   after submission is re-enabled. Network errors and unstructured HTTP failures
   retain the draft and explain how to check the local server and connection before
@@ -229,6 +234,8 @@ count with the result heading and display filenames as secondary metadata.
 - Global search is always reachable. `/` focuses a search field outside text
   entry. A skip link, visible focus, text labels, and semantic table structure
   support keyboard use. Reduced-motion preferences disable transitions/animations.
+  The engagement selector retains its accessible label when compact chrome hides
+  the visible label; native selects use 16px text on mobile like other form inputs.
 - Links underline only on hover, including navigation and linked service chips.
   Table-header links retain neutral text and never underline. Button-styled links
   keep button emphasis rather than text-link decoration. Inventory creation is

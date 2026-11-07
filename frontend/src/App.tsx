@@ -30,6 +30,7 @@ import {
   SortLink,
   Empty,
   Section,
+  usePage,
 } from "./common";
 import type { HostRow, PageData } from "./types";
 import { AppShell, navigation } from "./components/app-shell";
@@ -61,6 +62,11 @@ function HostTable({
   rows: HostRow[];
   sortable?: boolean;
 }) {
+  const { data } = usePage();
+  const sortState = (column: string) =>
+    !sortable ? undefined : data.sort === column
+      ? (data.direction === "desc" ? "descending" : "ascending")
+      : "none";
   if (!rows.length)
     return (
       <Empty>
@@ -73,10 +79,10 @@ function HostTable({
     <Table className={sortable ? "inventory-table" : undefined}>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-28">{heading("change", "Change")}</TableHead>
-          <TableHead>{heading("ip", "Host / address")}</TableHead>
-          <TableHead>{heading("ports", "Open services")}</TableHead>
-          <TableHead>{heading("status", "Triage")}</TableHead>
+          <TableHead className="w-28" aria-sort={sortState("change")}>{heading("change", "Change")}</TableHead>
+          <TableHead aria-sort={sortState("ip")}>{heading("ip", "Host / address")}</TableHead>
+          <TableHead aria-sort={sortState("ports")}>{heading("ports", "Open services")}</TableHead>
+          <TableHead aria-sort={sortState("status")}>{heading("status", "Triage")}</TableHead>
           <TableHead>Tags</TableHead>
         </TableRow>
       </TableHeader>
@@ -168,7 +174,7 @@ function Inventory({ data }: { data: PageData }) {
         getComputedStyle(element).getPropertyValue("--inventory-row-height"),
       );
       const headerHeight =
-        element.querySelector("thead")?.getBoundingClientRect().height ?? 32;
+        Number.parseFloat(getComputedStyle(element).getPropertyValue("--inventory-header-height"));
       setCapacity(
         Math.max(
           1,
@@ -188,6 +194,7 @@ function Inventory({ data }: { data: PageData }) {
   useEffect(() => {
     if (!capacity) return;
     const controller = new AbortController();
+    setError("");
     const params = new URLSearchParams(location.search);
     const previousSize = Number(params.get("fit"));
     if (previousSize > 0 && previousSize !== capacity) {
@@ -323,9 +330,11 @@ function Inventory({ data }: { data: PageData }) {
           className="shrink-0 border-b px-3 py-1.5 text-xs text-muted-foreground"
           role="status"
         >
-          {ready
-            ? `${current.matched ?? 0} of ${current.total ?? 0} hosts`
-            : "Loading hosts…"}
+          {error
+            ? "Hosts could not be loaded."
+            : ready
+              ? `${current.matched ?? 0} of ${current.total ?? 0} hosts`
+              : "Loading hosts…"}
         </div>
         <div
           className="inventory-viewport"
@@ -344,7 +353,15 @@ function Inventory({ data }: { data: PageData }) {
               </Button>
             </div>
           ) : ready ? (
-            <HostTable rows={current.rows ?? []} sortable />
+            current.rows?.length ? (
+              <HostTable rows={current.rows} sortable />
+            ) : (
+              <Empty>
+                {filtered
+                  ? "No hosts match these filters. Use Reset to show all hosts."
+                  : "No hosts yet. Import a scan or use New host to start recon."}
+              </Empty>
+            )
           ) : null}
         </div>
       </div>

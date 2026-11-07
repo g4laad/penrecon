@@ -253,10 +253,10 @@ main [data-slot="table-cell"] { padding-block: .375rem; }
 .inventory-toolbar { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .inventory-toolbar > header { margin: 0 0 0 auto; }
 .inventory-results { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
-.inventory-viewport { --inventory-row-height: 56px; flex: 1; min-height: 0; overflow: hidden; }
+.inventory-viewport { --inventory-row-height: 56px; --inventory-header-height: 32px; flex: 1; min-height: 0; overflow: hidden; }
 .inventory-viewport [data-slot="table-container"] { overflow: visible; }
 .inventory-table { width: 100%; table-layout: fixed; }
-.inventory-table thead { height: 32px; }
+.inventory-table thead { height: var(--inventory-header-height); }
 .inventory-table tbody tr { height: var(--inventory-row-height); }
 .inventory-table th:nth-child(1) { width: 10%; }
 .inventory-table th:nth-child(2) { width: 25%; }
@@ -270,13 +270,24 @@ main [data-slot="table-cell"] { padding-block: .375rem; }
 .inventory-table td:nth-child(3):has(> a) > div { max-height: 20px; }
 .inventory-pagination { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
 @media (max-width: 700px) {
+  .inventory-viewport { --inventory-header-height: 48px; }
   .inventory-table th:nth-child(1), .inventory-table td:nth-child(1),
   .inventory-table th:nth-child(5), .inventory-table td:nth-child(5) { display: none; }
   .inventory-table th:nth-child(2) { width: 47%; }
   .inventory-table th:nth-child(3) { width: 25%; }
   .inventory-table th:nth-child(4) { width: 28%; }
   .inventory-table td:nth-child(3) a > span + span { display: none; }
-  .inventory-table th { overflow: hidden; text-overflow: ellipsis; }
+  .inventory-table th { white-space: normal; overflow: visible; }
+}
+@media (max-width: 480px) {
+  .inventory-viewport { --inventory-row-height: 104px; --inventory-header-height: 64px; }
+  .inventory-table, .inventory-table thead, .inventory-table tbody { display: block; }
+  .inventory-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: 52px 52px; }
+  .inventory-table thead tr { grid-template-rows: 32px 32px; }
+  .inventory-table th:nth-child(n) { width: auto; }
+  .inventory-table :is(th, td):nth-child(2) { grid-column: 1 / -1; }
+  .inventory-table :is(th, td) { min-width: 0; align-content: center; }
+  .inventory-table th { white-space: normal; overflow: visible; }
 }
 @media (max-height: 400px) {
   .inventory-shell.workbench-shell > main { padding-block: .25rem; }
@@ -297,7 +308,7 @@ main a[class*="border"]:not([data-slot="button"]):not(.credential-choice):hover 
 }
 @media (max-width: 1000px) {
   .workspace-toolbar { flex-wrap: wrap; gap: 8px; }
-  .workspace-selector > span { display: none; }
+  .workspace-selector > span { @apply sr-only; }
   .workspace-search-field input { width: 220px; }
 }
 /* Bound chrome on compact screens instead of making the workspace scroll. */
