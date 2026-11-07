@@ -401,8 +401,13 @@ React source lives in `frontend/src`. Shared components are shadcn/ui's
 `base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
 icons. Add components with `npx shadcn@latest add <component> -c frontend`.
 Existing page URLs return the React shell, or the same page context as JSON
-with `Accept: application/json`. Mutations retain their form endpoints and
-refresh page data after success.
+with `Accept: application/json`. Mutations retain their form endpoints. Successful
+JSON mutations return only `{"ok": true}`, plus `redirect_to` when a destination
+is needed; they never issue HTTP redirects or return refreshed page collections.
+The frontend refreshes the current URL once for same-page outcomes, preserving
+filters and pagination, or navigates once for a different destination. HTML form
+submissions retain redirects where applicable. Attachment cleanup failures retain
+their committed-success notice; retrying a failed refresh never repeats the POST.
 Engagement ownership validation loads only the requested engagement. The page-data
 boundary loads the catalog for the workspace selector, reusing the catalog page's
 sorted results; redirects, exports, and attachment downloads do not query it.
@@ -423,9 +428,9 @@ full metadata for internal queries and persistence.
 - `queries.latest_observations()` and the shared service-name resolver keep
   inventory, exports, and credential associations on the same current state.
   Credential assembly reuses each host's observation map.
-- The web layer binds service-table state once for query/form inputs, and
-  operation input once for create/edit. Operation validation remains inside the
-  handler, after ownership and attachment-conflict checks.
+- The web layer binds service-table state for reads and operation input once for
+  create/edit. Operation validation remains inside the handler, after ownership
+  and attachment-conflict checks.
 - `components/credential-fields.tsx` supplies both credential editors, including
   masked, kind-aware secret controls and multiline notes.
 - Frontend page workflow modules own host selection/commands, credential

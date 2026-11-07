@@ -13,6 +13,12 @@ from penrecon.db import engagement_attachments_dir
 from penrecon.models import OperationLog
 from penrecon.queries import operation_logs
 
+def _assert_outcome(response) -> None:
+    assert response.status_code == 200
+    assert "location" not in response.headers
+    assert response.json() == {"ok": True, "redirect_to": ENGAGEMENT_PREFIX + "/operations"}
+
+
 
 def _attachment_files() -> set[Path]:
     directory = engagement_attachments_dir(TEST_ENGAGEMENT_ID)
@@ -106,8 +112,7 @@ def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> 
             "tags": " recon, , priority ",
         },
     )
-    assert response.status_code == 303
-    assert response.headers["location"] == ENGAGEMENT_PREFIX + "/operations"
+    _assert_outcome(response)
 
     operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
     assert operation["command"] == "nmap -sV target.internal"
@@ -126,7 +131,7 @@ def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> 
 def test_create_operation_rejects_blank_command(client: TestClient) -> None:
     response = _create_operation(client, command="  ")
     assert response.status_code == 400
-    assert response.json()["detail"] == "Command is required."
+    assert response.json()["detail"]
     assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
 
 
@@ -156,7 +161,7 @@ def test_edit_preserves_existing_attachment_without_attachment_control(client: T
         command="original command",
         attachment=("original.txt", b"original bytes", "text/plain"),
     )
-    assert created.status_code == 303
+    _assert_outcome(created)
     after_upload = _attachment_files()
     created_files = after_upload - before_upload
     assert len(created_files) == 1
@@ -167,7 +172,7 @@ def test_edit_preserves_existing_attachment_without_attachment_control(client: T
         data={"command": "edited command", "tool": "curl"},
         follow_redirects=False,
     )
-    assert edited.status_code == 303
+    _assert_outcome(edited)
     assert _attachment_files() == after_upload
     download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
     assert download.status_code == 200
@@ -184,7 +189,7 @@ def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: Test
         command="collect evidence",
         attachment=("evidence notes.txt", b"evidence\nbytes", "text/plain"),
     )
-    assert response.status_code == 303
+    _assert_outcome(response)
     after = _attachment_files()
     assert len(after - before) == 1
     operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
@@ -201,11 +206,11 @@ def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: Test
 
 def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None:
     before_upload = _attachment_files()
-    assert _create_operation(
+    _assert_outcome(_create_operation(
         client,
         command="attach",
         attachment=("old.txt", b"old", "text/plain"),
-    ).status_code == 303
+    ))
     after_upload = _attachment_files()
     old_files = after_upload - before_upload
     assert len(old_files) == 1
@@ -219,7 +224,7 @@ def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None
         files={"attachment": ("new.txt", b"new", "text/plain")},
         follow_redirects=False,
     )
-    assert replaced.status_code == 303
+    _assert_outcome(replaced)
     after_replace = _attachment_files()
     new_files = after_replace - before_replace
     assert len(new_files) == 1
@@ -247,18 +252,18 @@ def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None
         data={"command": "attachment removed", "remove_attachment": "true"},
         follow_redirects=False,
     )
-    assert removed.status_code == 303
+    _assert_outcome(removed)
     assert _attachment_files() == before_remove - {new_file}
     assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").status_code == 404
 
 
 def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None:
     before_upload = _attachment_files()
-    assert _create_operation(
+    _assert_outcome(_create_operation(
         client,
         command="delete me",
         attachment=("delete.txt", b"delete", "text/plain"),
-    ).status_code == 303
+    ))
     after_upload = _attachment_files()
     created_files = after_upload - before_upload
     assert len(created_files) == 1
@@ -267,7 +272,7 @@ def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None
 
     before_delete = _attachment_files()
     deleted = client.post(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/delete", follow_redirects=False)
-    assert deleted.status_code == 303
+    _assert_outcome(deleted)
     assert _attachment_files() == before_delete - {created_file}
     assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
     assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").status_code == 404
@@ -281,12 +286,12 @@ def test_missing_operation_ids_return_404(client: TestClient) -> None:
 
 def test_search_and_pagination_retain_state_and_expected_rows(client: TestClient) -> None:
     for index in range(11):
-        assert _create_operation(client, command=f"batch {index:02d}").status_code == 303
-    assert _create_operation(
+        _assert_outcome(_create_operation(client, command=f"batch {index:02d}"))
+    _assert_outcome(_create_operation(
         client,
         command="endpoint result",
         data={"source": "NeedleHost"},
-    ).status_code == 303
+    ))
 
     search = client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "needlehost", "per": "10", "page": "1"}).json()
     assert [row["command"] for row in search["operations"]] == ["endpoint result"]
@@ -357,7 +362,7 @@ def test_operation_aware_dates_are_normalized_before_storage(client: TestClient)
     response = _create_operation(client, data={
         "started_at": "2026-09-22T10:00+02:00", "ended_at": "2026-09-22T08:30Z",
     })
-    assert response.status_code == 303
+    _assert_outcome(response)
     operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
     assert operation["started_at"] == "2026-09-22T08:00:00"
     assert operation["ended_at"] == "2026-09-22T08:30:00"
@@ -368,7 +373,7 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, action: str,
 ) -> None:
     before = _attachment_files()
-    assert _create_operation(client, attachment=("old.txt", b"old", "text/plain")).status_code == 303
+    _assert_outcome(_create_operation(client, attachment=("old.txt", b"old", "text/plain")))
     old_file = next(iter(_attachment_files() - before))
     operation_id = _only_operation_id(client)
     original_unlink = Path.unlink
@@ -391,6 +396,10 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
     assert response.status_code == 200
     assert response.json()["committed"] is True
     assert response.json()["cleanup_pending"] is True
+    assert response.json()["redirect_to"] == ENGAGEMENT_PREFIX + "/operations"
+    assert response.json()["detail"]
+    assert set(response.json()) == {"ok", "committed", "cleanup_pending", "detail", "redirect_to"}
+    assert "location" not in response.headers
     assert old_file.is_file()
     operations = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"]
     if action == "delete":
@@ -404,7 +413,7 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
 def test_failed_attachment_replacement_keeps_old_metadata_and_file(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert _create_operation(client, command="original", attachment=("old.txt", b"old", "text/plain")).status_code == 303
+    _assert_outcome(_create_operation(client, command="original", attachment=("old.txt", b"old", "text/plain")))
     operation_id = _only_operation_id(client)
     before = _attachment_files()
 

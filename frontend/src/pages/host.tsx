@@ -15,7 +15,6 @@ import {
   MutationForm,
   Pager,
   SelectField,
-  usePage,
 } from "../common";
 import type { HostCredential, Note, PageData, Service } from "../types";
 import {
@@ -48,33 +47,17 @@ function timestamp(value: string) {
 function HostActionForm({
   command,
   ...props
-}: Omit<ComponentProps<typeof MutationForm>, "action" | "confirm" | "onSuccess"> & { command: HostCommand }) {
-  const { navigate } = usePage();
-  const { action, confirm, outcome } = describeHostCommand(command);
+}: Omit<ComponentProps<typeof MutationForm>, "action" | "confirm"> & { command: HostCommand }) {
+  const { action, confirm } = describeHostCommand(command);
   return (
     <MutationForm
       {...props}
       action={action}
       confirm={confirm}
-      onSuccess={outcome.type === "return-to-inventory" ? () => navigate(outcome.href) : undefined}
     />
   );
 }
 
-function ServiceContext({ data }: { data: PageData }) {
-  return (
-    <>
-      <input type="hidden" name="sort" value={data.sort ?? "port"} />
-      <input type="hidden" name="dir" value={data.direction ?? "asc"} />
-      <input type="hidden" name="page" value={data.page ?? 1} />
-      <input type="hidden" name="per" value={data.per ?? "25"} />
-      <input type="hidden" name="f_port" value={data.f_port ?? ""} />
-      <input type="hidden" name="f_state" value={data.f_state ?? ""} />
-      <input type="hidden" name="f_service" value={data.f_service ?? ""} />
-      <input type="hidden" name="f_status" value={data.f_status ?? ""} />
-    </>
-  );
-}
 
 function ServiceDetail({
   service,
@@ -108,7 +91,6 @@ function ServiceDetail({
           command={{ type: "save-service-overrides", serviceId: service.service_id }}
           className="stack"
         >
-          <ServiceContext data={data} />
           <div className="form-grid">
             <SelectField
               label="State"
@@ -157,7 +139,6 @@ function ServiceDetail({
           <HostActionForm
             command={{ type: "reset-service-overrides", serviceId: service.service_id }}
           >
-            <ServiceContext data={data} />
             <input type="hidden" name="state" value="" />
             <input type="hidden" name="service_name" value="" />
             <input type="hidden" name="product" value="" />
@@ -179,7 +160,6 @@ function ServiceDetail({
           <HostActionForm
             command={{ type: "delete-service", serviceId: service.service_id, label: `${service.port}/${service.proto}` }}
           >
-            <ServiceContext data={data} />
             <Button type="submit" variant="destructive">
               Delete service
             </Button>
@@ -462,7 +442,6 @@ function AddService({ data }: { data: PageData }) {
   return (
     <Modal title="Add service" trigger={<Button>Add service</Button>}>
       <HostActionForm command={{ type: "create-or-update-service", hostId: data.host!.id }}>
-        <ServiceContext data={data} />
         <div className="form-grid">
           <Field
             label="Port"

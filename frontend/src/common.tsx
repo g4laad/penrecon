@@ -249,13 +249,21 @@ export function Modal({
     </Dialog>
   );
 }
+type MutationOutcome = {
+  ok: true;
+  redirect_to?: string;
+  committed?: boolean;
+  cleanup_pending?: boolean;
+  detail?: string;
+};
+
 type MutationState =
   | { phase: "idle" | "saved" }
   | { phase: "submitting" | "checking-unconfirmed" }
   | { phase: "rejected"; message: string; fields: Record<string, string> }
   | { phase: "unconfirmed"; message: string }
-  | { phase: "reconciling"; response: Response }
-  | { phase: "committed-refresh-failed"; response: Response };
+  | { phase: "reconciling"; outcome: MutationOutcome }
+  | { phase: "committed-refresh-failed"; outcome: MutationOutcome };
 
 const saveRecoveryMessage =
   "Save could not be confirmed. Check the current data before deciding whether to submit again.";
@@ -263,7 +271,6 @@ const saveRecoveryMessage =
 export function MutationForm({
   action,
   children,
-  onSuccess,
   confirm: confirmation,
   className = "stack",
   encType = "multipart/form-data",
@@ -271,7 +278,6 @@ export function MutationForm({
 }: {
   action: string;
   children: ReactNode;
-  onSuccess?: (response: Response) => void | Promise<void>;
   confirm?: string;
   className?: string;
   encType?: "multipart/form-data" | "application/x-www-form-urlencoded";
@@ -292,12 +298,11 @@ export function MutationForm({
     }
   }, [state]);
 
-  async function reconcile(response: Response) {
-    setState({ phase: "reconciling", response });
+  async function reconcile(outcome: MutationOutcome) {
+    setState({ phase: "reconciling", outcome });
     try {
-      if (onSuccess) await onSuccess(response);
-      else if (response.redirected && new URL(response.url).pathname !== location.pathname) {
-        navigate(response.url);
+      if (outcome.redirect_to && new URL(outcome.redirect_to, location.href).pathname !== location.pathname) {
+        navigate(outcome.redirect_to);
       } else {
         await refresh();
         formRef.current?.reset();
@@ -306,7 +311,7 @@ export function MutationForm({
       modal?.close();
     } catch {
       // The POST already succeeded. Recovery must never submit it again.
-      setState({ phase: "committed-refresh-failed", response });
+      setState({ phase: "committed-refresh-failed", outcome });
     }
   }
 
@@ -314,7 +319,7 @@ export function MutationForm({
     if (operation.current) return;
     operation.current = Symbol("recovery");
     try {
-      if (state.phase === "committed-refresh-failed") await reconcile(state.response);
+      if (state.phase === "committed-refresh-failed") await reconcile(state.outcome);
       else if (state.phase === "unconfirmed") {
         setState({ phase: "checking-unconfirmed" });
         try {
@@ -354,6 +359,7 @@ export function MutationForm({
           try {
             response = await fetch(engagementUrl(action), {
               method: "POST",
+              redirect: "error",
               // URL encoding preserves exact Markdown newlines.
               body: encType === "application/x-www-form-urlencoded"
                 ? new URLSearchParams(Array.from(body, ([key, value]) => [key, String(value)]))
@@ -379,16 +385,19 @@ export function MutationForm({
               : { phase: "rejected", message, fields });
             return;
           }
-          if (response.headers.get("content-type")?.includes("application/json")) {
-            try {
-              const outcome = await response.clone().json() as { committed?: unknown; cleanup_pending?: unknown; detail?: unknown };
-              if (outcome.committed === true && outcome.cleanup_pending === true && typeof outcome.detail === "string") {
-                notify(outcome.detail);
-              }
-            } catch { /* Successful responses need not carry a mutation notice. */ }
+          let outcome: MutationOutcome;
+          try {
+            outcome = await response.json() as MutationOutcome;
+            if (outcome.ok !== true) throw new Error("Missing mutation confirmation");
+          } catch {
+            setState({ phase: "unconfirmed", message: saveRecoveryMessage });
+            return;
+          }
+          if (outcome.committed === true && outcome.cleanup_pending === true && typeof outcome.detail === "string") {
+            notify(outcome.detail);
           }
           modal?.committed();
-          await reconcile(response);
+          await reconcile(outcome);
         } finally {
           operation.current = null;
         }
