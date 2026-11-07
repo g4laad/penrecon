@@ -406,6 +406,33 @@ def test_search_serializes_all_result_sources(client: TestClient) -> None:
     assert data["results"]["credentials"][0]["username"] == "needle"
 
 
+@pytest.mark.parametrize("query", [" OPERATOR ", " Private-Marker "])
+def test_search_credentials_exclude_secrets_and_management_data(client: TestClient, query: str) -> None:
+    path = _create_host(client)
+    host_id = int(path.rsplit("/", 1)[1])
+    client.post(f"{path}/services", data={"port": "22", "service_name": "ssh"})
+    created = client.post(ENGAGEMENT_PREFIX + "/credentials", data={
+        "username": "operator",
+        "secret": "search-must-not-expose-this",
+        "notes": "private-marker management notes",
+        "host_ids": [str(host_id)],
+    }).json()["credentials"][0]
+
+    response = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": query})
+    assert response.status_code == 200
+    assert response.json()["results"]["credentials"] == [{
+        "id": created["id"],
+        "kind": "password",
+        "username": "operator",
+        "hosts": [{"host_id": host_id, "ip": "10.0.0.5"}],
+    }]
+    assert "search-must-not-expose-this" not in response.text
+    assert "private-marker management notes" not in response.text
+    managed = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    assert managed["secret"] == "search-must-not-expose-this"
+    assert managed["notes"] == "private-marker management notes"
+
+
 @pytest.mark.parametrize("fields", [
     {"port": "-1"}, {"port": "65536"}, {"port": "22", "proto": "bogus"},
     {"port": "22", "state": "bogus"},

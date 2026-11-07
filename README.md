@@ -281,6 +281,10 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   the selected secret, full notes, and link management. Filter by username,
   notes, IP/service, kind, or linked/unlinked scope; secret values are excluded.
   Filters and selection are bookmarkable. The layout stacks on narrow screens.
+  Engagement-wide search matches credential usernames and notes, but returns only
+  credential IDs, kinds, usernames, and linked-host IDs/IPs. Secrets, full notes,
+  timestamps, service associations, and service-picker data stay out of search
+  responses, including the initial HTML page data.
   During creation, selecting a host loads its services. A failed load blocks
   saving until you retry successfully or deselect the host; retrying clears the
   error and shows loading while saving remains disabled.

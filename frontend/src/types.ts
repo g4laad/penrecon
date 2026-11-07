@@ -201,6 +201,6 @@ export interface PageData {
       title: string;
       preview: string;
     }[];
-    credentials: Credential[];
+    credentials: Pick<Credential, "id" | "kind" | "username" | "hosts">[];
   };
 }
