@@ -28,6 +28,12 @@ use blue (`#1d4ed8`), selected navigation and workbench items use a light blue
 tint, and keyboard focus uses the blue ring token. Muted foreground is darkened
 for legibility. Status and diff badges remain neutral and always include text;
 destructive actions retain red.
+Primary buttons use the solid `primary-hover` token rather than opacity:
+`#1340ca` in light mode (8.03:1 with white text) and `oklch(0.87 0 0)`
+in the inherited dark defaults (12.10:1 with primary foreground).
+Dark destructive uses the sRGB-safe `oklch(0.704 0.185 22.216)`.
+Destructive buttons use 10% default and 20% hover tints in both appearances;
+the dark hover pair measures 4.65:1 against the card surface.
 Light-mode destructive text uses `oklch(0.50 0.20 27.325)`, measuring 5.52:1
 against the default 10% destructive tint and 4.57:1 against the 20% hover tint.
 Input boundaries use a separate `input` token (`oklch(0.65 0 0)` in light mode),
