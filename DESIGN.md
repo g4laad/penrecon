@@ -28,6 +28,8 @@ use blue (`#1d4ed8`), selected navigation and workbench items use a light blue
 tint, and keyboard focus uses the blue ring token. Muted foreground is darkened
 for legibility. Status and diff badges remain neutral and always include text;
 destructive actions retain red.
+Light-mode destructive text uses `oklch(0.50 0.20 27.325)`, measuring 5.52:1
+against the default 10% destructive tint and 4.57:1 against the 20% hover tint.
 Input boundaries use a separate `input` token (`oklch(0.65 0 0)` in light mode),
 measuring 3.23:1 against white; structural dividers keep the lighter `border` token.
 
@@ -123,6 +125,9 @@ count with the result heading and display filenames as secondary metadata.
   closes the calendar, and Clear date omits the timestamp. Time uses shadcn
   Input with `type="time"`; the browser/system chooses 12- or 24-hour display.
   No custom hour/minute selectors or forced time format.
+  Date and time controls stack below 640px so selected dates and calendar icons
+  remain inside their controls. Date buttons expose their visible text as their
+  accessible name within the Started/Ended fieldset.
 - Inventory/service filters, sorting, pagination, scan comparison, and search
   use addressable query parameters. Page URLs can be bookmarked and reloaded.
   Inventory uses automatic viewport-sized pagination with Previous/Next controls.
@@ -179,6 +184,9 @@ count with the result heading and display filenames as secondary metadata.
   Commands can be copied, with visible success or failure feedback.
   Search and Add operation share a bottom-aligned toolbar without the standalone
   filter/header margins offsetting their controls.
+  Both forms warn before discarding changed drafts or leaving the page, including
+  calendar-only and attachment-only changes. Cancelling dismissal retains the
+  draft; saving blocks dismissal and closes without a discard prompt on success.
 - The operations list and details scroll independently within the viewport,
   stacking on narrow screens. Selection uses `#operation-ID`, survives reload
   and browser history, and falls back to the first available record after

@@ -133,10 +133,15 @@ export function Modal({
   const [dirty, setDirty] = useState(false);
   const content = useRef<HTMLDivElement>(null);
   const initialForms = useRef<string[]>([]);
-  const snapshot = (root: HTMLDivElement) =>
+  const snapshot = useCallback((root: HTMLDivElement) =>
     Array.from(root.querySelectorAll("form"), (form) =>
-      JSON.stringify(Array.from(new FormData(form).entries())),
-    );
+      JSON.stringify(Array.from(new FormData(form).entries(), ([name, value]) => [
+        name,
+        value instanceof File
+          ? value.name ? [value.name, value.size, value.type, value.lastModified] : null
+          : value,
+      ])),
+    ), []);
   useEffect(() => {
     if (!protectChanges || !dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -149,11 +154,9 @@ export function Modal({
   const captureContent = useCallback((node: HTMLDivElement | null) => {
     content.current = node;
     if (node && protectChanges) {
-      initialForms.current = Array.from(node.querySelectorAll("form"), (form) =>
-        JSON.stringify(Array.from(new FormData(form).entries())),
-      );
+      initialForms.current = snapshot(node);
     }
-  }, [protectChanges]);
+  }, [protectChanges, snapshot]);
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!nextOpen && protectChanges) {
