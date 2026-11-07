@@ -3,8 +3,12 @@ import {
   useContext,
   useId,
   useState,
+  useEffect,
+  useRef,
+  useCallback,
   isValidElement,
   Fragment,
+  Suspense,
   type ReactNode,
   type InputHTMLAttributes,
   type ComponentProps,
@@ -105,14 +109,49 @@ export function Modal({
   title,
   trigger,
   children,
+  protectChanges = false,
+  className,
 }: {
   title: string;
   trigger: ReactNode;
   children: ReactNode;
+  protectChanges?: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const content = useRef<HTMLDivElement>(null);
+  const initialForms = useRef<string[]>([]);
+  const snapshot = (root: HTMLDivElement) =>
+    Array.from(root.querySelectorAll("form"), (form) =>
+      JSON.stringify(Array.from(new FormData(form).entries())),
+    );
+  useEffect(() => {
+    if (!protectChanges || !dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty, protectChanges]);
+  const captureContent = useCallback((node: HTMLDivElement | null) => {
+    content.current = node;
+    if (node && protectChanges) {
+      initialForms.current = Array.from(node.querySelectorAll("form"), (form) =>
+        JSON.stringify(Array.from(new FormData(form).entries())),
+      );
+    }
+  }, [protectChanges]);
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen && protectChanges) {
+        if (content.current?.querySelector("fieldset:disabled")) return;
+        if (dirty && !window.confirm("Discard unsaved note changes?")) return;
+      }
+      setDirty(false);
+      setOpen(nextOpen);
+    }}>
       <DialogTrigger
         render={
           isValidElement(trigger) && trigger.type !== Fragment ? (
@@ -122,11 +161,23 @@ export function Modal({
           )
         }
       />
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className={`max-h-[90dvh] overflow-y-auto ${className ?? "sm:max-w-2xl"}`}>
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="sr-only">{title} form</DialogDescription>
-        <CloseModal.Provider value={() => setOpen(false)}>
-          {children}
+        <CloseModal.Provider value={() => { setDirty(false); setOpen(false); }}>
+          <Suspense fallback={<p role="status" className="muted text-sm">Loading form…</p>}>
+          <div
+            ref={captureContent}
+            className="contents"
+            onInput={protectChanges ? () => {
+              if (content.current) {
+                setDirty(JSON.stringify(snapshot(content.current)) !== JSON.stringify(initialForms.current));
+              }
+            } : undefined}
+          >
+            {children}
+          </div>
+          </Suspense>
         </CloseModal.Provider>
       </DialogContent>
     </Dialog>
@@ -138,12 +189,14 @@ export function MutationForm({
   onSuccess,
   confirm: confirmation,
   className = "stack",
+  encType = "multipart/form-data",
 }: {
   action: string;
   children: ReactNode;
   onSuccess?: (response: Response) => void | Promise<void>;
   confirm?: string;
   className?: string;
+  encType?: "multipart/form-data" | "application/x-www-form-urlencoded";
 }) {
   const { refresh, navigate } = usePage();
   const close = useContext(CloseModal);
@@ -153,7 +206,7 @@ export function MutationForm({
     <form
       action={engagementUrl(action)}
       method="post"
-      encType="multipart/form-data"
+      encType={encType}
       className={className}
       onSubmit={async (event) => {
         event.preventDefault();
@@ -165,7 +218,11 @@ export function MutationForm({
         try {
           const response = await fetch(engagementUrl(action), {
             method: "POST",
-            body,
+            // Multipart serialization normalizes newlines to CRLF. Text-only
+            // Markdown forms use URL encoding to preserve their exact source.
+            body: encType === "application/x-www-form-urlencoded"
+              ? new URLSearchParams(Array.from(body, ([key, value]) => [key, String(value)]))
+              : body,
             headers: { Accept: "application/json" },
           });
           if (!response.ok) {

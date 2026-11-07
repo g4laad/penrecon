@@ -150,8 +150,13 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.
 - **Diff** any two scans: added / removed / changed ports and versions.
-- **Annotate**: markdown notes, status, and tags on findings persist across
-  re-scans; ingest never touches them.
+- **Annotate**: host notes use a syntax-highlighted Markdown editor with formatting
+  shortcuts, Write/Preview/Split views, and an expandable workspace. Saved notes
+  render tables, task lists, and copyable code blocks using the same preview.
+  Unsaved notes warn before dismissal or leaving the page; failed saves retain
+  the draft. HTML displays as text, unsafe links are blocked, and images appear
+  as source links without automatic remote fetching. Markdown source, status,
+  and tags persist across re-scans; ingest never touches them.
 - **Manual services**: manually edited services show a “Manual” pill to the right
   of the service name in the host's services table.
 - **Credentials**: store secrets and link them to hosts and services. Secrets

@@ -114,8 +114,25 @@ count with the result heading and display filenames as secondary metadata.
   the current rows-per-page setting.
 - Destructive actions require confirmation. Host deletion states that credential
   links are deleted, not the credentials themselves.
-- Notes and scan-derived text render as escaped React text. Notes retain their
-  Markdown source; arbitrary HTML is not executed.
+- Host notes retain exact Markdown source and render through a shared
+  `react-markdown`/GFM viewer in both saved details and editor previews. HTML is
+  displayed as escaped text, unsafe URL schemes are blocked, and images render
+  as source links rather than fetching remote resources. Scan-derived text
+  remains escaped React text.
+- Note creation/editing uses CodeMirror with syntax highlighting, formatting
+  actions, undo/redo, and Write/Preview/Split modes in a wider, expandable dialog.
+  Split panes stack on narrow screens; tables and fenced code scroll horizontally.
+  Fenced code has a copy action with visible success/failure feedback. Tab leaves
+  the editor rather than inserting indentation. Notes use URL-encoded submission
+  to avoid multipart newline normalization; other forms retain multipart encoding.
+  The editor loads only when an Add/Edit note dialog opens; reading notes does
+  not download CodeMirror. A dialog-level loading state withholds the entire
+  form until the editor is ready, preserving initial draft-state detection.
+  Strict entry signatures keep lazy chunks from importing unversioned `app.js`
+  alongside the cache-versioned entry script and initializing React twice.
+- Note dialogs warn before discarding changed title/source or leaving the page.
+  Failed saves keep drafts intact; saving disables editing and dismissal until
+  completion. Successful mutations close without a discard prompt.
 - Credentials use the approved identity-first workbench: a compact selectable
   list beside the selected credential's secret, full discovery notes, and
   host/service link management. The list stacks above details on small screens.

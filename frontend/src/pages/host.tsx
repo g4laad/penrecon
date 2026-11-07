@@ -1,11 +1,11 @@
 import { ScopedLink } from "../common";
-import { useEffect, useState } from "react";
+import { lazy, useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
+import { MarkdownView } from "@/components/markdown-view";
 import {
   Empty,
   Field,
@@ -17,6 +17,12 @@ import {
   usePage,
 } from "../common";
 import type { Credential, Note, PageData, Service } from "../types";
+
+const MarkdownEditor = lazy(() =>
+  import("@/components/markdown-editor").then((module) => ({
+    default: module.MarkdownEditor,
+  })),
+);
 
 function timestamp(value: string) {
   return value.replace("T", " ").slice(0, 16);
@@ -279,6 +285,8 @@ function NoteDetail({ note }: { note: Note }) {
         </div>
         <Modal
           title="Edit note"
+          protectChanges
+          className="sm:max-w-5xl"
           trigger={
             <Button
               variant="outline"
@@ -290,21 +298,14 @@ function NoteDetail({ note }: { note: Note }) {
           }
         >
           <div className="stack">
-            <MutationForm action={`/notes/${note.id}/edit`} className="stack">
+            <MutationForm action={`/notes/${note.id}/edit`} className="stack" encType="application/x-www-form-urlencoded">
               <Field
                 label="Title"
                 name="title"
                 defaultValue={note.title}
                 required
               />
-              <Field label="Note (Markdown)" name="body_md">
-                <Textarea
-                  name="body_md"
-                  aria-label="Note (Markdown)"
-                  defaultValue={note.body_md}
-                  rows={10}
-                />
-              </Field>
+              <MarkdownEditor defaultValue={note.body_md} />
               <Button type="submit">Save note</Button>
             </MutationForm>
             <MutationForm
@@ -318,9 +319,7 @@ function NoteDetail({ note }: { note: Note }) {
           </div>
         </Modal>
       </div>
-      <p className="whitespace-pre-wrap break-words text-sm">
-        {note.body_md || <span className="muted">No note body.</span>}
-      </p>
+      <MarkdownView source={note.body_md} />
     </article>
   );
 }
@@ -494,18 +493,11 @@ function AddService({ data }: { data: PageData }) {
 
 function AddNote({ hostId }: { hostId: number }) {
   return (
-    <Modal title="Add note" trigger={<Button>Add note</Button>}>
-      <MutationForm action="/notes">
+    <Modal title="Add note" trigger={<Button>Add note</Button>} protectChanges className="sm:max-w-5xl">
+      <MutationForm action="/notes" encType="application/x-www-form-urlencoded">
         <input type="hidden" name="host_id" value={hostId} />
         <Field label="Title" name="title" required placeholder="Note title" />
-        <Field label="Note (Markdown)" name="body_md">
-          <Textarea
-            name="body_md"
-            aria-label="Note (Markdown)"
-            rows={8}
-            placeholder="Findings, next steps…"
-          />
-        </Field>
+        <MarkdownEditor />
         <div>
           <Button type="submit">Add note</Button>
         </div>

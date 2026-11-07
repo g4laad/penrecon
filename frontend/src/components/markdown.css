@@ -1,0 +1,176 @@
+.markdown-view {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.markdown-view > :first-child {
+  margin-top: 0;
+}
+
+.markdown-view > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-view :is(p, ul, ol, blockquote, .markdown-code-block, .markdown-table-scroll) {
+  margin-block: .75rem;
+}
+
+.markdown-view :is(p, li) {
+  white-space: pre-wrap;
+}
+
+.markdown-view :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 1.25rem .5rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.markdown-view h1 { font-size: 1.5rem; }
+.markdown-view h2 { font-size: 1.25rem; }
+.markdown-view h3 { font-size: 1.125rem; }
+.markdown-view :is(h4, h5, h6) { font-size: 1rem; }
+.markdown-view h6 { color: var(--muted-foreground); }
+
+.markdown-view a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.markdown-view a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.markdown-view :is(a, button, pre, .markdown-table-scroll):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.markdown-view ul {
+  list-style-type: disc;
+  padding-inline-start: 1.5rem;
+}
+
+.markdown-view ol {
+  list-style-type: decimal;
+  padding-inline-start: 1.5rem;
+}
+
+.markdown-view ul ul { list-style-type: circle; }
+.markdown-view ul ul ul { list-style-type: square; }
+.markdown-view li { margin-block: .25rem; }
+.markdown-view li > :is(ul, ol) { margin-block: .25rem; }
+.markdown-view li > p { margin-block: .25rem; }
+.markdown-view .contains-task-list { list-style: none; }
+
+.markdown-view .task-list-item > input[type="checkbox"] {
+  margin-inline: -1.25rem .5rem;
+  accent-color: var(--primary);
+  vertical-align: middle;
+}
+
+.markdown-view blockquote {
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: .875rem;
+  color: var(--muted-foreground);
+}
+
+.markdown-view blockquote > :first-child { margin-top: 0; }
+.markdown-view blockquote > :last-child { margin-bottom: 0; }
+
+.markdown-view code {
+  border-radius: .25rem;
+  padding: .125rem .25rem;
+  background: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .8125rem;
+  white-space: break-spaces;
+}
+
+.markdown-code-block {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.markdown-code-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  border-bottom: 1px solid var(--border);
+  padding: .25rem .5rem;
+  color: var(--muted-foreground);
+  font-size: .75rem;
+}
+
+.markdown-view pre {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  padding: .75rem;
+  white-space: pre;
+  overflow-wrap: normal;
+  tab-size: 4;
+}
+
+.markdown-view pre code {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  white-space: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.markdown-copy-status {
+  display: block;
+  padding: 0 .75rem .5rem;
+  color: var(--muted-foreground);
+  font-size: .75rem;
+}
+
+.markdown-copy-status:empty { padding: 0; }
+
+.markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.markdown-view table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: inherit;
+}
+
+.markdown-view :is(th, td) {
+  min-width: 6rem;
+  border-bottom: 1px solid var(--border);
+  padding: .375rem .625rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.markdown-view th {
+  background: var(--muted);
+  font-weight: 600;
+}
+
+.markdown-view tr:last-child td { border-bottom: 0; }
+
+.markdown-view hr {
+  margin-block: 1rem;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown-image-source { font-size: .875rem; }

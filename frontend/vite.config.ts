@@ -12,6 +12,9 @@ export default defineConfig({
     emptyOutDir: true,
     cssCodeSplit: false,
     rollupOptions: {
+      // The HTML cache-busts app.js with a query string. Keep its exports closed
+      // so lazy chunks share hashed modules instead of reimporting the entry.
+      preserveEntrySignatures: "strict",
       input: resolve(import.meta.dirname, "src/main.tsx"),
       output: {
         entryFileNames: "app.js",
