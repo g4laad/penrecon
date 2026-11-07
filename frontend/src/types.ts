@@ -32,6 +32,7 @@ export interface Service {
   last_seen: string;
   annotation: Annotation | null;
   manual: boolean;
+  overrides: TimelineOverrides;
 }
 export interface LinkedHost {
   host_id: number;
@@ -72,6 +73,46 @@ export interface Scan {
   imported_at: string;
   host_count: number;
   raw_path: string | null;
+}
+export interface TimelineState {
+  state: string;
+  service_name: string | null;
+  product: string | null;
+  version: string | null;
+}
+export interface TimelineOverrides extends Omit<TimelineState, "state"> {
+  state: string | null;
+}
+export interface TimelineChange {
+  port: number;
+  proto: string;
+  kind: "added" | "changed" | "removed";
+  before: TimelineState | null;
+  after: TimelineState | null;
+  before_overrides?: TimelineOverrides | null;
+  after_overrides?: TimelineOverrides | null;
+}
+export interface TimelineEntry {
+  id: string;
+  source: "scan" | "manual";
+  scan_id: number | null;
+  filename: string;
+  tool: string;
+  occurred_at: string;
+  imported_at: string;
+  time_source: "scan" | "import" | "manual";
+  first_seen: boolean;
+  coverage_known: boolean;
+  changes: TimelineChange[];
+  not_reported: { port: number; proto: string }[];
+}
+export interface HostTimeline {
+  entries: TimelineEntry[];
+  total: number;
+  page: number;
+  pages: number;
+  show_unchanged: boolean;
+  latest_change: TimelineEntry | null;
 }
 export interface Operation {
   id: number;
@@ -125,6 +166,7 @@ export interface PageData {
   host_ann?: Annotation | null;
   host_notes?: Note[];
   host_credentials?: Credential[];
+  host_timeline?: HostTimeline;
   services?: Service[];
   svc_total?: number;
   f_port?: string;

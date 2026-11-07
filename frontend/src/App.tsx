@@ -1,6 +1,6 @@
 import { ScopedLink, engagementUrl } from "./common";
 import { Textarea } from "@/components/ui/textarea";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ListFilter,
@@ -553,6 +553,74 @@ export default function App() {
       ) as PageData,
   );
   const path = location.pathname.replace(/^\/e\/[^/]+/, "") || "/";
+  const queryRequest = useRef<AbortController | null>(null);
+  const queryFocus = useRef<HTMLElement | null>(null);
+  const loadedQuery = useRef(location.pathname + location.search);
+  const pagePath = useRef(location.pathname);
+  useLayoutEffect(() => {
+    const previous = queryFocus.current;
+    if (previous && !previous.isConnected && document.activeElement === document.body) {
+      document.getElementById("main")?.focus({ preventScroll: true });
+    }
+    queryFocus.current = null;
+  }, [data]);
+  const [queryPending, setQueryPending] = useState(false);
+  const [queryError, setQueryError] = useState<{ url: string; message: string } | null>(null);
+  const loadQuery = useCallback(async (url: string, push: boolean) => {
+    const target = new URL(url, location.href);
+    if (target.origin !== location.origin || target.pathname !== pagePath.current) return;
+    queryRequest.current?.abort();
+    const controller = new AbortController();
+    queryRequest.current = controller;
+    setQueryPending(true);
+    setQueryError((previous) => previous?.url === target.href ? previous : null);
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    try {
+      const response = await fetch(target.pathname + target.search, {
+        headers: { Accept: "application/json" }, signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Unable to update timeline (${response.status}). Try again.`);
+      const next = await response.json() as PageData;
+      if (controller.signal.aborted) return;
+      const oldURL = location.href;
+      if (push && target.href !== oldURL) history.pushState(null, "", target.href);
+      loadedQuery.current = target.pathname + target.search;
+      queryFocus.current = focused;
+      setQueryError(null);
+      setData(next);
+      if (new URL(oldURL).hash !== target.hash) {
+        window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: target.href }));
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) setQueryError({
+        url: target.href,
+        message: error instanceof Error ? error.message : "Unable to update timeline. Try again.",
+      });
+    } finally {
+      if (queryRequest.current === controller) {
+        queryRequest.current = null;
+        setQueryPending(false);
+      }
+    }
+  }, []);
+  useEffect(() => {
+    const syncQuery = () => {
+      if (location.pathname !== pagePath.current) return;
+      if (location.pathname + location.search !== loadedQuery.current) {
+        void loadQuery(location.href, false);
+      } else {
+        queryRequest.current?.abort();
+        queryRequest.current = null;
+        setQueryPending(false);
+        setQueryError(null);
+      }
+    };
+    window.addEventListener("popstate", syncQuery);
+    return () => {
+      window.removeEventListener("popstate", syncQuery);
+      queryRequest.current?.abort();
+    };
+  }, [loadQuery]);
   const refresh = async () => {
     const response = await fetch(location.pathname + location.search, {
       headers: { Accept: "application/json" },
@@ -588,7 +656,7 @@ export default function App() {
     document.title = `${title}${data.engagement?.name ? ` — ${data.engagement.name}` : ""} — penrecon`;
   }, [data.host?.ip, data.engagement?.name, path]);
   return (
-    <PageContext.Provider value={{ data, refresh, navigate }}>
+    <PageContext.Provider value={{ data, refresh, navigate, updateQuery: (url) => { void loadQuery(url, true); }, queryPending }}>
       <AppShell data={data} path={path}
         className={
           path === "/"
@@ -603,6 +671,11 @@ export default function App() {
         }
       >
         <main id="main" className="shell py-4" tabIndex={-1}>
+          <p role="status" className="sr-only">{queryPending ? "Updating timeline…" : ""}</p>
+          {queryError && <div className="flex flex-none flex-wrap items-center gap-2 text-sm" role="alert">
+            <p>{queryError.message}</p>
+            <Button type="button" variant="outline" size="sm" aria-disabled={queryPending} onClick={() => { if (!queryPending) void loadQuery(queryError.url, true); }}>Retry</Button>
+          </div>}
           <Suspense fallback={<p role="status" className="muted">Loading page…</p>}>
           {path === "/engagements" ? (
             <EngagementsPage data={data} />

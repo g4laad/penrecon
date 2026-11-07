@@ -7,15 +7,16 @@ rows. Never touches Annotation.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from dataclasses import asdict
 from pathlib import Path
 
-from libnmap.parser import NmapParserException
 from sqlmodel import Session, select
 
 from penrecon.db import DATA_DIR, engagement_scans_dir
 from penrecon.inventory import link_hostname
 from penrecon.models import (
     Host,
+    HostScanEvidence,
     Observation,
     ObsState,
     Scan,
@@ -70,6 +71,14 @@ def _store_host(
 ) -> None:
     host = _upsert_host(session, hr.ip, now, engagement_id=engagement_id)
     assert host.id is not None
+    session.add(HostScanEvidence(
+        engagement_id=engagement_id,
+        scan_id=scan_id,
+        host_id=host.id,
+        scanned_at=hr.scanned_at,
+        coverage=hr.coverage,
+        ports=[asdict(port) for port in hr.ports],
+    ))
     for name in hr.hostnames:
         if name:
             link_hostname(session, host.id, name, now, engagement_id=engagement_id)
@@ -87,7 +96,7 @@ def _store_host(
                 product=p.product,
                 version=p.version,
                 extra=p.extra,
-                observed_at=now,
+                observed_at=hr.scanned_at or now,
             )
         )
 
@@ -98,7 +107,7 @@ def ingest_scan(
     parser = get_parser(tool)
     try:
         result = parser(data)
-    except (NmapParserException, ValueError) as exc:
+    except ValueError as exc:
         message = (
             "Choose an nmap XML file exported with -oX, then upload again."
             if tool == "nmap"

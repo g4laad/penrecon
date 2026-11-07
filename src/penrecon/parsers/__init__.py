@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -27,6 +28,10 @@ class HostResult:
     ip: str
     hostnames: list[str] = field(default_factory=list)
     ports: list[PortResult] = field(default_factory=list)
+    scanned_at: datetime | None = None
+    # Compact protocol ranges and proven aggregate states; an omitted port is
+    # never itself evidence of a state. Kept JSON-shaped for durable provenance.
+    coverage: dict[str, Any] = field(default_factory=dict)
 
 
 ScanResult = list[HostResult]

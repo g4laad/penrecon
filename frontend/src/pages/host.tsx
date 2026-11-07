@@ -1,9 +1,10 @@
-import { ScopedLink } from "../common";
+import { QueryLink, ScopedLink } from "../common";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { CredentialFields } from "@/components/credential-fields";
+import { HostTimeline, TimelineTime, timelineSummary, timelineUrl } from "@/components/host-timeline";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -86,26 +87,24 @@ function ServiceDetail({
             <SelectField
               label="State"
               name="state"
-              defaultValue={
-                (data.states ?? []).includes(service.state) ? service.state : ""
-              }
+              defaultValue={service.overrides.state ?? ""}
               options={data.states ?? []}
               empty="Use latest scan value"
             />
             <Field
               label="Service name"
               name="service_name"
-              defaultValue={service.service_name ?? ""}
+              defaultValue={service.overrides.service_name ?? ""}
             />
             <Field
               label="Product"
               name="product"
-              defaultValue={service.product ?? ""}
+              defaultValue={service.overrides.product ?? ""}
             />
             <Field
               label="Version"
               name="version"
-              defaultValue={service.version ?? ""}
+              defaultValue={service.overrides.version ?? ""}
             />
             <SelectField
               label="Triage status"
@@ -592,10 +591,10 @@ function ServiceFilters({ data }: { data: PageData }) {
   );
 }
 
-type HostSection = "services" | "notes" | "credentials";
+type HostSection = "services" | "notes" | "credentials" | "timeline";
 function currentSection(): HostSection {
   const hash = location.hash.slice(1);
-  return hash === "notes" || hash === "credentials" ? hash : "services";
+  return hash === "notes" || hash === "credentials" || hash === "timeline" ? hash : "services";
 }
 
 export function HostPage({ data }: { data: PageData }) {
@@ -662,6 +661,15 @@ export function HostPage({ data }: { data: PageData }) {
           </div>
         </div>
       </header>
+        {data.host_timeline?.latest_change && (
+          <p className="flex min-w-0 flex-none flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+            <span className="muted">Latest change</span>
+            <span><TimelineTime entry={data.host_timeline.latest_change} /></span>
+            <QueryLink href={timelineUrl(1, false)} className="min-w-0 break-words underline underline-offset-4">
+              {timelineSummary(data.host_timeline.latest_change)} — View timeline
+            </QueryLink>
+          </p>
+        )}
       <Tabs.Root
         value={section}
         onValueChange={(value) => {
@@ -681,7 +689,11 @@ export function HostPage({ data }: { data: PageData }) {
           <Tabs.Tab value="credentials">
             Credentials <span className="mono muted">{credentials.length}</span>
           </Tabs.Tab>
+          <Tabs.Tab value="timeline">Timeline</Tabs.Tab>
         </Tabs.List>
+        <Tabs.Panel value="timeline">
+          <HostTimeline timeline={data.host_timeline} />
+        </Tabs.Panel>
         <Tabs.Panel value="services">
           <ServiceFilters
             key={JSON.stringify([

@@ -31,6 +31,14 @@ Success = the operator reaches for penrecon instead of grepping raw XML, and
 can answer “what’s open on this host, what changed since last week, what did I
 note about it, and what actions produced this state” in seconds.
 
+Each host has a service timeline combining timestamped scan evidence and manual
+service additions, edits, and removals with before/after values. Sources remain
+explicit, separate from the manually maintained operation log. Deleting a service
+retains its historical evidence and does not imply a closed port.
+Partial scans never imply closure; missing evidence remains distinct from an
+explicit closed or filtered state. Historical scan evidence never overwrites
+operator annotations or manual service overrides.
+
 ## Brand Personality
 
 Modern, clean, dense, precise. Three words: **operator, legible, fast.** It

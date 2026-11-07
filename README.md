@@ -43,6 +43,12 @@ manually reset its database. Re-ingesting scans does **not** restore notes,
 credentials, manual edits, or operation logs. Startup never deletes or migrates
 your data automatically.
 
+Host timelines add separate scan-evidence and manual-service-event tables on
+startup; existing engagement-aware databases do not need a reset. Retained legacy
+scans are recovered read-only when history is viewed; no existing records are
+rewritten. Manual service actions are recorded going forward, not reconstructed
+from existing inventory.
+
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
 server is needed at runtime. Rebuild before serving or packaging a wheel.
@@ -187,15 +193,25 @@ PENRECON_DATA=./data-test uv run penrecon serve --port 8765
 
 Open `http://127.0.0.1:8765` and select one of the ten generated engagements,
 named **Mock engagement 01** through **Mock engagement 10**. Each receives at
-least 100 rows per domain table, including hosts, hostnames, services, scans,
-observations, notes,
-credentials, operation logs, and their relationships. Every host and service
+least 100 hosts, hostnames, services, scans, observations, notes, credentials,
+operation logs, and their relationships. Every host and service
 has a triage annotation. Each scan has retained nmap XML, and each operation
 has a downloadable text attachment.
+Manual-service events start empty until services are changed through the UI.
 
 The first host, `198.18.0.1` (`host-00001.mock.test`), has five open ports:
 TCP 22 (SSH), 80 (HTTP), 443 (HTTPS), 5432 (PostgreSQL), and UDP 53 (DNS).
 Other hosts vary in status, service state, product, and credential kind.
+
+Open that host's **Timeline** tab for four change groups across 28 daily scan
+snapshots: an initial HTTP/HTTPS baseline, HTTP closing, HTTP reopening with a
+version change while HTTPS becomes filtered and SSH appears, then the final
+five-open-port snapshot. Enable **Show unchanged scans** to exercise two pages
+of history, including a 443-only partial scan, a zero-port sighting, and repeated
+unchanged results. Missing ports never become closed solely because they were
+omitted. Mock XML and stored evidence use the same realistic scan timestamps.
+Existing mock engagements are not modified; run `seed` again to create new
+engagements with these timelines.
 
 Use `seed --count 250` for a larger dataset (minimum 100, maximum 131070 per
 type **per engagement**). Every invocation creates ten new engagements with
@@ -216,6 +232,33 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.
 - **Diff** any two scans: added / removed / changed ports and versions.
+- **Host timeline**: open a host's Timeline tab (`#timeline`) for newest-first
+  scan groups and manual service actions, expandable before/after changes, and a latest-change
+  link beside the host heading. Changes are shown by default; include unchanged
+  scans or page through history without changing service filters.
+  Timeline controls refresh JSON in place without reloading the page. The
+  unchanged-scans toggle retains focus and scroll position; pagination and browser
+  Back/Forward keep the URL and displayed history synchronized. Failed updates
+  retain existing results and offer Retry.
+  Scan execution time orders history when available; otherwise import time is
+  explicitly labeled. Current service state uses the same ordering, so importing
+  an older scan does not overwrite newer scan evidence. Host first/last-seen
+  timestamps retain their existing import-time meaning.
+  Missing ports are “not reported,” never assumed closed. Explicit states and
+  unambiguous nmap coverage/aggregate results can establish closure or filtering;
+  ambiguous results remain unknown. TCP and UDP are separate identities.
+  Manual additions, edits, removals, and setting/resetting overrides are explicitly
+  labeled with action timestamps. Removal retains history and means removed from
+  inventory, not a confirmed closed port. Effective values and override changes
+  are recorded atomically with each action, including when setting an override
+  leaves the effective value unchanged. No-op saves and annotation-only edits
+  produce no service events. Manual events remain visible with unchanged scans
+  hidden. Earlier manual actions cannot be reconstructed; notes, triage, and
+  credentials are not service-history events.
+  Legacy raw files recover scan time, coverage, and zero-port sightings where
+  available; missing/corrupt raw falls back to existing observations with unknown
+  coverage and import time. Unrecoverable zero-port sightings cannot be reconstructed.
+  Scan diff “removed” still means absent from that scan, not confirmed closed.
 - **Annotate**: host notes use a syntax-highlighted Markdown editor with formatting
   shortcuts, Write/Preview/Split views, and an expandable workspace. Saved notes
   render tables, task lists, and copyable code blocks using the same preview.

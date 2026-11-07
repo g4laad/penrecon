@@ -15,6 +15,7 @@ from typing import TypeVar
 from sqlalchemy import inspect
 from sqlmodel import Session, col, select
 
+from penrecon.history import HostTimeline, Overrides, State, host_history, timeline
 from penrecon.models import (
     Annotation,
     Credential,
@@ -44,6 +45,7 @@ class ServiceView:
     version: str | None
     last_seen: str
     annotation: Annotation | None
+    overrides: Overrides
     manual: bool = False
 
 
@@ -221,15 +223,13 @@ def operation_logs(session: Session, q: str = "", *, engagement_id: str) -> list
 def latest_observations(
     session: Session, host_id: int, *, engagement_id: str
 ) -> dict[tuple[int, str], Observation]:
-    """Latest Observation per (port, proto) for one host."""
-    obs = session.exec(
-        select(Observation)
-        .where(Observation.engagement_id == engagement_id, Observation.host_id == host_id)
-        .order_by(Observation.observed_at.desc())  # type: ignore[attr-defined]
-    ).all()
-    latest: dict[tuple[int, str], Observation] = {}
-    for o in obs:
-        latest.setdefault((o.port, o.proto), o)
+    """Latest trustworthy scan evidence per (port, proto), ordered by scan time.
+
+    Aggregate closure/filtering only updates previously known ports; omitted
+    ports retain their last known state. Manual events never enter this replay;
+    current manual overrides are applied later.
+    """
+    _, latest = host_history(session, host_id, engagement_id=engagement_id)
     return latest
 
 
@@ -261,6 +261,24 @@ def _service_name(svc: Service, observation: Observation | None) -> str | None:
     return svc.m_service_name or (observation.service_name if observation else None)
 
 
+def service_state(svc: Service, observation: Observation | None) -> State:
+    """Resolve the effective values shared by inventory and manual snapshots."""
+    return State(
+        state=str(svc.m_state or (observation.state if observation else None) or "unknown"),
+        service_name=_service_name(svc, observation),
+        product=svc.m_product or (observation.product if observation else None),
+        version=svc.m_version or (observation.version if observation else None),
+    )
+
+
+def service_overrides(svc: Service) -> Overrides:
+    """Raw override values, including nulls that inherit scan evidence."""
+    return Overrides(
+        state=str(svc.m_state) if svc.m_state is not None else None,
+        service_name=svc.m_service_name, product=svc.m_product, version=svc.m_version,
+    )
+
+
 def resolved_services(
     session: Session, host_id: int, *, engagement_id: str
 ) -> list[ServiceView]:
@@ -275,18 +293,19 @@ def resolved_services(
     ).all():
         assert svc.id is not None
         o = latest.get((svc.port, svc.proto))
-        state = svc.m_state or (o.state if o else None) or "unknown"
+        effective = service_state(svc, o)
         views.append(
             ServiceView(
                 service_id=svc.id,
                 port=svc.port,
                 proto=svc.proto,
-                state=state,
-                service_name=_service_name(svc, o),
-                product=svc.m_product or (o.product if o else None),
-                version=svc.m_version or (o.version if o else None),
+                state=effective.state,
+                service_name=effective.service_name,
+                product=effective.product,
+                version=effective.version,
                 last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
                 annotation=get_annotation(session, service_id=svc.id, engagement_id=engagement_id),
+                overrides=service_overrides(svc),
                 manual=o is None
                 or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
             )
@@ -294,50 +313,35 @@ def resolved_services(
     return views
 
 
+def host_timeline(
+    session: Session, host_id: int, *, engagement_id: str,
+    page: int = 1, show_unchanged: bool = False,
+) -> HostTimeline:
+    """Newest-first scans and manual actions, merged before 20-entry pagination.
+
+    Unchanged scans are opt-in; every recorded manual action remains visible.
+    """
+    return timeline(
+        session, host_id, engagement_id=engagement_id,
+        page=page, show_unchanged=show_unchanged,
+    )
+
+
 def host_change(
     session: Session, host_id: int, *, engagement_id: str,
     scan_count: int, latest_scan_id: int | None
 ) -> str:
-    """Scan-delta marker for the hosts list: ``"new"`` if the host appeared for
-    the first time *in the latest scan* (and a prior baseline exists),
-    ``"changed"`` if its two most-recent scans added or altered a service, else
-    ``""``. Compares the host's own two latest scans (robust to partial scans),
-    mirroring :func:`diff_scans`. Removals are out of scope (they live on
-    /diff); manual data carries no observation and never flags.
+    """Scan-only marker, unaffected by manual actions in the unified timeline.
 
-    "new" needs a baseline: a single-scan database has nothing to be new
-    *relative to*, so on the first ingest no host flags — a green column where
-    everything is new says nothing. A host seen only in an older scan (absent
-    from the latest) is stale, not new, so it doesn't flag either.
-    # ponytail: one observation fetch per host, fine for single-user local.
+    Preserve the first-sighting baseline rule: only a host introduced in the
+    latest imported scan is new, and only when an earlier scan exists.
     """
-    obs = session.exec(
-        select(Observation)
-        .where(Observation.engagement_id == engagement_id, Observation.host_id == host_id)
-        .order_by(
-            Observation.observed_at.desc(),  # type: ignore[attr-defined]
-            Observation.scan_id.desc(),  # type: ignore[attr-defined]
-        )
-    ).all()
-    if not obs:
+    entries, _ = host_history(session, host_id, engagement_id=engagement_id)
+    if not entries:
         return ""
-    scan_order: list[int] = []
-    for o in obs:
-        if o.scan_id not in scan_order:
-            scan_order.append(o.scan_id)
-    if len(scan_order) == 1:
-        # first-seen only counts as "new" against a baseline, and only if that
-        # sighting is the current scan (not a host that dropped out of later scans)
-        return "new" if scan_count > 1 and scan_order[0] == latest_scan_id else ""
-    latest, prev = scan_order[0], scan_order[1]
-    prev_obs = {(o.port, o.proto): o for o in obs if o.scan_id == prev}
-    for o in obs:
-        if o.scan_id != latest:
-            continue
-        po = prev_obs.get((o.port, o.proto))
-        if po is None or _summary(o) != _summary(po):  # added or changed
-            return "changed"
-    return ""
+    if len(entries) == 1:
+        return "new" if scan_count > 1 and entries[0].scan_id == latest_scan_id else ""
+    return "changed" if entries[-1].changes else ""
 
 
 def host_rows(session: Session, *, engagement_id: str) -> list[HostRow]:

@@ -130,6 +130,51 @@ class Observation(EngagementOwned, table=True):
     observed_at: datetime = Field(default_factory=_now)
 
 
+class HostScanEvidence(EngagementOwned, table=True):
+    """Immutable scan-only evidence, including hosts with no reported ports.
+
+    Additive table: existing observations and raw files remain untouched.
+    Coverage stores compact ranges, never an assumption about omitted ports.
+    """
+
+    __tablename__ = "host_scan_evidence"
+    __table_args__ = (
+        UniqueConstraint("engagement_id", "scan_id", "host_id"),
+        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    scan_id: int = Field(index=True)
+    host_id: int = Field(index=True)
+    scanned_at: datetime | None = None
+    coverage: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    ports: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+class ManualServiceEvent(EngagementOwned, table=True):
+    """Append-only service value snapshots, independent of service lifetime.
+
+    Only future manual actions are recorded. The scalar JSON snapshots never
+    resolve against mutable services or observations when read.
+    """
+
+    __tablename__ = "manual_service_event"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        CheckConstraint("kind IN ('added', 'changed', 'removed')", name="manual_service_event_kind"),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    host_id: int = Field(index=True)
+    port: int
+    proto: str
+    occurred_at: datetime = Field(default_factory=_now, index=True)
+    kind: str
+    before: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
+    after: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
+    before_overrides: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
+    after_overrides: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
+
+
 class Annotation(EngagementOwned, table=True):
     """Triage state (status/tags) on a host or service. Never modified by
     ingest. Freeform notes live in :class:`Note`.

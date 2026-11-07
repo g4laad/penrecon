@@ -9,7 +9,7 @@ import json
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -22,6 +22,7 @@ from sqlmodel import Session, col, select
 
 from penrecon import queries
 from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session, init_db
+from penrecon.history import Overrides, State
 from penrecon.ingest import ScanParseError, ingest_scan
 from penrecon.inventory import link_hostname
 from penrecon.models import (
@@ -32,6 +33,7 @@ from penrecon.models import (
     Engagement,
     Host,
     HostHostname,
+    ManualServiceEvent,
     Note,
     Observation,
     ObsState,
@@ -288,6 +290,8 @@ def host_detail(
     table: _ServiceTable = Depends(_ServiceTable),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
+    timeline_page: int = 1,
+    timeline_unchanged: bool = False,
 ) -> Response:
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
@@ -298,6 +302,10 @@ def host_detail(
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
         "host_credentials": queries.credentials_for_host(session, host_id, engagement_id=engagement_id),
+        "host_timeline": queries.host_timeline(
+            session, host_id, engagement_id=engagement_id,
+            page=timeline_page, show_unchanged=timeline_unchanged,
+        ),
         "kinds": list(CredKind),
         **svc_ctx,
     })
@@ -432,6 +440,32 @@ def _clean(value: str) -> str | None:
     return v or None
 
 
+def _service_snapshot(svc: Service, observation: Observation | None) -> tuple[State, Overrides]:
+    """Detach effective values and raw overrides before any service mutation."""
+    return (
+        queries.service_state(svc, observation),
+        queries.service_overrides(svc),
+    )
+
+
+def _record_service_event(
+    session: Session, svc: Service,
+    before: tuple[State, Overrides] | None, after: tuple[State, Overrides] | None,
+) -> None:
+    """Stage an immutable value event in the service mutation's transaction."""
+    if before == after:
+        return
+    session.add(ManualServiceEvent(
+        engagement_id=svc.engagement_id, host_id=svc.host_id,
+        port=svc.port, proto=svc.proto,
+        kind="added" if before is None else "removed" if after is None else "changed",
+        before=asdict(before[0]) if before is not None else None,
+        after=asdict(after[0]) if after is not None else None,
+        before_overrides=asdict(before[1]) if before is not None else None,
+        after_overrides=asdict(after[1]) if after is not None else None,
+    ))
+
+
 @scoped.post("/hosts/{host_id}/services", response_class=JSONResponse)
 def add_service(
     request: Request,
@@ -454,6 +488,10 @@ def add_service(
             Service.host_id == host_id, Service.port == port, Service.proto == proto.strip().lower()
         )
     ).first()
+    observation = queries.latest_observations(session, host_id, engagement_id=engagement_id).get(
+        (port, proto.strip().lower())
+    )
+    before = _service_snapshot(svc, observation) if svc is not None else None
     if svc is None:
         svc = Service(host_id=host_id, port=port, proto=proto.strip().lower(), engagement_id=engagement_id)
         session.add(svc)
@@ -461,6 +499,7 @@ def add_service(
     svc.m_service_name = _clean(service_name)
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
+    _record_service_event(session, svc, before, _service_snapshot(svc, observation))
     session.commit()
     return _services_response(request, session, host, table, engagement_id=engagement_id)
 
@@ -482,11 +521,15 @@ def edit_service(
     svc = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if svc is None:
         return JSONResponse({"detail": "service not found"}, status_code=404)
+    observation = queries.latest_observations(session, svc.host_id, engagement_id=engagement_id).get(
+        (svc.port, svc.proto)
+    )
+    before = _service_snapshot(svc, observation)
     svc.m_state = ObsState(state) if state else None  # blank reverts to scan value
     svc.m_service_name = _clean(service_name)
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
-    session.commit()
+    _record_service_event(session, svc, before, _service_snapshot(svc, observation))
     # one Save persists both the scan overrides and the triage annotation
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
@@ -508,18 +551,12 @@ def delete_service(
         return JSONResponse({"detail": "service not found"}, status_code=404)
     host = queries.get_owned(session, Host, svc.host_id, engagement_id=engagement_id)
     assert host is not None
-    # hard delete: the service and everything tied to it. A later scan that sees
-    # this port re-creates it fresh, as if it had never been deleted. The FK
-    # cascade drops the annotation and credential links; observations key off
-    # (host, port, proto) rather than service_id, so clear them by hand.
-    for obs in session.exec(
-        select(Observation).where(Observation.engagement_id == engagement_id).where(
-            Observation.host_id == svc.host_id,
-            Observation.port == svc.port,
-            Observation.proto == svc.proto,
-        )
-    ).all():
-        session.delete(obs)
+    observation = queries.latest_observations(session, svc.host_id, engagement_id=engagement_id).get(
+        (svc.port, svc.proto)
+    )
+    _record_service_event(session, svc, _service_snapshot(svc, observation), None)
+    # Only the current service and its annotations/links are deleted. Immutable
+    # observations and manual events remain available to host history.
     session.delete(svc)
     session.commit()
     return _services_response(request, session, host, table, engagement_id=engagement_id)

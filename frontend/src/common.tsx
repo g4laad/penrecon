@@ -45,6 +45,8 @@ export const PageContext = createContext<{
   data: PageData;
   refresh: () => Promise<void>;
   navigate: (url: string) => void;
+  updateQuery: (url: string) => void;
+  queryPending: boolean;
 } | null>(null);
 const CloseModal = createContext<(() => void) | null>(null);
 const FieldErrors = createContext<Record<string, string>>({});
@@ -52,6 +54,21 @@ export function usePage() {
   const value = useContext(PageContext);
   if (!value) throw new Error("Missing page context");
   return value;
+}
+
+/** Keep ordinary link behavior for modified clicks and other destinations. */
+export function QueryLink({ href, onClick, ...props }: ComponentProps<"a">) {
+  const { updateQuery } = usePage();
+  return <a {...props} href={href} onClick={(event) => {
+    onClick?.(event);
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+        event.ctrlKey || event.shiftKey || event.altKey || props.download !== undefined ||
+        (props.target && props.target !== "_self") || !href) return;
+    const target = new URL(href, location.href);
+    if (target.origin !== location.origin || target.pathname !== location.pathname) return;
+    event.preventDefault();
+    updateQuery(target.href);
+  }} />;
 }
 export function Field({
   label,

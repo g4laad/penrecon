@@ -235,6 +235,14 @@ the selected file remains available for correction or replacement and retry.
   Active tabs use `#services`, `#notes`, and `#credentials` and survive reloads
   and browser history. Selection stays intact across tab changes; deletion or
   filtering falls back to the first available item.
+  The host timeline reserves a stable scrollbar gutter and 12px inline-end
+  padding so the unchanged-scans toggle and evidence stay clear of the scrollbar.
+  Timeline filtering, pagination, and its latest-change link fetch page data
+  without document navigation; query state remains URL-backed with Back/Forward
+  support. Checkbox focus and timeline scroll are retained; when a pagination
+  link disappears, focus moves to the main region without scrolling. Pending
+  updates are announced and obsolete requests are aborted. Failed requests keep
+  existing results and expose a focus-preserving Retry action.
 - Host identity remains visible as 13px data, with status, linked hostnames, and
   tags in a compact wrapping row; its page heading is screen-reader only.
   Observation dates live in Manage host rather than the
