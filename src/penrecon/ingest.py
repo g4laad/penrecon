@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from libnmap.parser import NmapParserException
 from sqlmodel import Session, select
 
 from penrecon.db import DATA_DIR, engagement_scans_dir
@@ -21,6 +22,10 @@ from penrecon.models import (
     Service,
 )
 from penrecon.parsers import HostResult, get_parser
+
+
+class ScanParseError(ValueError):
+    """Scan content does not match the selected tool's import format."""
 
 
 def _obs_state(raw: str) -> ObsState:
@@ -91,7 +96,15 @@ def ingest_scan(
     session: Session, data: bytes, filename: str, tool: str, *, engagement_id: str
 ) -> Scan:
     parser = get_parser(tool)
-    result = parser(data)
+    try:
+        result = parser(data)
+    except (NmapParserException, ValueError) as exc:
+        message = (
+            "Choose an nmap XML file exported with -oX, then upload again."
+            if tool == "nmap"
+            else f"{exc}. Correct the file or select the matching tool format, then upload again."
+        )
+        raise ScanParseError(message) from exc
     now = datetime.now(UTC)
 
     scan = Scan(

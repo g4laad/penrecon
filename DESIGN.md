@@ -75,6 +75,10 @@ table with internal scrolling and sticky column headings. On compact screens,
 the import section scrolls independently when needed. The scan import-safety
 description remains available to screen readers; comparisons group the difference
 count with the result heading and display filenames as secondary metadata.
+History filenames wrap within a minimum 12rem column, retaining horizontal table
+scrolling on narrow screens without painting over neighboring values. Invalid
+nmap and Amass content returns HTTP 400 with format-specific correction guidance;
+the selected file remains available for correction or replacement and retry.
 
 ## Components and interactions
 

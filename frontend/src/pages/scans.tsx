@@ -64,7 +64,7 @@ export function ScansPage({ data }: { data: PageData }) {
                 {scans.map((scan) => (
                   <TableRow key={scan.id}>
                     <TableCell className="mono">#{scan.id}</TableCell>
-                    <TableCell className="max-w-lg break-all font-medium">
+                    <TableCell className="min-w-48 max-w-lg break-all whitespace-normal font-medium">
                       {scan.filename}
                     </TableCell>
                     <TableCell>
@@ -162,16 +162,7 @@ export function DiffPage({ data }: { data: PageData }) {
                       key={`${entry.ip}-${entry.port}-${entry.proto}-${entry.kind}-${index}`}
                     >
                       <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
-                            entry.kind === "added"
-                              ? "border-emerald-700/30 bg-emerald-50 text-emerald-800"
-                              : entry.kind === "removed"
-                                ? "border-red-700/30 bg-red-50 text-red-800"
-                                : "border-amber-700/30 bg-amber-50 text-amber-900"
-                          }
-                        >
+                        <Badge variant="outline">
                           {entry.kind}
                         </Badge>
                       </TableCell>

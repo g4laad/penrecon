@@ -22,7 +22,7 @@ from sqlmodel import Session, col, select
 
 from penrecon import queries
 from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session, init_db
-from penrecon.ingest import ingest_scan
+from penrecon.ingest import ScanParseError, ingest_scan
 from penrecon.inventory import link_hostname
 from penrecon.models import (
     CredKind,
@@ -727,9 +727,12 @@ def scans(request: Request, engagement_id: str = Depends(require_engagement), se
 @scoped.post("/scans")
 async def upload_scan(
     file: UploadFile, tool: str = Form("nmap"), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
-) -> RedirectResponse:
+) -> Response:
     data = await file.read()
-    ingest_scan(session, data, file.filename or "upload", tool, engagement_id=engagement_id)
+    try:
+        ingest_scan(session, data, file.filename or "upload", tool, engagement_id=engagement_id)
+    except ScanParseError as exc:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
     return RedirectResponse(f"/e/{engagement_id}" + "/scans", status_code=303)
 
 
