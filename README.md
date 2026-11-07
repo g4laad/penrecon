@@ -26,6 +26,9 @@ to the selected engagement's host inventory. Every domain URL starts with
 Upload files from the selected engagement's Scans page. Use the sidebar's
 Scans and Scan diff entries to switch between import history and comparisons.
 
+Hosts pagination updates the inventory in place without reloading the page.
+The URL tracks the current page, including browser Back and Forward navigation.
+
 One shared SQLite database stores all engagements. Hosts, hostnames, services,
 scans, notes, triage, credentials, and operations are engagement-owned; the same
 IP or hostname can exist independently in multiple engagements. Search, exports,

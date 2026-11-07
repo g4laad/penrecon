@@ -27,6 +27,7 @@ import {
   SelectField,
   Modal,
   MutationForm,
+  QueryLink,
   Filters,
   SortLink,
   Empty,
@@ -381,7 +382,7 @@ function Inventory({ data }: { data: PageData }) {
             nativeButton={false}
             disabled={!ready || (current.page ?? 1) <= 1}
             render={
-              <ScopedLink href={pageUrl((current.page ?? 1) - 1)}
+              <QueryLink href={engagementUrl(pageUrl((current.page ?? 1) - 1))}
               aria-label="Previous page" />
             }
           >
@@ -392,7 +393,7 @@ function Inventory({ data }: { data: PageData }) {
             nativeButton={false}
             disabled={!ready || (current.page ?? 1) >= (current.pages ?? 1)}
             render={
-              <ScopedLink href={pageUrl((current.page ?? 1) + 1)}
+              <QueryLink href={engagementUrl(pageUrl((current.page ?? 1) + 1))}
               aria-label="Next page" />
             }
           >
