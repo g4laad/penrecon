@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
+import { CredentialFields } from "@/components/credential-fields";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -238,27 +239,7 @@ function CredentialDetail({
               className="stack"
             >
               <input type="hidden" name="host_id" value={hostId} />
-              <SelectField
-                label="Kind"
-                name="kind"
-                defaultValue={credential.kind}
-                options={data.kinds ?? []}
-              />
-              <Field
-                label="Username"
-                name="username"
-                defaultValue={credential.username}
-              />
-              <Field
-                label="Secret"
-                name="secret"
-                defaultValue={credential.secret}
-              />
-              <Field
-                label="Notes"
-                name="notes"
-                defaultValue={credential.notes}
-              />
+              <CredentialFields credential={credential} kinds={data.kinds ?? []} />
               <Button type="submit">Save credential</Button>
             </MutationForm>
             <MutationForm

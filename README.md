@@ -242,3 +242,20 @@ icons. Add components with `npx shadcn@latest add <component> -c frontend`.
 Existing page URLs return the React shell, or the same page context as JSON
 with `Accept: application/json`. Mutations retain their form endpoints and
 refresh page data after success.
+
+### Shared feature seams
+
+- `inventory.py` owns hostname/link persistence for both ingestion and manual
+  edits. Callers normalize inputs and commit; existing hidden links stay hidden.
+- `queries.latest_observations()` and the shared service-name resolver keep
+  inventory, exports, and credential associations on the same current state.
+  Credential assembly reuses each host's observation map.
+- The web layer binds service-table state once for query/form inputs, and
+  operation input once for create/edit. Operation validation remains inside the
+  handler, after ownership and attachment-conflict checks.
+- `components/credential-fields.tsx` supplies both credential editors, including
+  masked, kind-aware secret controls and multiline notes.
+
+The [before wiring report](reports/untangle-before.html) records the ranked
+knots with original file/line anchors. The [after report](reports/untangle-after.html)
+and [comparison image](reports/untangle-comparison.png) show the cutover.

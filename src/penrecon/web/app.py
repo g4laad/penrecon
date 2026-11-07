@@ -22,7 +22,8 @@ from sqlmodel import Session, col, select
 
 from penrecon import queries
 from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session, init_db
-from penrecon.ingest import _upsert_hostname, ingest_scan
+from penrecon.ingest import ingest_scan
+from penrecon.inventory import link_hostname
 from penrecon.models import (
     CredKind,
     Credential,
@@ -226,25 +227,57 @@ def export_hosts_csv(engagement_id: str = Depends(require_engagement), session: 
     )
 
 
+@dataclass(frozen=True)
+class _ServiceTable:
+    """URL/form state carried unchanged through service mutations."""
+
+    sort: str = "port"
+    dir: str = ""
+    page: str = "1"
+    f_port: str = ""
+    f_state: str = ""
+    f_service: str = ""
+    f_status: str = ""
+    per: str = ""
+
+
+def _service_table_form(
+    sort: str = Form("port"),
+    dir: str = Form(""),
+    page: str = Form("1"),
+    f_port: str = Form(""),
+    f_state: str = Form(""),
+    f_service: str = Form(""),
+    f_status: str = Form(""),
+    per: str = Form(""),
+) -> _ServiceTable:
+    return _ServiceTable(sort, dir, page, f_port, f_state, f_service, f_status, per)
+
+
 def _services_ctx(
-    session: Session, host: Host, sort: str, dir: str, page: str,
-    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
+    session: Session, host: Host, table: _ServiceTable,
     *, engagement_id: str,
 ) -> dict[str, object]:
     """Filtered, sorted, server-paginated services; svc_total is the matched count."""
     assert host.id is not None
-    services = queries.host_services(session, host.id, engagement_id=engagement_id)
-    services = queries.filter_services(services, f_port, f_state, f_service, f_status)
-    direction = dir if dir in ("asc", "desc") else queries.SERVICE_SORT_DEFAULT_DIR.get(sort, "asc")
-    services = queries.sort_services(services, sort, direction)
+    services = queries.resolved_services(session, host.id, engagement_id=engagement_id)
+    services = queries.filter_services(
+        services, table.f_port, table.f_state, table.f_service, table.f_status
+    )
+    direction = (
+        table.dir if table.dir in ("asc", "desc")
+        else queries.SERVICE_SORT_DEFAULT_DIR.get(table.sort, "asc")
+    )
+    services = queries.sort_services(services, table.sort, direction)
     total = len(services)
-    page_no = int(page) if page.strip().isdigit() else 1
-    per_limit = queries.resolve_per_page(per)
+    page_no = int(table.page) if table.page.strip().isdigit() else 1
+    per_limit = queries.resolve_per_page(table.per)
     page_services, page_no, pages = queries.paginate(services, page_no, per_limit)
     return {"host": host, "services": page_services, "svc_total": total,
-            "page": page_no, "pages": pages, "sort": sort, "direction": direction,
+            "page": page_no, "pages": pages, "sort": table.sort, "direction": direction,
             "per": "all" if per_limit is None else str(per_limit),
-            "f_port": f_port, "f_state": f_state, "f_service": f_service, "f_status": f_status,
+            "f_port": table.f_port, "f_state": table.f_state,
+            "f_service": table.f_service, "f_status": table.f_status,
             "statuses": list(Status), "states": list(ObsState)}
 
 
@@ -252,21 +285,14 @@ def _services_ctx(
 def host_detail(
     request: Request,
     host_id: int,
-    sort: str = "port",
-    dir: str = "",
-    page: str = "1",
-    f_port: str = "",
-    f_state: str = "",
-    f_service: str = "",
-    f_status: str = "",
-    per: str = "",
+    table: _ServiceTable = Depends(_ServiceTable),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
-    svc_ctx = _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
+    svc_ctx = _services_ctx(session, host, table, engagement_id=engagement_id)
     return page_response(request, {
         "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
@@ -283,13 +309,11 @@ def _hostnames_response(request: Request, session: Session, host: Host, *, engag
 
 
 def _services_response(
-    request: Request, session: Session, host: Host,
-    sort: str = "port", dir: str = "", page: str = "1",
-    f_port: str = "", f_state: str = "", f_service: str = "", f_status: str = "", per: str = "",
+    request: Request, session: Session, host: Host, table: _ServiceTable,
     *, engagement_id: str,
 ) -> Response:
     return page_response(
-        request, _services_ctx(session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
+        request, _services_ctx(session, host, table, engagement_id=engagement_id)
     )
 
 
@@ -306,7 +330,7 @@ def add_hostname(
         return JSONResponse({"detail": "host not found"}, status_code=404)
     clean = name.strip().lower()  # normalize so manual adds dedup against scan data
     if clean:
-        _upsert_hostname(session, host_id, clean, datetime.now(UTC), engagement_id=engagement_id)
+        link_hostname(session, host_id, clean, datetime.now(UTC), engagement_id=engagement_id)
         session.commit()
     return _hostnames_response(request, session, host, engagement_id=engagement_id)
 
@@ -418,14 +442,7 @@ def add_service(
     service_name: str = Form(""),
     product: str = Form(""),
     version: str = Form(""),
-    sort: str = Form("port"),
-    dir: str = Form(""),
-    page: str = Form("1"),
-    f_port: str = Form(""),
-    f_state: str = Form(""),
-    f_service: str = Form(""),
-    f_status: str = Form(""),
-    per: str = Form(""),
+    table: _ServiceTable = Depends(_service_table_form),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -445,7 +462,7 @@ def add_service(
     svc.m_product = _clean(product)
     svc.m_version = _clean(version)
     session.commit()
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
+    return _services_response(request, session, host, table, engagement_id=engagement_id)
 
 
 @scoped.post("/services/{service_id}/edit", response_class=JSONResponse)
@@ -458,14 +475,7 @@ def edit_service(
     version: str = Form(""),
     status: Status = Form(Status.new),
     tags: str = Form(""),
-    sort: str = Form("port"),
-    dir: str = Form(""),
-    page: str = Form("1"),
-    f_port: str = Form(""),
-    f_state: str = Form(""),
-    f_service: str = Form(""),
-    f_status: str = Form(""),
-    per: str = Form(""),
+    table: _ServiceTable = Depends(_service_table_form),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -482,21 +492,14 @@ def edit_service(
     queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
     host = queries.get_owned(session, Host, svc.host_id, engagement_id=engagement_id)
     assert host is not None
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
+    return _services_response(request, session, host, table, engagement_id=engagement_id)
 
 
 @scoped.post("/services/{service_id}/delete", response_class=JSONResponse)
 def delete_service(
     request: Request,
     service_id: int,
-    sort: str = Form("port"),
-    dir: str = Form(""),
-    page: str = Form("1"),
-    f_port: str = Form(""),
-    f_state: str = Form(""),
-    f_service: str = Form(""),
-    f_status: str = Form(""),
-    per: str = Form(""),
+    table: _ServiceTable = Depends(_service_table_form),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -519,16 +522,20 @@ def delete_service(
         session.delete(obs)
     session.delete(svc)
     session.commit()
-    return _services_response(request, session, host, sort, dir, page, f_port, f_state, f_service, f_status, per, engagement_id=engagement_id)
+    return _services_response(request, session, host, table, engagement_id=engagement_id)
 
 
 # --- credentials --------------------------------------------------------------
 
-def _credentials_response(request: Request, session: Session, *, engagement_id: str) -> Response:
-    return page_response(request, {
+def _credential_context(session: Session, *, engagement_id: str) -> dict[str, object]:
+    return {
         "credentials": queries.credential_views(session, engagement_id=engagement_id),
         "hosts": session.exec(select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)).all(),
-    })
+    }
+
+
+def _credentials_response(request: Request, session: Session, *, engagement_id: str) -> Response:
+    return page_response(request, _credential_context(session, engagement_id=engagement_id))
 
 
 def _host_credentials_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
@@ -572,8 +579,7 @@ def edit_credential(
 @scoped.get("/credentials", response_class=HTMLResponse)
 def credentials_page(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     return page_response(request, {
-        "credentials": queries.credential_views(session, engagement_id=engagement_id),
-        "hosts": session.exec(select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)).all(),
+        **_credential_context(session, engagement_id=engagement_id),
         "kinds": list(CredKind),
     })
 
@@ -863,39 +869,43 @@ def _parse_operation_datetime(raw: str, field: str) -> datetime | None:
         raise ValueError(f"Invalid {field} date-time.") from exc
 
 
-def _normalize_operation_form(
-    started_at: str,
-    ended_at: str,
-    source: str,
-    destination: str,
-    tool: str,
-    user_context: str,
-    command: str,
-    output: str,
-    description: str,
-    comments: str,
-    tags: str,
-) -> _OperationForm:
-    parsed_start = _parse_operation_datetime(started_at, "started_at")
-    parsed_end = _parse_operation_datetime(ended_at, "ended_at")
-    clean_command = command.strip()
-    if not clean_command:
-        raise ValueError("Command is required.")
-    if parsed_start is not None and parsed_end is not None and parsed_end < parsed_start:
-        raise ValueError("ended_at must not be earlier than started_at.")
-    return _OperationForm(
-        started_at=parsed_start,
-        ended_at=parsed_end,
-        source=source.strip(),
-        destination=destination.strip(),
-        tool=tool.strip(),
-        user_context=user_context.strip(),
-        command=clean_command,
-        output=output,
-        description=description,
-        comments=comments,
-        tags=[tag.strip() for tag in tags.split(",") if tag.strip()],
-    )
+@dataclass(frozen=True)
+class _OperationInput:
+    """Bind raw form fields once; handlers choose when validation runs."""
+
+    started_at: str = Form("")
+    ended_at: str = Form("")
+    source: str = Form("")
+    destination: str = Form("")
+    tool: str = Form("")
+    user_context: str = Form("")
+    command: str = Form("")
+    output: str = Form("")
+    description: str = Form("")
+    comments: str = Form("")
+    tags: str = Form("")
+
+    def normalize(self) -> _OperationForm:
+        parsed_start = _parse_operation_datetime(self.started_at, "started_at")
+        parsed_end = _parse_operation_datetime(self.ended_at, "ended_at")
+        clean_command = self.command.strip()
+        if not clean_command:
+            raise ValueError("Command is required.")
+        if parsed_start is not None and parsed_end is not None and parsed_end < parsed_start:
+            raise ValueError("ended_at must not be earlier than started_at.")
+        return _OperationForm(
+            started_at=parsed_start,
+            ended_at=parsed_end,
+            source=self.source.strip(),
+            destination=self.destination.strip(),
+            tool=self.tool.strip(),
+            user_context=self.user_context.strip(),
+            command=clean_command,
+            output=self.output,
+            description=self.description,
+            comments=self.comments,
+            tags=[tag.strip() for tag in self.tags.split(",") if tag.strip()],
+        )
 
 
 def _apply_operation_form(operation: OperationLog, values: _OperationForm) -> None:
@@ -952,37 +962,6 @@ def _save_operation_attachment(upload: UploadFile, *, engagement_id: str) -> tup
     return original_name, str(destination.relative_to(DATA_DIR)), upload.content_type
 
 
-def _operation_form_values(
-    started_at: str,
-    ended_at: str,
-    source: str,
-    destination: str,
-    tool: str,
-    user_context: str,
-    command: str,
-    output: str,
-    description: str,
-    comments: str,
-    tags: str,
-) -> _OperationForm | JSONResponse:
-    try:
-        return _normalize_operation_form(
-            started_at,
-            ended_at,
-            source,
-            destination,
-            tool,
-            user_context,
-            command,
-            output,
-            description,
-            comments,
-            tags,
-        )
-    except ValueError as exc:
-        return _operation_bad_request(str(exc))
-
-
 @scoped.get("/operations", response_class=HTMLResponse)
 def operations_page(
     request: Request,
@@ -1014,36 +993,15 @@ def operations_page(
 
 @scoped.post("/operations")
 def create_operation(
-    started_at: str = Form(""),
-    ended_at: str = Form(""),
-    source: str = Form(""),
-    destination: str = Form(""),
-    tool: str = Form(""),
-    user_context: str = Form(""),
-    command: str = Form(""),
-    output: str = Form(""),
-    description: str = Form(""),
-    comments: str = Form(""),
-    tags: str = Form(""),
+    form: _OperationInput = Depends(_OperationInput),
     attachment: UploadFile | None = File(None),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    values = _operation_form_values(
-        started_at,
-        ended_at,
-        source,
-        destination,
-        tool,
-        user_context,
-        command,
-        output,
-        description,
-        comments,
-        tags,
-    )
-    if isinstance(values, JSONResponse):
-        return values
+    try:
+        values = form.normalize()
+    except ValueError as exc:
+        return _operation_bad_request(str(exc))
     operation = OperationLog(command=values.command, engagement_id=engagement_id)
     _apply_operation_form(operation, values)
     new_path: str | None = None
@@ -1068,17 +1026,7 @@ def create_operation(
 @scoped.post("/operations/{operation_id}/edit")
 def edit_operation(
     operation_id: int,
-    started_at: str = Form(""),
-    ended_at: str = Form(""),
-    source: str = Form(""),
-    destination: str = Form(""),
-    tool: str = Form(""),
-    user_context: str = Form(""),
-    command: str = Form(""),
-    output: str = Form(""),
-    description: str = Form(""),
-    comments: str = Form(""),
-    tags: str = Form(""),
+    form: _OperationInput = Depends(_OperationInput),
     remove_attachment: bool = Form(False),
     attachment: UploadFile | None = File(None),
     engagement_id: str = Depends(require_engagement),
@@ -1092,21 +1040,10 @@ def edit_operation(
         return _operation_bad_request(
             "Cannot replace and remove an attachment in the same request."
         )
-    values = _operation_form_values(
-        started_at,
-        ended_at,
-        source,
-        destination,
-        tool,
-        user_context,
-        command,
-        output,
-        description,
-        comments,
-        tags,
-    )
-    if isinstance(values, JSONResponse):
-        return values
+    try:
+        values = form.normalize()
+    except ValueError as exc:
+        return _operation_bad_request(str(exc))
 
     old_path = operation.attachment_path
     new_path: str | None = None

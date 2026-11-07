@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session
+from sqlmodel import select
+
+from penrecon.ingest import ingest_scan
+from penrecon.queries import resolved_services
+from tests.fixtures import SCAN_A
 
 from penrecon.models import (
     CredKind,
@@ -91,3 +96,46 @@ def test_pickable_services_scoped_to_linked_hosts(session: Session) -> None:
     session.add(c2)
     session.commit()
     assert credential_views(session, engagement_id=TEST_ENGAGEMENT_ID)[0].pickable_services == []
+
+
+def test_credential_service_names_follow_current_state(session: Session) -> None:
+    ingest_scan(session, SCAN_A.encode(), "old.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    updated = SCAN_A.replace('name="ssh"', 'name="ssh-new"').replace('name="http"', 'name="http-new"')
+    ingest_scan(session, updated.encode(), "new.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    host = session.exec(select(Host).where(Host.ip == "10.0.0.1")).one()
+    services = {
+        svc.port: svc for svc in session.exec(select(Service)).all()
+    }
+    credential = Credential(username="operator", engagement_id=TEST_ENGAGEMENT_ID)
+    session.add(credential)
+    session.flush()
+    assert credential.id is not None and host.id is not None and services[22].id is not None
+    session.add(CredentialHost(
+        credential_id=credential.id, host_id=host.id, engagement_id=TEST_ENGAGEMENT_ID,
+    ))
+    session.add(CredentialService(
+        credential_id=credential.id, service_id=services[22].id, engagement_id=TEST_ENGAGEMENT_ID,
+    ))
+    session.commit()
+
+    def names() -> tuple[str | None, str | None]:
+        view = credential_views(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+        return view.services[0].name, view.pickable_services[0].name
+
+    assert names() == ("ssh-new", "http-new")
+    services[22].m_service_name = "manual-ssh"
+    services[80].m_service_name = "manual-http"
+    session.commit()
+    assert names() == ("manual-ssh", "manual-http")
+
+    services[22].m_service_name = ""
+    services[80].m_service_name = None
+    session.commit()
+    assert names() == ("ssh-new", "http-new")
+
+    unnamed = SCAN_A.replace('name="ssh"', 'name=""').replace('name="http"', 'name=""')
+    ingest_scan(session, unnamed.encode(), "unnamed.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    assert names() == (None, None)
+    assert {svc.port: svc.service_name for svc in resolved_services(
+        session, host.id, engagement_id=TEST_ENGAGEMENT_ID,
+    )} == {22: None, 80: None}

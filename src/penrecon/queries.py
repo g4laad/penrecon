@@ -256,11 +256,16 @@ def host_hostnames(
     return [(hid, name) for hid, name in rows if hid is not None]
 
 
+def _service_name(svc: Service, observation: Observation | None) -> str | None:
+    """Manual names override the latest observation, including a missing name."""
+    return svc.m_service_name or (observation.service_name if observation else None)
+
+
 def resolved_services(
     session: Session, host_id: int, *, engagement_id: str
 ) -> list[ServiceView]:
     """Current services for display: manual overrides win over the latest
-    observation, hidden services excluded, manual-only services included."""
+    observation; manual-only services are included."""
     latest = latest_observations(session, host_id, engagement_id=engagement_id)
     views: list[ServiceView] = []
     for svc in session.exec(
@@ -277,7 +282,7 @@ def resolved_services(
                 port=svc.port,
                 proto=svc.proto,
                 state=state,
-                service_name=svc.m_service_name or (o.service_name if o else None),
+                service_name=_service_name(svc, o),
                 product=svc.m_product or (o.product if o else None),
                 version=svc.m_version or (o.version if o else None),
                 last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
@@ -461,10 +466,6 @@ def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[Host
     return sorted(rows, key=ip_key, reverse=reverse)
 
 
-def host_services(session: Session, host_id: int, *, engagement_id: str) -> list[ServiceView]:
-    return resolved_services(session, host_id, engagement_id=engagement_id)
-
-
 def filter_services(
     services: list[ServiceView], port: str = "", state: str = "",
     service: str = "", status: str = "",
@@ -537,26 +538,9 @@ class CredentialView:
     pickable_services: list[LinkedService]  # services of linked hosts, not yet linked
 
 
-def _service_name(session: Session, svc: Service, *, engagement_id: str) -> str | None:
-    """Display name for a service: manual override, else the latest observation."""
-    if svc.m_service_name:
-        return svc.m_service_name
-    o = session.exec(
-        select(Observation.service_name)
-        .where(
-            Observation.engagement_id == engagement_id,
-            Observation.host_id == svc.host_id,
-            Observation.port == svc.port,
-            Observation.proto == svc.proto,
-        )
-        .order_by(Observation.observed_at.desc())  # type: ignore[attr-defined]
-    ).first()
-    return o
-
-
 def credential_views(session: Session, *, engagement_id: str) -> list[CredentialView]:
-    """Every credential in this engagement with linked hosts/services (newest first).
-    # ponytail: a couple of queries + in-Python grouping, fine for single-user local."""
+    """Engagement credentials with linked hosts/services, newest first.
+    Service names reuse the current observations for each host."""
     creds = session.exec(
         select(Credential)
         .where(Credential.engagement_id == engagement_id)
@@ -573,6 +557,22 @@ def credential_views(session: Session, *, engagement_id: str) -> list[Credential
         if hid is not None:
             hosts_by_cred[cid].append(LinkedHost(hid, ip))
 
+    latest_by_host: dict[int, dict[tuple[int, str], Observation]] = {}
+
+    def linked_service(svc: Service, ip: str) -> LinkedService:
+        assert svc.id is not None
+        observation = None
+        if not svc.m_service_name:
+            if svc.host_id not in latest_by_host:
+                latest_by_host[svc.host_id] = latest_observations(
+                    session, svc.host_id, engagement_id=engagement_id
+                )
+            observation = latest_by_host[svc.host_id].get((svc.port, svc.proto))
+        return LinkedService(
+            svc.id, svc.host_id, ip, svc.port, svc.proto,
+            _service_name(svc, observation),
+        )
+
     services_by_cred: dict[int, list[LinkedService]] = defaultdict(list)
     for cid, svc, ip in session.exec(
         select(CredentialService.credential_id, Service, Host.ip)
@@ -585,12 +585,7 @@ def credential_views(session: Session, *, engagement_id: str) -> list[Credential
         .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
     ).all():
         if svc.id is not None:
-            services_by_cred[cid].append(
-                LinkedService(
-                    svc.id, svc.host_id, ip, svc.port, svc.proto,
-                    _service_name(session, svc, engagement_id=engagement_id),
-                )
-            )
+            services_by_cred[cid].append(linked_service(svc, ip))
 
     # Services grouped by host, but only for hosts that some credential links —
     # this is the pool the per-credential picker draws from (services of linked
@@ -608,12 +603,7 @@ def credential_views(session: Session, *, engagement_id: str) -> list[Credential
             .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
         ).all():
             if svc.id is not None:
-                services_by_host[svc.host_id].append(
-                    LinkedService(
-                        svc.id, svc.host_id, ip, svc.port, svc.proto,
-                        _service_name(session, svc, engagement_id=engagement_id),
-                    )
-                )
+                services_by_host[svc.host_id].append(linked_service(svc, ip))
 
     def _pickable(cid: int) -> list[LinkedService]:
         linked = {s.service_id for s in services_by_cred.get(cid, [])}

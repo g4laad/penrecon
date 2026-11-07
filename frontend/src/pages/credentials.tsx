@@ -4,13 +4,11 @@ import { Search, Unlink } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { CredentialSecretInput } from "@/components/credential-secret-input";
+import { CredentialFields } from "@/components/credential-fields";
 import {
   Empty,
-  Field,
   Modal,
   MutationForm,
   PageHeader,
@@ -22,48 +20,6 @@ import { CredentialCreateForm } from "./credential-create";
 type Credential = NonNullable<PageData["credentials"]>[number];
 type Host = NonNullable<PageData["hosts"]>[number];
 
-function CredentialFields({
-  credential,
-  kinds,
-}: {
-  credential?: Credential;
-  kinds: string[];
-}) {
-  const [kind, setKind] = useState(credential?.kind ?? "password");
-  const [secret, setSecret] = useState(credential?.secret ?? "");
-  return (
-    <div className="form-grid">
-      <Field label="Kind">
-        <NativeSelect name="kind" value={kind} onChange={(event) => setKind(event.target.value)}>
-          {kinds.map((value) => <option key={value}>{value}</option>)}
-        </NativeSelect>
-      </Field>
-      <Field
-        label="Username"
-        name="username"
-        defaultValue={credential?.username}
-        placeholder="admin"
-      />
-      <div className="col-span-full">
-        <CredentialSecretInput key={kind} kind={kind} value={secret} onChange={setSecret} />
-      </div>
-      <div className="col-span-full">
-        <Field label="Notes" name="notes">
-          <Textarea
-            name="notes"
-            defaultValue={credential?.notes}
-            rows={3}
-            placeholder="Where and how this credential was found"
-          />
-        </Field>
-      </div>
-      <p className="muted col-span-full text-xs">
-        Provide a username, a secret, or both. Credentials and their links are
-        never changed by scan imports.
-      </p>
-    </div>
-  );
-}
 
 function CredentialLinks({
   credential,
