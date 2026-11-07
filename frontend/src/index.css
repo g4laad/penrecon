@@ -151,7 +151,7 @@
   .credential-label { font-size: .75rem; font-weight: 600; color: var(--muted-foreground); }
   /* Constrain the full sizing chain so content scrolls inside the workbench. */
   .workbench-shell { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-  .workbench-shell > .site-header, .workbench-shell > footer { flex: none; }
+  .workbench-shell > .site-header { flex: none; }
   .workbench-shell > main { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: hidden; }
   .credential-workbench-page, .host-workbench-page, .host-workbench-tabs { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; }
   .credential-workbench-page { gap: .75rem; }
@@ -277,9 +277,6 @@ main [data-slot="table-cell"] { padding-block: .375rem; }
   .inventory-table th:nth-child(4) { width: 28%; }
   .inventory-table td:nth-child(3) a > span + span { display: none; }
   .inventory-table th { overflow: hidden; text-overflow: ellipsis; }
-}
-@media (max-height: 500px) {
-  .inventory-shell > footer { display: none; }
 }
 @media (max-height: 400px) {
   .inventory-shell.workbench-shell > main { padding-block: .25rem; }

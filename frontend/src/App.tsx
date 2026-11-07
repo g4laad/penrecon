@@ -588,10 +588,6 @@ export default function App() {
             <Inventory data={data} />
           )}
         </main>
-        <footer className="shell border-t py-2 text-xs text-muted-foreground">
-          penrecon · Local recon workspace{" "}
-          <span className="float-right">Press / to focus search</span>
-        </footer>
       </AppShell>
     </PageContext.Provider>
   );

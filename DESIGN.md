@@ -54,7 +54,7 @@ Pagination stays visible and automatically fits 1–50 rows to the available hei
 The `fit` query parameter supplies that bounded server-side page size, overriding
 manual `per` choices; filtering/sorting still apply before pagination. Resizing
 retains the first visible host on the resized page, with ordinary server clamping.
-The decorative footer is omitted on short inventory windows to preserve row space.
+The shared application footer is omitted on all pages to preserve content space.
 Credentials retain full discovery notes and association controls, but omit empty
 notes and zero-count scope metadata. Operations omit absent metadata while
 retaining Start/End and From/To labels, commands, tags, and attachment access.
