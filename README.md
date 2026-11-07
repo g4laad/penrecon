@@ -403,6 +403,9 @@ icons. Add components with `npx shadcn@latest add <component> -c frontend`.
 Existing page URLs return the React shell, or the same page context as JSON
 with `Accept: application/json`. Mutations retain their form endpoints and
 refresh page data after success.
+Engagement ownership validation loads only the requested engagement. The page-data
+boundary loads the catalog for the workspace selector, reusing the catalog page's
+sorted results; redirects, exports, and attachment downloads do not query it.
 Page-data responses project only consumer-facing fields: storage paths,
 engagement ownership columns, and query-only filtering metadata stay server-side.
 Row-count choices live in the frontend; responses do not include

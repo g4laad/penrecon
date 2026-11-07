@@ -43,8 +43,13 @@ from penrecon.web.serialization import encode_page, host_credential
 _HERE = Path(__file__).parent
 
 
-def page_response(request: Request, context: dict[str, object]) -> Response:
+def page_response(request: Request, session: Session, context: dict[str, object]) -> Response:
     """Return the same page data to JSON consumers and the local React shell."""
+    engagements = getattr(request.state, "engagements", None)
+    if engagements is None:
+        engagements = session.exec(
+            select(Engagement).order_by(col(Engagement.created_at).desc())
+        ).all()
     data = encode_page({
         **context,
         "engagement": (
@@ -52,7 +57,7 @@ def page_response(request: Request, context: dict[str, object]) -> Response:
             if (engagement := getattr(request.state, "engagement", None)) is not None
             else None
         ),
-        "engagements": getattr(request.state, "engagements", []),
+        "engagements": engagements,
     })
     headers = {"Vary": "Accept"}
     if "application/json" in request.headers.get("accept", "").lower():
@@ -97,9 +102,6 @@ def require_engagement(
     if engagement is None:
         raise HTTPException(status_code=404, detail="engagement not found")
     request.state.engagement = engagement
-    request.state.engagements = session.exec(
-        select(Engagement).order_by(col(Engagement.created_at).desc())
-    ).all()
     return engagement_id
 
 
@@ -126,7 +128,7 @@ def engagements_page(request: Request, session: Session = Depends(get_session)) 
             col(Engagement.id).asc(),
         )
     ).all()
-    return page_response(request, {"sort": sort, "direction": direction})
+    return page_response(request, session, {"sort": sort, "direction": direction})
 
 
 @app.post("/engagements")
@@ -206,12 +208,12 @@ def index(
            "page": page_no, "pages": pages,
            "q": q, "port": port, "tag": tag, "status": status, "change": change,
            "sort": sort, "direction": direction, "statuses": list(Status)}
-    return page_response(request, ctx)
+    return page_response(request, session, ctx)
 
 
 @scoped.get("/search", response_class=HTMLResponse)
 def search_page(request: Request, q: str = "", engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
-    return page_response(request, {"q": q.strip(), "results": queries.search(session, q, engagement_id=engagement_id)})
+    return page_response(request, session, {"q": q.strip(), "results": queries.search(session, q, engagement_id=engagement_id)})
 
 
 @scoped.get("/export/hosts.csv")
@@ -297,7 +299,7 @@ def host_detail(
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
     svc_ctx = _services_ctx(session, host, table, engagement_id=engagement_id)
-    return page_response(request, {
+    return page_response(request, session, {
         "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
@@ -316,7 +318,7 @@ def host_detail(
 
 def _hostnames_response(request: Request, session: Session, host: Host, *, engagement_id: str) -> Response:
     assert host.id is not None
-    return page_response(request, {"host": host, "hostnames": queries.host_hostnames(session, host.id, engagement_id=engagement_id)})
+    return page_response(request, session, {"host": host, "hostnames": queries.host_hostnames(session, host.id, engagement_id=engagement_id)})
 
 
 def _services_response(
@@ -324,7 +326,7 @@ def _services_response(
     *, engagement_id: str,
 ) -> Response:
     return page_response(
-        request, _services_ctx(session, host, table, engagement_id=engagement_id)
+        request, session, _services_ctx(session, host, table, engagement_id=engagement_id)
     )
 
 
@@ -548,11 +550,11 @@ def _credential_context(session: Session, *, engagement_id: str) -> dict[str, ob
 
 
 def _credentials_response(request: Request, session: Session, *, engagement_id: str) -> Response:
-    return page_response(request, _credential_context(session, engagement_id=engagement_id))
+    return page_response(request, session, _credential_context(session, engagement_id=engagement_id))
 
 
 def _host_credentials_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
-    return page_response(request, {
+    return page_response(request, session, {
         "host": queries.get_owned(session, Host, host_id, engagement_id=engagement_id),
         "host_credentials": [
             host_credential(credential, host_id)
@@ -592,7 +594,7 @@ def edit_credential(
 
 @scoped.get("/credentials", response_class=HTMLResponse)
 def credentials_page(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
-    return page_response(request, {
+    return page_response(request, session, {
         **_credential_context(session, engagement_id=engagement_id),
         "kinds": list(CredKind),
     })
@@ -731,7 +733,7 @@ def unlink_cred_service(request: Request, cred_id: int, service_id: int, engagem
 @scoped.get("/scans", response_class=HTMLResponse)
 def scans(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     rows = session.exec(select(Scan).where(Scan.engagement_id == engagement_id).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
-    return page_response(request, {"scans": rows, "tools": sorted(PARSERS)})
+    return page_response(request, session, {"scans": rows, "tools": sorted(PARSERS)})
 
 
 @scoped.post("/scans")
@@ -759,13 +761,13 @@ def diff(
         if scan_id is not None and queries.get_owned(session, Scan, scan_id, engagement_id=engagement_id) is None:
             raise HTTPException(status_code=404, detail="scan not found")
     result = queries.diff_scans(session, a, b, engagement_id=engagement_id) if a and b else None
-    return page_response(request, {"scans": all_scans, "result": result, "a": a, "b": b})
+    return page_response(request, session, {"scans": all_scans, "result": result, "a": a, "b": b})
 
 
 def _annotation_response(request: Request, session: Session, host_id: int, saved: bool = False, *, engagement_id: str) -> Response:
     if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="host not found")
-    return page_response(request, {
+    return page_response(request, session, {
         "host_id": host_id,
         "ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "statuses": list(Status),
@@ -802,7 +804,7 @@ def annotation_post(
 # --- notes: any number of titled notes per host -------------------------------
 
 def _notes_response(request: Request, session: Session, host_id: int, *, engagement_id: str) -> Response:
-    return page_response(request, {
+    return page_response(request, session, {
         "host_id": host_id,
         "notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
     })
@@ -1108,7 +1110,7 @@ def operations_page(
         "pages": pages,
         "per": normalized_per,
     }
-    return page_response(request, context)
+    return page_response(request, session, context)
 
 
 @scoped.post("/operations")
