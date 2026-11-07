@@ -255,7 +255,3 @@ refresh page data after success.
   handler, after ownership and attachment-conflict checks.
 - `components/credential-fields.tsx` supplies both credential editors, including
   masked, kind-aware secret controls and multiline notes.
-
-The [before wiring report](reports/untangle-before.html) records the ranked
-knots with original file/line anchors. The [after report](reports/untangle-after.html)
-and [comparison image](reports/untangle-comparison.png) show the cutover.
