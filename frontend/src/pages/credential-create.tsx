@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useState, type CSSProperties } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CredentialSecretInput } from "@/components/credential-secret-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,14 +62,11 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
   const [kind, setKind] = useState("password");
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
-  const [reveal, setReveal] = useState(false);
   const [query, setQuery] = useState("");
   const [associationsMounted, setAssociationsMounted] = useState(false);
   const [hostPage, setHostPage] = useState(1);
   const [targets, setTargets] = useState<Record<number, number[]>>({});
   const [ready, setReady] = useState<Record<number, boolean>>({});
-  const secretId = useId();
-  const hintId = useId();
   const hostIds = Object.keys(targets).map(Number);
   const serviceCount = Object.values(targets).reduce((count, ids) => count + ids.length, 0);
   const valid = Boolean(username.trim() || secret.trim());
@@ -104,22 +101,15 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
       return next;
     });
   }
-  const label = kind === "key" ? "Private key" : kind === "hash" ? "Hash" : kind === "token" ? "Token" : "Secret";
   return <MutationForm action="/credentials">
     <p className="text-sm text-muted-foreground">Capture quickly. Expand associations when you know the scope.</p>
     <div className="grid gap-4 sm:grid-cols-2">
-      <Field label="Credential kind"><NativeSelect className="w-full" name="kind" value={kind} onChange={(event) => { setKind(event.target.value); setReveal(false); }}>
+      <Field label="Credential kind"><NativeSelect className="w-full" name="kind" value={kind} onChange={(event) => setKind(event.target.value)}>
         {kinds.map((value) => <option key={value}>{value}</option>)}
       </NativeSelect></Field>
       <Field label="Username / identity" name="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin, DOMAIN\\user, or email" autoComplete="off" />
     </div>
-    <div className="grid gap-1.5">
-      <div className="flex items-center justify-between gap-2"><label htmlFor={secretId} className="text-sm font-medium">{label}</label>
-        <Button type="button" size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>{reveal ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{reveal ? "Hide" : "Reveal"}</Button></div>
-      {kind === "key" || kind === "other" ? <Textarea id={secretId} name="secret" className="mono" rows={kind === "key" ? 5 : 3} value={secret} onChange={(event) => setSecret(event.target.value)} autoComplete="off" spellCheck={false} aria-describedby={hintId} style={!reveal ? { WebkitTextSecurity: "disc" } as CSSProperties : undefined} placeholder={kind === "key" ? "Paste private key" : "Paste or enter secret"} /> :
-        <Input id={secretId} name="secret" className="mono" type={reveal ? "text" : "password"} value={secret} onChange={(event) => setSecret(event.target.value)} autoComplete="new-password" spellCheck={false} aria-describedby={hintId} placeholder={kind === "hash" ? "Paste hash" : kind === "token" ? "Paste token" : "Paste or enter secret"} />}
-      <p id={hintId} className="text-xs text-muted-foreground">Username or secret required; either can stand alone.</p>
-    </div>
+    <CredentialSecretInput key={kind} kind={kind} value={secret} onChange={setSecret} />
     <Field label="Discovery notes (optional)"><Textarea name="notes" rows={3} placeholder="Where was it found? What context should you keep?" /></Field>
     <details className="rounded-md border p-3" onToggle={(event) => { if (event.currentTarget.open) setAssociationsMounted(true); }}>
       <summary className="cursor-pointer text-sm font-semibold">Target associations · {hostIds.length} hosts / {serviceCount} services</summary>
@@ -128,7 +118,7 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Host[]; kinds: s
         <Input type="search" aria-label="Search target hosts" placeholder="Search hosts by IP…" value={query} onChange={(event) => { setQuery(event.target.value); setHostPage(1); }} />
         <div className="max-h-56 overflow-y-auto rounded-md border">
           {renderedHosts.map((host) => <div key={host.id} hidden={!visibleHostIds.has(host.id)} className="border-b last:border-b-0">
-            <label className="flex cursor-pointer items-center gap-3 p-3 text-sm hover:bg-muted/40"><input type="checkbox" className="size-4 accent-primary" name="host_ids" value={host.id} checked={host.id in targets} onChange={() => toggleHost(host.id)} /><span className="mono">{host.ip}</span></label>
+            <label className="flex min-w-0 cursor-pointer items-center gap-3 p-3 text-sm hover:bg-muted/40"><input type="checkbox" className="size-4 shrink-0 accent-primary" name="host_ids" value={host.id} checked={host.id in targets} onChange={() => toggleHost(host.id)} /><span className="mono min-w-0 break-all">{host.ip}</span></label>
             {host.id in targets && <HostServices host={host} selected={targets[host.id]} onSelect={onSelect} onReady={onReady} />}
           </div>)}
           {!hosts.length && <p className="p-3 text-sm text-muted-foreground">No hosts yet. You can save an unlinked credential.</p>}

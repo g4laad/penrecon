@@ -161,9 +161,14 @@ count with the result heading and display filenames as secondary metadata.
   stay compact when the adjacent column has a taller picker.
   Unlink actions use compact ghost icon buttons with the unlink symbol,
   target-specific accessible labels, and hover titles.
+  Long host/service identities wrap within chips and creation pickers at narrow
+  widths. Association pickers require a selection using native field validation;
+  server errors explain how to select a target or reload stale choices.
 - Secrets start concealed, with reveal/copy actions, and conceal again when
   switching identities or changing the secret. Delete is a secondary footer
   action with confirmation. Associations do not imply verified access.
+  Editing shares creation's concealed, kind-aware secret entry; changing kind
+  conceals the value without clearing it.
 - Design reference: `prototype/credential-views` at `b564842` preserves the
   workbench, ledger, and target-grouped comparison. The user approved Workbench;
   production contains only that view, with real mutations and no switcher.
@@ -194,7 +199,10 @@ count with the result heading and display filenames as secondary metadata.
   A username or secret is required. Credential and selected links save in one
   transaction; invalid or out-of-scope targets create nothing. Service-loading
   failures remain visible with retry, and saving waits for selected hosts to load.
-  Reopening the dialog starts a fresh, concealed draft.
+  Create and Edit warn before dismissing changed credential drafts or leaving
+  the page. Cancelling dismissal retains values and associations; successful
+  saves close without a discard warning. Dismissal is blocked during saving.
+  Reopening a dismissed dialog starts a fresh, concealed draft.
   Design reference: `prototype/credential-entry` at `199ec06` preserves A/B/C.
   The user approved A; production has real persistence and no prototype controls.
 - Host details use the approved **D / Tabbed Workbench** layout: Services,

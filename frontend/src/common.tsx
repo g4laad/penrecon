@@ -86,16 +86,18 @@ export function SelectField({
   defaultValue,
   options,
   empty,
+  required = false,
 }: {
   label: string;
   name: string;
   defaultValue?: string | number;
   options: (string | { value: string; label: string })[];
   empty?: string;
+  required?: boolean;
 }) {
   return (
     <Field label={label}>
-      <NativeSelect name={name} defaultValue={defaultValue} className="w-full">
+      <NativeSelect name={name} defaultValue={defaultValue} required={required} className="w-full">
         {empty !== undefined && (
           <NativeSelectOption value="">{empty}</NativeSelectOption>
         )}
@@ -124,7 +126,7 @@ export function Modal({
   title: string;
   trigger: ReactNode;
   children: ReactNode;
-  protectChanges?: boolean;
+  protectChanges?: boolean | string;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -156,7 +158,7 @@ export function Modal({
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!nextOpen && protectChanges) {
         if (content.current?.querySelector("fieldset:disabled")) return;
-        if (dirty && !window.confirm("Discard unsaved note changes?")) return;
+        if (dirty && !window.confirm(typeof protectChanges === "string" ? protectChanges : "Discard unsaved note changes?")) return;
       }
       setDirty(false);
       setOpen(nextOpen);

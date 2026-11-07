@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { CredentialSecretInput } from "@/components/credential-secret-input";
 import {
   Empty,
   Field,
@@ -28,14 +29,15 @@ function CredentialFields({
   credential?: Credential;
   kinds: string[];
 }) {
+  const [kind, setKind] = useState(credential?.kind ?? "password");
+  const [secret, setSecret] = useState(credential?.secret ?? "");
   return (
     <div className="form-grid">
-      <SelectField
-        label="Kind"
-        name="kind"
-        defaultValue={credential?.kind ?? "password"}
-        options={kinds}
-      />
+      <Field label="Kind">
+        <NativeSelect name="kind" value={kind} onChange={(event) => setKind(event.target.value)}>
+          {kinds.map((value) => <option key={value}>{value}</option>)}
+        </NativeSelect>
+      </Field>
       <Field
         label="Username"
         name="username"
@@ -43,17 +45,7 @@ function CredentialFields({
         placeholder="admin"
       />
       <div className="col-span-full">
-        <Field label="Secret" name="secret">
-          <Textarea
-            name="secret"
-            defaultValue={credential?.secret}
-            autoComplete="off"
-            spellCheck={false}
-            className="mono"
-            rows={3}
-            placeholder="Password, hash, private key, or token"
-          />
-        </Field>
+        <CredentialSecretInput key={kind} kind={kind} value={secret} onChange={setSecret} />
       </div>
       <div className="col-span-full">
         <Field label="Notes" name="notes">
@@ -93,10 +85,10 @@ function CredentialLinks({
           {credential.hosts.map((host) => (
             <div
               key={host.host_id}
-              className="actions rounded-md border px-2 py-0.5"
+              className="actions min-w-0 max-w-full rounded-md border px-2 py-0.5"
             >
               <ScopedLink href={`/hosts/${host.host_id}`}
-              className="mono text-[13px] underline underline-offset-4">{host.ip}</ScopedLink>
+              className="mono min-w-0 break-all text-[13px] underline underline-offset-4">{host.ip}</ScopedLink>
               <MutationForm
                 action={`/credentials/${credential.id}/unlink/host/${host.host_id}`}
                 confirm={`Unlink host ${host.ip} from this credential?`}
@@ -126,6 +118,7 @@ function CredentialLinks({
               label="Link host"
               name="host_id"
               empty="Select a host…"
+              required
               options={availableHosts.map((host) => ({
                 value: String(host.id),
                 label: host.ip,
@@ -145,10 +138,10 @@ function CredentialLinks({
           {credential.services.map((service) => (
             <div
               key={service.service_id}
-              className="actions rounded-md border px-2 py-0.5"
+              className="actions min-w-0 max-w-full rounded-md border px-2 py-0.5"
             >
               <ScopedLink href={`/hosts/${service.host_id}`}
-              className="mono text-[13px] underline underline-offset-4">{service.ip}:{service.port}/{service.proto}
+              className="mono min-w-0 break-all text-[13px] underline underline-offset-4">{service.ip}:{service.port}/{service.proto}
               {service.name ? ` ${service.name}` : ""}</ScopedLink>
               <MutationForm
                 action={`/credentials/${credential.id}/unlink/service/${service.service_id}`}
@@ -181,6 +174,7 @@ function CredentialLinks({
               label="Link service"
               name="service_id"
               empty="Select a service…"
+              required
               options={credential.pickable_services.map((service) => ({
                 value: String(service.service_id),
                 label: `${service.ip}:${service.port}/${service.proto}${service.name ? ` ${service.name}` : ""}`,
@@ -224,6 +218,7 @@ function CredentialDetail({
         <div className="actions">
           <Modal
             title="Edit credential"
+            protectChanges="Discard unsaved credential changes?"
             trigger={
               <Button type="button" variant="outline" size="sm">
                 Edit credential
@@ -347,6 +342,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
       <PageHeader title="Credentials">
         <Modal
           title="Add credential"
+          protectChanges="Discard unsaved credential changes?"
           trigger={<Button type="button">Add credential</Button>}
         >
           <CredentialCreateForm kinds={kinds} hosts={hosts} />

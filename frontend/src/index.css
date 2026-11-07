@@ -181,7 +181,7 @@
   .credential-choice:hover { background: var(--muted); }
   .credential-choice[aria-current] { background: var(--accent); border-left-color: var(--primary); }
   .credential-choice:focus-visible { outline-offset: -3px; }
-  .credential-detail { display: grid; min-width: 0; min-height: 0; align-content: start; overflow-y: auto; overscroll-behavior-y: contain; gap: .75rem; padding: .75rem; }
+  .credential-detail { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; align-content: start; overflow-y: auto; overscroll-behavior-y: contain; gap: .75rem; padding: .75rem; }
   .host-tabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .5rem; border-bottom: 1px solid var(--border); }
   .host-tabs [role=tab] { display: inline-flex; align-items: center; gap: .5rem; padding: .5rem .75rem; border-bottom: 2px solid transparent; font-size: .8125rem; cursor: pointer; }
   .host-tabs [role=tab]:hover { background: var(--muted); }

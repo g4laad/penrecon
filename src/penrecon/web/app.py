@@ -645,8 +645,10 @@ def link_cred_host(request: Request, cred_id: int, host_id: str = Form(""), enga
     hid = int(host_id) if host_id.strip().isdigit() else None
     if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    if hid is None or queries.get_owned(session, Host, hid, engagement_id=engagement_id) is None:
-        raise HTTPException(status_code=404, detail="host not found")
+    if hid is None:
+        raise HTTPException(status_code=422, detail="Select a host, then choose Link host.")
+    if queries.get_owned(session, Host, hid, engagement_id=engagement_id) is None:
+        raise HTTPException(status_code=404, detail="Host is no longer available. Reload credentials and select another host.")
     if queries.get_owned(session, CredentialHost, (cred_id, hid), engagement_id=engagement_id) is None:
         session.add(CredentialHost(credential_id=cred_id, host_id=hid, engagement_id=engagement_id))  # ignore duplicate links
         session.commit()
@@ -686,7 +688,7 @@ def link_cred_service(
     if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="credential not found")
     if svc is None:
-        raise HTTPException(status_code=404, detail="service not found")
+        raise HTTPException(status_code=422 if sid is None else 404, detail="Select an available service, then choose Link service. Reload credentials if the service is no longer available.")
     # only services of a host already linked to this credential may be linked
     linked_host = queries.get_owned(
         session, CredentialHost, (cred_id, svc.host_id), engagement_id=engagement_id
