@@ -1,11 +1,10 @@
 import { ScopedLink } from "../common";
-import { lazy, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MarkdownView } from "@/components/markdown-view";
 import {
   Empty,
   Field,
@@ -17,6 +16,12 @@ import {
   usePage,
 } from "../common";
 import type { Credential, Note, PageData, Service } from "../types";
+
+const MarkdownView = lazy(() =>
+  import("@/components/markdown-view").then((module) => ({
+    default: module.MarkdownView,
+  })),
+);
 
 const MarkdownEditor = lazy(() =>
   import("@/components/markdown-editor").then((module) => ({
@@ -319,7 +324,9 @@ function NoteDetail({ note }: { note: Note }) {
           </div>
         </Modal>
       </div>
-      <MarkdownView source={note.body_md} />
+      <Suspense fallback={<p role="status" className="muted text-sm">Loading note…</p>}>
+        <MarkdownView source={note.body_md} />
+      </Suspense>
     </article>
   );
 }

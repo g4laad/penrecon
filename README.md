@@ -48,6 +48,8 @@ assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
 server is needed at runtime. Rebuild before serving or packaging a wheel.
 Host details, credentials, scans/diffs, and operations load their JavaScript
 on demand; the navigation shell stays visible while a page loads.
+The Markdown renderer loads when a saved note is displayed; opening a host's
+Services tab does not download it. The note editor loads when its form opens.
 
 ## Docker (distroless)
 
