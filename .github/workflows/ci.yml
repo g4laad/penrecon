@@ -50,3 +50,18 @@ jobs:
 
       - name: Smoke-test installed CLI
         run: uv run --isolated --no-project --with dist/penrecon-*.whl penrecon --help
+
+  nix:
+    name: Build Nix package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+
+      - name: Build Nix package
+        run: nix build --no-write-lock-file
+
+      - name: Smoke-test Nix CLI
+        run: ./result/bin/penrecon --help

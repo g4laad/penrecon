@@ -292,6 +292,8 @@ GitHub Actions runs on pushes, pull requests, and manual dispatches. The workflo
 in `.github/workflows/ci.yml` installs locked dependencies, runs pytest and mypy,
 checks TypeScript and builds the frontend, then packages a wheel and smoke-tests
 its installed CLI. CI uses Python from `.python-version` and Node.js 22.
+A separate Ubuntu job builds the Nix package from the locked flake inputs and
+smoke-tests its CLI.
 
 React source lives in `frontend/src`. Shared components are shadcn/ui's
 `base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
