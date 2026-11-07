@@ -111,7 +111,8 @@ the selected file remains available for correction or replacement and retry.
   collapsing to a 56px labeled-accessible icon rail. Bottom-left chevrons toggle
   it; desktop collapse preference survives navigation and reload in tab-local
   session storage. Engagement selection and scoped search remain above the page.
-  The catalog has no sidebar. Active host-detail pages highlight Hosts.
+  The catalog has no sidebar. Active host-detail pages highlight Hosts. Selected
+  navigation links use a light blue fill and blue text, without a darker left stripe.
 - At widths up to 700px the sidebar starts collapsed; expanding overlays the page
   without squeezing its content. The mobile overlay traps keyboard focus, makes
   the underlying page inert, closes on Escape or outside click, and restores

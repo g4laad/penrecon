@@ -228,7 +228,7 @@
   .sidebar-navigation { display: flex; flex-direction: column; gap: 4px; }
   .sidebar-navigation a, .sidebar-catalog { display: flex; align-items: center; gap: 12px; white-space: nowrap; border-radius: 6px; padding: 10px; font-size: 13px; color: var(--muted-foreground); }
   .sidebar-navigation a:hover, .sidebar-catalog:hover { background: var(--muted); color: var(--foreground); }
-  .sidebar-navigation a[aria-current=page] { background: var(--accent); color: var(--primary); font-weight: 600; box-shadow: inset 2px 0 var(--primary); }
+  .sidebar-navigation a[aria-current=page] { background: var(--accent); color: var(--primary); font-weight: 600; }
   .sidebar-bottom { margin-top: auto; padding-top: 24px; display: grid; gap: 8px; }
   .sidebar-toggle { justify-content: flex-start; width: 100%; padding: 10px; gap: 12px; height: 36px; color: var(--muted-foreground); font-size: 12px; }
   [data-collapsed=true] > .app-sidebar { padding: 10px; }
