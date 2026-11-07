@@ -51,6 +51,63 @@ on demand; the navigation shell stays visible while a page loads.
 The Markdown renderer loads when a saved note is displayed; opening a host's
 Services tab does not download it. The note editor loads when its form opens.
 
+## Nix
+
+With flakes enabled, build the application or run it directly:
+
+```sh
+nix build
+PENRECON_DATA="$HOME/.local/share/penrecon" nix run . -- serve --port 8765
+```
+
+Open `http://127.0.0.1:8765`. The package includes the built frontend and
+Python 3.14 environment; Node.js and uv are not needed at runtime.
+`flake.lock`, `uv.lock`, and `frontend/package-lock.json` pin the build inputs.
+Nixpkgs follows the stable NixOS 26.05 release.
+Supported systems are `x86_64-linux` and `aarch64-linux`.
+When building a Git checkout, new Nix files must be tracked by Git.
+
+For development, `nix develop` provides Python 3.14, uv, and Node.js 24.
+Then use the commands in **Run** above. After changing frontend dependencies,
+update `npmDepsHash` in `flake.nix` to the hash reported by Nix when rebuilding.
+Use `nix flake update` to update the Nix inputs deliberately.
+
+### NixOS service
+
+Add this repository to your system flake's inputs:
+
+```nix
+inputs.penrecon.url = "github:g4laad/penrecon";
+```
+
+Include its module in your `nixosSystem` configuration:
+
+```nix
+modules = [
+  inputs.penrecon.nixosModules.default
+  {
+    services.penrecon = {
+      enable = true;
+      port = 8765;
+    };
+  }
+];
+```
+
+Apply with `sudo nixos-rebuild switch`, then inspect
+`systemctl status penrecon` or `journalctl -u penrecon`.
+The service runs as a dynamic unprivileged user, retains its database and
+attachments in `/var/lib/penrecon`, and listens only on loopback. No firewall
+port is opened. Stop the service before backing up the entire state directory;
+do not copy only the SQLite file. Removing the service does not remove its data.
+
+There is no authentication. For remote access, use an SSH tunnel instead of
+exposing the service:
+
+```sh
+ssh -N -L 8765:127.0.0.1:8765 user@server
+```
+
 ## Docker (distroless)
 
 Docker Engine with the Compose plugin is sufficient; Python and Node.js are
