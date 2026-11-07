@@ -1,6 +1,6 @@
 import { ScopedLink, engagementUrl } from "./common";
 import { Textarea } from "@/components/ui/textarea";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ListFilter,
@@ -32,11 +32,27 @@ import {
   Section,
 } from "./common";
 import type { HostRow, PageData } from "./types";
-import { HostPage } from "./pages/host";
-import { CredentialsPage } from "./pages/credentials";
-import { ScansPage, DiffPage } from "./pages/scans";
-import { OperationsPage } from "./pages/operations";
 import { AppShell, navigation } from "./components/app-shell";
+
+const HostPage = lazy(() =>
+  import("./pages/host").then((module) => ({ default: module.HostPage })),
+);
+const CredentialsPage = lazy(() =>
+  import("./pages/credentials").then((module) => ({
+    default: module.CredentialsPage,
+  })),
+);
+const ScansPage = lazy(() =>
+  import("./pages/scans").then((module) => ({ default: module.ScansPage })),
+);
+const DiffPage = lazy(() =>
+  import("./pages/scans").then((module) => ({ default: module.DiffPage })),
+);
+const OperationsPage = lazy(() =>
+  import("./pages/operations").then((module) => ({
+    default: module.OperationsPage,
+  })),
+);
 
 function HostTable({
   rows,
@@ -570,6 +586,7 @@ export default function App() {
         }
       >
         <main id="main" className="shell py-4" tabIndex={-1}>
+          <Suspense fallback={<p role="status" className="muted">Loading page…</p>}>
           {path === "/engagements" ? (
             <EngagementsPage data={data} />
           ) : path.startsWith("/hosts/") ? (
@@ -587,6 +604,7 @@ export default function App() {
           ) : (
             <Inventory data={data} />
           )}
+          </Suspense>
         </main>
       </AppShell>
     </PageContext.Provider>

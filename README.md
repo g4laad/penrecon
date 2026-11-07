@@ -46,6 +46,8 @@ your data automatically.
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
 server is needed at runtime. Rebuild before serving or packaging a wheel.
+Host details, credentials, scans/diffs, and operations load their JavaScript
+on demand; the navigation shell stays visible while a page loads.
 
 ## Docker (distroless)
 
