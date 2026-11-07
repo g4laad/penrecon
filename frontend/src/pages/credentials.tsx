@@ -13,13 +13,13 @@ import {
   Modal,
   MutationForm,
   PageHeader,
+  usePage,
 } from "../common";
-import type { PageData } from "../types";
+import type { Credential, PageData } from "../types";
 import { CredentialCreateForm } from "./credential-create";
 import { credentialDraftValidity, resolveCredentialScope, resolveCredentialSelection } from "./credential-workflow";
 import { useHostOptions, type HostOptions } from "./credential-host-options";
-
-type Credential = NonNullable<PageData["credentials"]>[number];
+import { SelectedDetail } from "./use-selected-detail";
 
 type AssociationPicker =
   | { status: "available"; options: { value: string; label: string }[] }
@@ -264,32 +264,15 @@ export function CredentialsPage({ data }: { data: PageData }) {
   const kind = currentUrl.searchParams.get("kind") ?? "";
   const scope = currentUrl.searchParams.get("scope") ?? "";
   const resolvedScope = resolveCredentialScope(scope);
-  const all = data.credentials ?? [];
+  const { updateQuery, queryPending } = usePage();
+  const currentData = (data.q ?? "") === query && (data.kind ?? "") === kind && (data.scope ?? "") === scope;
+  const ready = currentData && !queryPending;
+  const credentials = ready ? data.credentials ?? [] : [];
+  const total = data.total ?? 0;
   const kinds = data.kinds ?? [];
-  const credentials = all.filter((credential) => {
-    const linked = Boolean(
-      credential.hosts.length || credential.services.length,
-    );
-    const text = [
-      credential.username,
-      credential.kind,
-      credential.notes,
-      ...credential.hosts.map((host) => host.ip),
-      ...credential.services.map(
-        (service) =>
-          `${service.ip}:${service.port}/${service.proto} ${service.name ?? ""}`,
-      ),
-    ]
-      .join(" ")
-      .toLowerCase();
-    return (
-      (!kind || credential.kind === kind) &&
-      (resolvedScope === "all" || (resolvedScope === "linked" && linked) || (resolvedScope === "unlinked" && !linked)) &&
-      text.includes(query.toLowerCase())
-    );
-  });
-  const selection = resolveCredentialSelection(currentUrl.hash, all, credentials);
-  const selected = selection.status === "selected" ? selection.credential : undefined;
+  const filtered = Boolean(query || kind || scope);
+  const selection = resolveCredentialSelection(currentUrl.hash, credentials, filtered);
+  const selected = ready && selection.status === "selected" ? selection.credential : undefined;
   const hostOptions = useHostOptions(Boolean(selected));
   function filter(values: Record<string, string>) {
     const next = new URL(location.href);
@@ -299,6 +282,13 @@ export function CredentialsPage({ data }: { data: PageData }) {
     }
     next.hash = "";
     history.replaceState(null, "", next);
+    setUrl(next.href);
+    updateQuery(next.href, true);
+  }
+  function clearSelection() {
+    const next = new URL(location.href);
+    next.hash = "";
+    history.pushState(null, "", next);
     setUrl(next.href);
   }
   return (
@@ -356,14 +346,21 @@ export function CredentialsPage({ data }: { data: PageData }) {
           {resolvedScope === "invalid" && <option value={scope} disabled>Unknown scope: {scope}</option>}
         </NativeSelect>
         <span className="muted text-xs" role="status">
-          {credentials.length} of {all.length} credentials
+          {queryPending ? "Loading credentials…" : ready ? `${credentials.length} of ${total} credentials` : "Credentials are not up to date."}
         </span>
       </div>
       {resolvedScope === "invalid" && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
         <p>Unknown association filter. Choose a scope or clear this filter.</p>
         <Button type="button" variant="outline" size="sm" onClick={() => filter({ scope: "" })}>Clear scope filter</Button>
       </div>}
-      {credentials.length > 0 || selection.status === "unavailable" ? (
+      {!ready ? (
+        <Empty>
+          {queryPending ? "Loading credentials…" : <>
+            <p>Unable to show credentials for the current filters. Retry to load this view.</p>
+            <Button type="button" variant="outline" className="mt-3" onClick={() => updateQuery(location.href, true)}>Retry credentials</Button>
+          </>}
+        </Empty>
+      ) : credentials.length > 0 || selection.status === "unavailable" ? (
         <div className="credential-workbench rounded-lg border bg-card">
           <section className="credential-list" aria-label="Credential list">
             <h2 className="credential-label border-b bg-muted/40 px-2.5 py-2 text-xs">
@@ -398,39 +395,43 @@ export function CredentialsPage({ data }: { data: PageData }) {
               </span>
               <span className="muted mt-1 block text-xs">
                 {[
-                  credential.hosts.length
-                    ? `${credential.hosts.length} hosts`
+                  credential.host_count
+                    ? `${credential.host_count} hosts`
                     : "",
-                  credential.services.length
-                    ? `${credential.services.length} services`
+                  credential.service_count
+                    ? `${credential.service_count} services`
                     : "",
                 ]
                   .filter(Boolean)
                   .join(" · ") || "Unlinked"}
               </span>
-              {credential.notes && (
+              {credential.notes_preview && (
                 <span className="muted mt-1 block truncate text-xs">
-                  {credential.notes}
+                  {credential.notes_preview}
                 </span>
               )}</ScopedLink>
             ))}
           </section>
-          {selected ? <CredentialDetail
+          {selected ? <SelectedDetail<{ credential: Credential }>
             key={selected.id}
-            credential={selected}
+            url={`/credentials/${selected.id}`}
+            revision={data}
+            label="credential"
+          >{({ credential }) => <CredentialDetail
+            credential={credential}
             kinds={kinds}
             hostOptions={hostOptions}
-          /> : <Empty>
-            <p>{selection.status === "unavailable" && selection.reason === "filtered" ? "This credential is hidden by the current filters." : "The requested credential is unavailable. It may have been deleted."}</p>
+          />}</SelectedDetail> : <Empty>
+            <p>{selection.status === "unavailable" && selection.reason === "filtered-or-missing" ? "This credential may be hidden by the current filters or no longer available." : "The requested credential is unavailable. It may have been deleted."}</p>
             <div className="actions mt-3 justify-center">
-              <Button type="button" variant="outline" onClick={() => filter({})}>Clear selection</Button>
-              {selection.status === "unavailable" && selection.reason === "filtered" && <Button type="button" variant="outline" onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>}
+              <Button type="button" variant="outline" onClick={clearSelection}>Clear selection</Button>
+              {selection.status === "unavailable" && selection.reason === "filtered-or-missing" && <Button type="button" variant="outline" onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>}
             </div>
           </Empty>}
         </div>
       ) : (
         <Empty>
-          {all.length ? (
+          {total ? (
             <>
               <p>No credentials match these filters.</p>
               <Button

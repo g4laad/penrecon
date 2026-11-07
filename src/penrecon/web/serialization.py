@@ -46,6 +46,16 @@ _ENCODERS: dict[type[object], Callable[[Any], object]] = {
         "user_context", "command", "output", "description", "comments", "tags",
         "attachment_name", "created_at", "updated_at",
     ),
+    queries.OperationSummary: lambda operation: _fields(
+        operation, "id", "started_at", "destination", "tool", "command",
+    ),
+    queries.CredentialSummary: lambda credential: _fields(
+        credential, "id", "kind", "username", "notes_preview", "host_count", "service_count",
+    ),
+    queries.CredentialView: lambda credential: _fields(
+        credential, "id", "kind", "username", "secret", "notes", "created_at",
+        "hosts", "services", "pickable_services",
+    ),
     queries.HostRow: lambda row: _fields(
         row, "id", "ip", "hostnames", "open_count", "status", "tags",
         "open_services", "change", "triaged",

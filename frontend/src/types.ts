@@ -55,6 +55,14 @@ export interface Credential {
   services: LinkedService[];
   pickable_services: LinkedService[];
 }
+export interface CredentialSummary {
+  id: number;
+  kind: string;
+  username: string;
+  notes_preview: string;
+  host_count: number;
+  service_count: number;
+}
 export type HostCredential = Pick<Credential, "id" | "kind" | "username" | "secret" | "notes"> & {
   hosts: Pick<LinkedHost, "host_id">[];
   services: Omit<LinkedService, "ip">[];
@@ -128,6 +136,7 @@ export interface Operation {
   created_at: string;
   updated_at: string;
 }
+export type OperationSummary = Pick<Operation, "id" | "started_at" | "destination" | "tool" | "command">;
 export interface Engagement {
   id: string;
   name: string;
@@ -151,6 +160,8 @@ export interface PageData extends BootstrapData {
   pages?: number;
   per?: string;
   q?: string;
+  kind?: string;
+  scope?: string;
   port?: string;
   tag?: string;
   status?: string;
@@ -172,7 +183,7 @@ export interface PageData extends BootstrapData {
   f_state?: string;
   f_service?: string;
   f_status?: string;
-  credentials?: Credential[];
+  credentials?: CredentialSummary[];
   scans?: Scan[];
   tools?: string[];
   a?: number | null;
@@ -189,7 +200,7 @@ export interface PageData extends BootstrapData {
       after: string | null;
     }[];
   } | null;
-  operations?: Operation[];
+  operations?: OperationSummary[];
   results?: {
     hosts: HostRow[];
     notes: {

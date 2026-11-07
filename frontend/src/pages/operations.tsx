@@ -36,6 +36,7 @@ import {
   type TimestampDraft,
   type TimestampEvent,
 } from "./operation-workflow";
+import { SelectedDetail } from "./use-selected-detail";
 
 function OperationTimestamp({
   label,
@@ -535,7 +536,13 @@ export function OperationsPage({ data }: { data: PageData }) {
             ))}
           </nav>
           {selected ? (
-            <OperationDetails key={selected.id} operation={selected} />
+            <SelectedDetail<{ operation: Operation }>
+              url={`/operations/${selected.id}`}
+              revision={data}
+              label="operation"
+            >
+              {({ operation }) => <OperationDetails key={operation.id} operation={operation} />}
+            </SelectedDetail>
           ) : (
             <Empty>
               The selected operation is not available on this page. It may have been deleted or be outside the current search or page. Select an operation from the list or adjust the search and page.

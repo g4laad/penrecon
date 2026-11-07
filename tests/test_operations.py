@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session
 from starlette.testclient import TestClient
 
@@ -93,9 +94,36 @@ def test_operation_logs_blank_query_returns_every_entry(session: Session) -> Non
     assert {row.command for row in operation_logs(session, "  ", engagement_id=TEST_ENGAGEMENT_ID)} == {"one", "two"}
 
 
+def test_operation_summaries_search_full_text_without_returning_details(session: Session) -> None:
+    body = "evidence " * 10000 + "Straße needle"
+    session.add(OperationLog(
+        command="inspect", output=body, comments="private comment",
+        description="private description", engagement_id=TEST_ENGAGEMENT_ID,
+    ))
+    session.commit()
+
+    statements = []
+
+    def record_sql(connection, cursor, statement, parameters, context, executemany) -> None:
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", record_sql)
+    try:
+        rows = operation_logs(session, "STRASSE NEEDLE", engagement_id=TEST_ENGAGEMENT_ID)
+    finally:
+        event.remove(engine, "before_cursor_execute", record_sql)
+    projections = [statement.split("FROM", 1)[0].lower() for statement in statements]
+    assert projections
+    assert all("operation_log.output" not in projection and "operation_log.comments" not in projection for projection in projections)
+    assert len(rows) == 1
+    assert vars(rows[0]).keys() == {"id", "started_at", "destination", "tool", "command"}
+    assert rows[0].command == "inspect"
 
 
-def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> None:
+
+
+def test_create_operation_round_trips_all_detail_fields(client: TestClient) -> None:
     response = _create_operation(
         client,
         command="  nmap -sV target.internal  ",
@@ -114,7 +142,7 @@ def test_create_operation_round_trips_all_summary_fields(client: TestClient) -> 
     )
     _assert_outcome(response)
 
-    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
     assert operation["command"] == "nmap -sV target.internal"
     assert operation["started_at"] == "2026-09-22T09:15:00"
     assert operation["ended_at"] == "2026-09-22T09:45:00"
@@ -192,7 +220,7 @@ def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: Test
     _assert_outcome(response)
     after = _attachment_files()
     assert len(after - before) == 1
-    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
     assert operation["attachment_name"] == "evidence notes.txt"
     assert {"attachment_path", "engagement_id"}.isdisjoint(operation)
 
@@ -279,6 +307,7 @@ def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None
 
 
 def test_missing_operation_ids_return_404(client: TestClient) -> None:
+    assert client.get(ENGAGEMENT_PREFIX + "/operations/999999").status_code == 404
     assert client.post(ENGAGEMENT_PREFIX + "/operations/999999/edit", data={"command": "missing"}).status_code == 404
     assert client.post(ENGAGEMENT_PREFIX + "/operations/999999/delete").status_code == 404
     assert client.get(ENGAGEMENT_PREFIX + "/operations/999999/attachment").status_code == 404
@@ -363,7 +392,7 @@ def test_operation_aware_dates_are_normalized_before_storage(client: TestClient)
         "started_at": "2026-09-22T10:00+02:00", "ended_at": "2026-09-22T08:30Z",
     })
     _assert_outcome(response)
-    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
     assert operation["started_at"] == "2026-09-22T08:00:00"
     assert operation["ended_at"] == "2026-09-22T08:30:00"
 

@@ -281,6 +281,10 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   the selected secret, full notes, and link management. Filter by username,
   notes, IP/service, kind, or linked/unlinked scope; secret values are excluded.
   Filters and selection are bookmarkable. The layout stacks on narrow screens.
+  List responses contain identity/scope summaries and at most 160 characters of
+  notes. Full notes, secrets, and association pickers load only for the selected
+  credential. Filtering still searches full notes and linked host/service data
+  on the server; secret values are never searched.
   Engagement-wide search matches credential usernames and notes, but returns only
   credential IDs, kinds, usernames, and linked-host IDs/IPs. Secrets, full notes,
   timestamps, service associations, and service-picker data stay out of search
@@ -294,6 +298,9 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   Start and end timestamps use shadcn calendar popovers and styled native time
   inputs; the browser/system chooses 12- or 24-hour display. A selected date
   defaults to midnight; use Clear date to omit that timestamp.
+  Pages contain operation summaries; selecting an entry loads its full output,
+  comments, timestamps, and attachment metadata separately. Search still matches
+  full output and comments without including those bodies in list responses.
 
 ## Workflow guarantees
 
@@ -308,8 +315,10 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   Successful reconciliation commits the new page data before resetting forms.
   Failed saves and failed refreshes do not reset drafts.
 - **Request ownership:** query navigation, viewport-sized host loading,
-  credential service loading, and clipboard feedback reject stale completions.
-  New navigation supersedes older requests; lazy-load failures offer page reload.
+  credential service loading, selected credential/operation details, and clipboard
+  feedback reject stale completions. New navigation supersedes older requests.
+  Detail failures offer Retry; successful mutations invalidate and reload the
+  selected detail. JavaScript lazy-load failures offer page reload.
 - **Selections:** unavailable credential/operation hashes show recovery instead
   of another record. Host inspectors commit their fallback selection, so an old
   selection does not reappear unexpectedly when filters or pages change.
@@ -421,9 +430,15 @@ Scoped JSON reads use these resource URLs:
 | `/data/hosts` | Inventory rows, counts, pagination, filters, and sort state |
 | `/data/hosts/{host_id}/services` | Service rows and service-table state |
 | `/data/hosts/{host_id}/timeline` | Host timeline only |
-| `/data/operations` | Paginated operations and query state |
+| `/data/operations` | Paginated operation summaries and query state |
+| `/credentials?filter=…&kind=…&scope=…` | Credential summaries, total count, and filter state |
+| `/credentials/{cred_id}` | Selected credential, including secret, full notes, and association pickers |
+| `/operations/{operation_id}` | Selected operation, including output, comments, and attachment metadata |
 | `/options/hosts` | Host ID/address pairs |
 | `/options/hosts/{host_id}/services` | Service ID, port, protocol, and name |
+
+Credential and operation detail responses are engagement-scoped JSON with
+`Cache-Control: no-store`; missing or foreign-engagement IDs return 404.
 
 Query navigation keeps document URLs in browser history and merges resource
 responses into existing state, preserving unrelated host sections and navigation.

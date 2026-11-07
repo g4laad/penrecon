@@ -120,7 +120,7 @@ def test_selector_options_are_minimal_and_credentials_page_has_no_host_catalog(c
     assert client.get(ENGAGEMENT_PREFIX + f"/options/hosts/{host_id}/services").json() == {
         "services": [{"service_id": service_id, "port": 443, "proto": "tcp", "service_name": "https"}],
     }
-    assert set(client.get(ENGAGEMENT_PREFIX + "/credentials").json()) == {"credentials", "kinds"}
+    assert set(client.get(ENGAGEMENT_PREFIX + "/credentials").json()) == {"credentials", "total", "kinds", "q", "kind", "scope"}
     empty_path, empty_id = _host(client, "10.0.0.3")
     assert client.get(empty_path).status_code == 200
     assert client.get(ENGAGEMENT_PREFIX + f"/options/hosts/{empty_id}/services").json() == {"services": []}
@@ -138,6 +138,97 @@ def test_operation_data_filters_and_paginates_without_other_sections(client: Tes
     assert (data["total"], data["page"], data["pages"], data["q"], data["per"]) == (12, 2, 2, "audit", "10")
     assert len(data["operations"]) == 2
     assert all(operation["command"].startswith("audit-") and operation["command"] != "audit-foreign" for operation in data["operations"])
+    assert all(set(operation) == {"id", "started_at", "destination", "tool", "command"} for operation in data["operations"])
+
+
+def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(client: TestClient) -> None:
+    path, host_id = _host(client, "10.0.0.1")
+    assert client.post(path + "/services", data={"port": 22, "service_name": "ssh"}).status_code == 200
+    service_id = client.get(path).json()["services"][0]["service_id"]
+    notes = "long credential notes " * 10000 + "buried-note-needle"
+    assert client.post(ENGAGEMENT_PREFIX + "/credentials", data={
+        "username": "operator", "secret": "private-secret-marker", "notes": notes,
+        "host_ids": [str(host_id)],
+    }).status_code == 200
+    data = client.get(ENGAGEMENT_PREFIX + "/credentials").json()
+    summary = data["credentials"][0]
+    assert set(summary) == {"id", "kind", "username", "notes_preview", "host_count", "service_count"}
+    assert summary["notes_preview"] == notes[:160]
+    assert (summary["host_count"], summary["service_count"], data["total"]) == (1, 0, 1)
+    assert (data["q"], data["kind"], data["scope"]) == ("", "", "")
+    html = client.get(ENGAGEMENT_PREFIX + "/credentials", headers={"Accept": "text/html"})
+    assert _embedded(html)["credentials"] == [summary]
+    assert "private-secret-marker" not in html.text
+    assert "buried-note-needle" not in html.text
+    filtered = client.get(ENGAGEMENT_PREFIX + "/credentials", params={
+        "filter": "buried-note-needle", "kind": "password", "scope": "linked",
+    }).json()
+    assert filtered["credentials"] == [summary]
+    assert (filtered["q"], filtered["kind"], filtered["scope"]) == ("buried-note-needle", "password", "linked")
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials", params={"scope": "unknown"}).json()["credentials"] == []
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials", params={"filter": "10.0.0.1"}).json()["credentials"] == [summary]
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials", params={"filter": "ssh"}).json()["credentials"] == []
+    endpoint = ENGAGEMENT_PREFIX + f'/credentials/{summary["id"]}'
+    response = client.get(endpoint, headers={"Accept": "text/html"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["cache-control"] == "no-store"
+    detail = response.json()["credential"]
+    assert detail["secret"] == "private-secret-marker"
+    assert detail["notes"] == notes
+    assert [service["service_id"] for service in detail["pickable_services"]] == [service_id]
+    assert {"engagement_id", "attachment_path"}.isdisjoint(detail)
+    assert client.post(endpoint + "/edit", data={
+        "username": "updated", "secret": "changed-secret", "notes": "changed notes",
+    }).status_code == 200
+    assert client.post(endpoint + "/link/service", data={"service_id": service_id}).status_code == 200
+    refreshed = client.get(endpoint).json()["credential"]
+    assert (refreshed["username"], refreshed["secret"], refreshed["notes"]) == ("updated", "changed-secret", "changed notes")
+    assert [service["service_id"] for service in refreshed["services"]] == [service_id]
+    assert refreshed["pickable_services"] == []
+    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["service_count"] == 1
+    assert client.post(endpoint + f"/unlink/host/{host_id}").status_code == 200
+    refreshed = client.get(endpoint).json()["credential"]
+    assert refreshed["hosts"] == refreshed["services"] == refreshed["pickable_services"] == []
+
+
+@pytest.mark.parametrize("field", ["output", "comments", "description", "source", "user_context"])
+def test_operation_lists_search_full_details_but_return_only_summaries(client: TestClient, field: str) -> None:
+    body = "large private evidence " * 10000 + "buried-operation-needle"
+    assert client.post(ENGAGEMENT_PREFIX + "/operations", data={"command": "inspect", field: body}).status_code == 200
+    data = client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "buried-operation-needle"}).json()
+    assert data["total"] == 1
+    summary = data["operations"][0]
+    assert set(summary) == {"id", "started_at", "destination", "tool", "command"}
+    assert "buried-operation-needle" not in json.dumps(summary)
+    html = client.get(ENGAGEMENT_PREFIX + "/operations", headers={"Accept": "text/html"})
+    assert _embedded(html)["operations"] == [summary]
+    assert "buried-operation-needle" not in html.text
+    endpoint = ENGAGEMENT_PREFIX + f'/operations/{summary["id"]}'
+    response = client.get(endpoint, headers={"Accept": "text/html"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["cache-control"] == "no-store"
+    detail = response.json()["operation"]
+    assert detail[field] == body
+    assert {"engagement_id", "attachment_path", "attachment_media_type"}.isdisjoint(detail)
+    assert client.post(endpoint + "/edit", data={"command": "updated", "output": "new evidence"}).status_code == 200
+    refreshed = client.get(endpoint).json()["operation"]
+    assert (refreshed["command"], refreshed["output"]) == ("updated", "new evidence")
+    assert client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "buried-operation-needle"}).json()["operations"] == []
+
+
+@pytest.mark.parametrize("resource", ["credentials", "operations"])
+def test_detail_resources_reject_missing_and_foreign_ids(client: TestClient, resource: str) -> None:
+    other = _engagement(client)
+    fields = {"username": "foreign", "secret": "foreign-secret"} if resource == "credentials" else {"command": "foreign", "output": "foreign evidence"}
+    assert client.post(other + "/" + resource, data=fields).status_code == 200
+    foreign_id = client.get(other + "/" + resource).json()[resource][0]["id"]
+    for resource_id in (foreign_id, 999999):
+        response = client.get(ENGAGEMENT_PREFIX + f"/{resource}/{resource_id}")
+        assert response.status_code == 404
+        assert "foreign" not in response.text
+    assert client.get("/e/missing/" + resource + f"/{foreign_id}").status_code == 404
 
 
 @pytest.mark.parametrize("resource", ["data/hosts/{host_id}/services", "data/hosts/{host_id}/timeline", "options/hosts/{host_id}/services"])

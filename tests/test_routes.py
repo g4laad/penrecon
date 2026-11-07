@@ -29,6 +29,14 @@ def _create_credential(client: TestClient, **fields) -> dict:
                 if credential["username"] == fields.get("username", "").strip())
 
 
+def _credential_details(client: TestClient) -> list[dict]:
+    summaries = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]
+    return [
+        client.get(ENGAGEMENT_PREFIX + f'/credentials/{summary["id"]}').json()["credential"]
+        for summary in summaries
+    ]
+
+
 
 def _create_host(client: TestClient, ip: str = "10.0.0.5") -> str:
     response = client.post(ENGAGEMENT_PREFIX + "/hosts", data={"ip": ip}, follow_redirects=False)
@@ -162,7 +170,7 @@ def test_create_credential_lists_it(client: TestClient) -> None:
         ENGAGEMENT_PREFIX + "/credentials", data={"kind": "password", "username": "root", "secret": "toor"},
     )
     _assert_outcome(response)
-    credential = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    credential = _credential_details(client)[0]
     assert credential["username"] == "root"
     assert credential["secret"] == "toor"
     assert credential["kind"] == "password"
@@ -181,14 +189,14 @@ def test_create_credential_with_multiple_targets_deduplicates_links(client: Test
         "service_ids": [str(sid) for sid in [*service_ids, service_ids[0]]],
     })
     _assert_outcome(response)
-    credential = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    credential = _credential_details(client)[0]
     assert credential["username"] == "root"
     assert credential["secret"] == "toor"
     assert credential["notes"] == "shared"
     assert credential["kind"] == "password"
     assert sorted(host["host_id"] for host in credential["hosts"]) == sorted(host_ids)
     assert sorted(service["service_id"] for service in credential["services"]) == sorted(service_ids)
-    persisted = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]
+    persisted = _credential_details(client)
     assert persisted == [credential]
     for path in paths:
         assert client.get(path).json()["host_credentials"][0]["id"] == credential["id"]
@@ -239,7 +247,7 @@ def test_create_credential_rejects_empty_identity(client: TestClient, data: dict
 def test_create_credential_preserves_target_free_defaults(client: TestClient, data: dict[str, str]) -> None:
     response = client.post(ENGAGEMENT_PREFIX + "/credentials", data=data)
     _assert_outcome(response)
-    credential = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    credential = _credential_details(client)[0]
     assert credential["kind"] == "password"
     assert credential["username"] == data.get("username", "")
     assert credential["secret"] == data.get("secret", "")
@@ -391,12 +399,12 @@ def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> 
     credential_id = _create_credential(client, username="root", secret="toor")["id"]
     linked = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": host_id})
     _assert_outcome(linked)
-    credential = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    credential = _credential_details(client)[0]
     assert credential["hosts"][0]["ip"] == "10.0.0.5"
     assert credential["pickable_services"][0]["service_id"] == service_id
     linked_service = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/service", data={"service_id": str(service_id)})
     _assert_outcome(linked_service)
-    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["services"][0]["name"] == "ssh"
+    assert _credential_details(client)[0]["services"][0]["name"] == "ssh"
     detail = client.get(path).json()
     assert detail["host_credentials"][0]["id"] == credential_id
     edited = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/edit", data={"host_id": host_id, "username": "admin", "secret": "changed"})
@@ -404,10 +412,10 @@ def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> 
     assert client.get(path).json()["host_credentials"][0]["username"] == "admin"
     unlinked_service = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/service/{service_id}")
     _assert_outcome(unlinked_service)
-    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["services"] == []
+    assert _credential_details(client)[0]["services"] == []
     unlinked_host = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
     _assert_outcome(unlinked_host)
-    assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["hosts"] == []
+    assert _credential_details(client)[0]["hosts"] == []
     deleted = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/delete")
     _assert_outcome(deleted)
     assert client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"] == []
@@ -431,7 +439,7 @@ def test_unlink_host_removes_only_its_credential_service_links(client: TestClien
 
     response = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
     _assert_outcome(response)
-    credentials = {credential["id"]: credential for credential in client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]}
+    credentials = {credential["id"]: credential for credential in _credential_details(client)}
     credential = credentials[credential_id]
     assert [host["host_id"] for host in credential["hosts"]] == [other_id]
     assert [service["service_id"] for service in credential["services"]] == [service_ids[2]]
@@ -444,7 +452,7 @@ def test_unlink_host_removes_only_its_credential_service_links(client: TestClien
     # Re-linking the host must not resurrect its old service associations.
     client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/unlink/host/{host_id}")
     client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": str(host_id)})
-    persisted = {credential["id"]: credential for credential in client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"]}
+    persisted = {credential["id"]: credential for credential in _credential_details(client)}
     assert [service["service_id"] for service in persisted[credential_id]["services"]] == [service_ids[2]]
 
 
@@ -483,7 +491,7 @@ def test_search_credentials_exclude_secrets_and_management_data(client: TestClie
     }]
     assert "search-must-not-expose-this" not in response.text
     assert "private-marker management notes" not in response.text
-    managed = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    managed = _credential_details(client)[0]
     assert managed["secret"] == "search-must-not-expose-this"
     assert managed["notes"] == "private-marker management notes"
 
@@ -518,7 +526,7 @@ def test_empty_credential_edit_is_rejected_without_changing_record(client: TestC
         "username": " ", "secret": " ", "notes": "discard",
     })
     assert response.status_code == 422
-    persisted = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    persisted = _credential_details(client)[0]
     assert persisted["username"] == "root"
     assert persisted["notes"] == ""
 
@@ -533,7 +541,7 @@ def test_credential_service_requires_explicit_host_link(client: TestClient) -> N
     client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": host_id})
     assert client.post(route, data={"service_id": str(service_id)}).status_code == 200
     assert client.post(route, data={"service_id": str(service_id)}).status_code == 200
-    assert len(client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["services"]) == 1
+    assert len(_credential_details(client)[0]["services"]) == 1
 
 
 def test_annotation_allows_reclassification(client: TestClient) -> None:
@@ -573,7 +581,7 @@ def test_service_override_reset_delete_and_scan_recreation_keep_action_history(c
     removed = client.get(path).json()
     assert 22 not in [service["port"] for service in removed["services"]]
     assert len([entry for entry in removed["host_timeline"]["entries"] if entry["source"] == "manual"]) == 3
-    credential = next(credential for credential in client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"] if credential["id"] == credential_id)
+    credential = next(credential for credential in _credential_details(client) if credential["id"] == credential_id)
     assert credential["services"] == []
     assert len(credential["hosts"]) == 1
 

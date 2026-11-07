@@ -616,10 +616,6 @@ def delete_service(
 
 # --- credentials --------------------------------------------------------------
 
-def _credential_context(session: Session, *, engagement_id: str) -> dict[str, object]:
-    return {
-        "credentials": queries.credential_views(session, engagement_id=engagement_id),
-    }
 
 
 @scoped.post("/credentials/{cred_id}/edit", response_class=JSONResponse)
@@ -648,11 +644,37 @@ def edit_credential(
 
 
 @scoped.get("/credentials", response_class=HTMLResponse)
-def credentials_page(request: Request, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
+def credentials_page(
+    request: Request,
+    filter: str = "",
+    kind: str = "",
+    scope: str = "",
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    credentials, total = queries.credential_summaries(
+        session, filter, kind, scope, engagement_id=engagement_id,
+    )
     return page_response(request, session, {
-        **_credential_context(session, engagement_id=engagement_id),
-        "kinds": list(CredKind),
+        "credentials": credentials, "total": total, "kinds": list(CredKind),
+        "q": filter, "kind": kind, "scope": scope,
     })
+
+
+@scoped.get("/credentials/{cred_id}")
+def credential_detail(
+    cred_id: int,
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    credential = queries.credential_view(session, cred_id, engagement_id=engagement_id)
+    if credential is None:
+        raise HTTPException(
+            status_code=404, detail="credential not found", headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(
+        encode_page({"credential": credential}), headers={"Cache-Control": "no-store"},
+    )
 
 
 @scoped.post("/credentials", response_class=JSONResponse)
@@ -1169,6 +1191,22 @@ def operations_data(
     session: Session = Depends(get_session),
 ) -> Response:
     return JSONResponse(encode_page(_operations_ctx(session, q, page, per, engagement_id=engagement_id)))
+
+
+@scoped.get("/operations/{operation_id}")
+def operation_detail(
+    operation_id: int,
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
+    if operation is None:
+        raise HTTPException(
+            status_code=404, detail="operation not found", headers={"Cache-Control": "no-store"},
+        )
+    return JSONResponse(
+        encode_page({"operation": operation}), headers={"Cache-Control": "no-store"},
+    )
 
 
 @scoped.post("/operations")

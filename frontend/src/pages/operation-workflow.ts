@@ -1,4 +1,4 @@
-import type { Operation } from "../types";
+import type { OperationSummary } from "../types";
 
 export type TimestampDraft =
   | { kind: "absent"; time: string }
@@ -72,10 +72,10 @@ export function attachmentFile(draft: AttachmentDraft): File | null {
 
 export type OperationSelection =
   | { kind: "empty" }
-  | { kind: "selected"; operation: Operation }
+  | { kind: "selected"; operation: OperationSummary }
   | { kind: "unavailable"; hash: string };
 
-export function resolveOperationSelection(operations: Operation[], hash: string): OperationSelection {
+export function resolveOperationSelection(operations: OperationSummary[], hash: string): OperationSelection {
   if (hash) {
     const operation = operations.find((item) => hash === `#operation-${item.id}`);
     return operation ? { kind: "selected", operation } : { kind: "unavailable", hash };

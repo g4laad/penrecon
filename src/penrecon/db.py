@@ -35,6 +35,11 @@ def enable_sqlite_fks(engine: object) -> None:
         cur = dbapi_conn.cursor()  # type: ignore[attr-defined]
         cur.execute("PRAGMA foreign_keys=ON")
         cur.close()
+        # SQLite's built-in lower() is ASCII-only; list searches preserve the
+        # operation log's Unicode case-insensitive substring matching in SQL.
+        dbapi_conn.create_function(  # type: ignore[attr-defined]
+            "casefold", 1, lambda value: (value or "").casefold(), deterministic=True,
+        )
 
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})

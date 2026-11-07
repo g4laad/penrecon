@@ -1,4 +1,4 @@
-import type { Credential, ServiceOption } from "../types";
+import type { CredentialSummary, ServiceOption } from "../types";
 
 export type DraftValidity = "empty" | "valid";
 export function credentialDraftValidity(username: string, secret: string): DraftValidity {
@@ -84,15 +84,14 @@ export function resolveCredentialScope(value: string): CredentialScope {
 }
 
 export type CredentialSelection =
-  | { status: "selected"; credential: Credential }
+  | { status: "selected"; credential: CredentialSummary }
   | { status: "empty" }
-  | { status: "unavailable"; reason: "invalid" | "missing" | "filtered" };
-export function resolveCredentialSelection(hash: string, all: Credential[], visible: Credential[]): CredentialSelection {
+  | { status: "unavailable"; reason: "invalid" | "missing" | "filtered-or-missing" };
+export function resolveCredentialSelection(hash: string, visible: CredentialSummary[], filtered: boolean): CredentialSelection {
   if (!hash) return visible[0] ? { status: "selected", credential: visible[0] } : { status: "empty" };
   if (!/^#credential-\d+$/.test(hash)) return { status: "unavailable", reason: "invalid" };
-  const credential = all.find((item) => hash === `#credential-${item.id}`);
-  if (!credential) return { status: "unavailable", reason: "missing" };
-  return visible.some((item) => item.id === credential.id)
+  const credential = visible.find((item) => hash === `#credential-${item.id}`);
+  return credential
     ? { status: "selected", credential }
-    : { status: "unavailable", reason: "filtered" };
+    : { status: "unavailable", reason: filtered ? "filtered-or-missing" : "missing" };
 }
