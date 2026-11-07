@@ -47,6 +47,7 @@ export const PageContext = createContext<{
   navigate: (url: string) => void;
 } | null>(null);
 const CloseModal = createContext<(() => void) | null>(null);
+const FieldErrors = createContext<Record<string, string>>({});
 export function usePage() {
   const value = useContext(PageContext);
   if (!value) throw new Error("Missing page context");
@@ -61,14 +62,22 @@ export function Field({
   children?: ReactNode;
 } & InputHTMLAttributes<HTMLInputElement>) {
   const id = useId();
+  const errors = useContext(FieldErrors);
+  const error = props.name ? errors[props.name] : undefined;
+  const errorId = `${id}-error`;
   return (
-    <label
-      className="grid min-w-0 gap-1.5 text-sm font-medium"
-      htmlFor={children ? undefined : id}
-    >
-      <span>{label}</span>
-      {children ?? <Input id={id} {...props} />}
-    </label>
+    <div data-slot="field" className="grid min-w-0 gap-1.5 text-sm font-medium">
+      <label className="grid min-w-0 gap-1.5" htmlFor={children ? undefined : id}>
+        <span>{label}</span>
+        {children ?? <Input
+          id={id}
+          {...props}
+          aria-invalid={error ? true : props["aria-invalid"]}
+          aria-describedby={[props["aria-describedby"], error ? errorId : undefined].filter(Boolean).join(" ") || undefined}
+        />}
+      </label>
+      {error && <span id={errorId} className="text-sm font-normal text-destructive">{error}</span>}
+    </div>
   );
 }
 export function SelectField({
@@ -202,8 +211,16 @@ export function MutationForm({
   const close = useContext(CloseModal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!busy && Object.keys(fieldErrors).length) {
+      formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    }
+  }, [busy, fieldErrors]);
   return (
     <form
+      ref={formRef}
       action={engagementUrl(action)}
       method="post"
       encType={encType}
@@ -215,6 +232,7 @@ export function MutationForm({
         const body = new FormData(form);
         setBusy(true);
         setError("");
+        setFieldErrors({});
         try {
           const response = await fetch(engagementUrl(action), {
             method: "POST",
@@ -229,7 +247,8 @@ export function MutationForm({
             const text = await response.text();
             let message = text;
             try {
-              const parsed = JSON.parse(text) as { detail?: unknown };
+              const parsed = JSON.parse(text) as { detail?: unknown; field_errors?: Record<string, string> };
+              setFieldErrors(parsed.field_errors ?? {});
               message =
                 typeof parsed.detail === "string"
                   ? parsed.detail
@@ -253,15 +272,19 @@ export function MutationForm({
           }
           close?.();
         } catch (reason) {
-          setError(reason instanceof Error ? reason.message : "Request failed");
+          setError(reason instanceof TypeError || !(reason instanceof Error)
+            ? "Save could not be confirmed. Check that the local penrecon server is running and your connection is available before trying again."
+            : reason.message);
         } finally {
           setBusy(false);
         }
       }}
     >
-      <fieldset disabled={busy} className="contents">
-        {children}
-      </fieldset>
+      <FieldErrors.Provider value={fieldErrors}>
+        <fieldset disabled={busy} className="contents">
+          {children}
+        </fieldset>
+      </FieldErrors.Provider>
       {busy && (
         <p role="status" className="muted text-sm">
           Saving…
@@ -269,7 +292,7 @@ export function MutationForm({
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {Object.keys(fieldErrors).length ? "Correct the highlighted fields and submit again." : error}
         </p>
       )}
     </form>

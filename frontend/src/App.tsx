@@ -502,7 +502,7 @@ function EngagementsPage({ data }: { data: PageData }) {
             </TableRow></TableHeader>
             <TableBody>{data.engagements.map((engagement) => (
               <TableRow key={engagement.id}>
-                <TableCell className="max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/e/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
+                <TableCell className="min-w-40 max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/e/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
                 <TableCell className="min-w-48 max-w-xl whitespace-pre-wrap [overflow-wrap:anywhere]">{engagement.description}</TableCell>
                 <TableCell className="mono"><time dateTime={engagement.created_at}>{engagement.created_at.replace("T", " ").slice(0, 16)}</time></TableCell>
                 <TableCell className="text-right">

@@ -28,10 +28,15 @@ use blue (`#1d4ed8`), selected navigation and workbench items use a light blue
 tint, and keyboard focus uses the blue ring token. Muted foreground is darkened
 for legibility. Status and diff badges remain neutral and always include text;
 destructive actions retain red.
+Input boundaries use a separate `input` token (`oklch(0.65 0 0)` in light mode),
+measuring 3.23:1 against white; structural dividers keep the lighter `border` token.
+
 
 Use `.mono` for IPs, ports, protocol/version strings, timestamps, commands,
-output, and secrets. Body and form text remain 14px; data is 13px, and secondary
-metadata/table headings are 12px. Page titles and descriptions are screen-reader
+output, and secrets. Body text uses `.875rem` (14px at the default root size),
+so browser font preferences scale it; form text remains 14px on desktop and
+16px on mobile. Data is 13px, and secondary metadata/table headings are 12px.
+Page titles and descriptions are screen-reader
 only; visible page-level rows contain actions, without an empty row on pages
 without actions. Browser titles include the current engagement name; navigation
 and search stay within that engagement.
@@ -69,11 +74,14 @@ count with the result heading and display filenames as secondary metadata.
 - Buttons, inputs, textareas, badges, tables, native selects, separators, and
   dialogs come from the committed shadcn components. Interactive button/dialog
   behavior uses `@base-ui/react`.
+  Buttons respond instantly rather than applying broad property transitions.
 - `/engagements` fits the viewport with a dense, internally scrolling workspace
   table and sticky column headings. Names link directly to their workspaces;
   Name and Created headings toggle URL-backed ascending/descending sorting,
   defaulting to newest first. Long names/descriptions wrap within bounded
-  columns. A single top-right Create engagement button opens a modal with a
+  columns; names retain a 10rem minimum width on narrow screens, with horizontal
+  table scrolling rather than squeezed identity text. A single top-right Create
+  engagement button opens a modal with a
   required name and optional description. An empty catalog points to that action.
   Each row has a right-aligned, labeled pencil action opening a prefilled edit
   modal for name and description. Saving preserves workspace identity and creation
@@ -100,6 +108,11 @@ count with the result heading and display filenames as secondary metadata.
   no zoom or exit animation. Reduced-motion preferences disable the entrance fade.
 - `MutationForm` posts real multipart form data, disables duplicate submissions,
   surfaces errors, refreshes page data, and closes its modal on success.
+  Engagement-name validation returns `field_errors` keyed by input name; shared
+  fields render associated inline errors, expose invalid state, and receive focus
+  after submission is re-enabled. Network errors retain the draft and explain
+  how to check the local server and connection before retrying, without claiming
+  the save definitely failed.
 - Operation timestamps use shadcn Calendar/Popover date pickers; selecting a day
   closes the calendar, and Clear date omits the timestamp. Time uses shadcn
   Input with `type="time"`; the browser/system chooses 12- or 24-hour display.

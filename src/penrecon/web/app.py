@@ -135,7 +135,10 @@ def create_engagement(
 ) -> Response:
     clean_name = name.strip()
     if not clean_name:
-        return JSONResponse({"detail": "Engagement name is required."}, status_code=400)
+        return JSONResponse(
+            {"detail": "Enter an engagement name.", "field_errors": {"name": "Enter an engagement name."}},
+            status_code=400,
+        )
     engagement = Engagement(name=clean_name, description=description.strip())
     session.add(engagement)
     session.commit()
@@ -155,7 +158,10 @@ def edit_engagement(
         return JSONResponse({"detail": "engagement not found"}, status_code=404)
     clean_name = name.strip()
     if not clean_name:
-        return JSONResponse({"detail": "Engagement name is required."}, status_code=400)
+        return JSONResponse(
+            {"detail": "Enter an engagement name.", "field_errors": {"name": "Enter an engagement name."}},
+            status_code=400,
+        )
     engagement.name = clean_name
     engagement.description = description.strip()
     session.add(engagement)
