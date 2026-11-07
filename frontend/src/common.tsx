@@ -192,6 +192,9 @@ export function Modal({
     </Dialog>
   );
 }
+const saveRecoveryMessage =
+  "Save could not be confirmed. Check that the local penrecon server is running and your connection is available before trying again.";
+
 export function MutationForm({
   action,
   children,
@@ -245,18 +248,17 @@ export function MutationForm({
           });
           if (!response.ok) {
             const text = await response.text();
-            let message = text;
+            let message = saveRecoveryMessage;
             try {
               const parsed = JSON.parse(text) as { detail?: unknown; field_errors?: Record<string, string> };
               setFieldErrors(parsed.field_errors ?? {});
               message =
                 typeof parsed.detail === "string"
                   ? parsed.detail
-                  : JSON.stringify(parsed.detail ?? parsed);
+                  : saveRecoveryMessage;
             } catch {
-              message =
-                new DOMParser().parseFromString(text, "text/html").body
-                  .textContent || text;
+              // Unstructured server responses do not provide recovery instructions.
+              message = saveRecoveryMessage;
             }
             throw new Error(message);
           }
@@ -273,7 +275,7 @@ export function MutationForm({
           close?.();
         } catch (reason) {
           setError(reason instanceof TypeError || !(reason instanceof Error)
-            ? "Save could not be confirmed. Check that the local penrecon server is running and your connection is available before trying again."
+            ? saveRecoveryMessage
             : reason.message);
         } finally {
           setBusy(false);

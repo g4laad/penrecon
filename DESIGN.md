@@ -110,9 +110,10 @@ count with the result heading and display filenames as secondary metadata.
   surfaces errors, refreshes page data, and closes its modal on success.
   Engagement-name validation returns `field_errors` keyed by input name; shared
   fields render associated inline errors, expose invalid state, and receive focus
-  after submission is re-enabled. Network errors retain the draft and explain
-  how to check the local server and connection before retrying, without claiming
-  the save definitely failed.
+  after submission is re-enabled. Network errors and unstructured HTTP failures
+  retain the draft and explain how to check the local server and connection before
+  retrying, without claiming the save definitely failed. Structured validation
+  messages remain available beside the fields.
 - Operation timestamps use shadcn Calendar/Popover date pickers; selecting a day
   closes the calendar, and Clear date omits the timestamp. Time uses shadcn
   Input with `type="time"`; the browser/system chooses 12- or 24-hour display.
