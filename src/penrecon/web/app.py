@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import csv
 import io
-import ipaddress
 import json
+import logging
 import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from enum import StrEnum
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -20,22 +21,17 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, col, select
 
-from penrecon import queries
+from penrecon import commands, queries
 from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session, init_db
-from penrecon.history import Overrides, State
 from penrecon.ingest import ScanParseError, ingest_scan
-from penrecon.inventory import link_hostname
+from penrecon.inventory import find_host_by_ip, hide_hostname, link_hostname, normalize_hostname, normalize_ip, same_ip
 from penrecon.models import (
     CredKind,
     Credential,
-    CredentialHost,
     CredentialService,
     Engagement,
     Host,
-    HostHostname,
-    ManualServiceEvent,
     Note,
-    Observation,
     ObsState,
     OperationLog,
     Scan,
@@ -136,6 +132,7 @@ def create_engagement(
     description: str = Form(""),
     session: Session = Depends(get_session),
 ) -> Response:
+    """Create a named workspace; no status/archive lifecycle is implied."""
     clean_name = name.strip()
     if not clean_name:
         return JSONResponse(
@@ -156,6 +153,7 @@ def edit_engagement(
     description: str = Form(""),
     session: Session = Depends(get_session),
 ) -> Response:
+    """Replace editable metadata, retaining workspace identity and evidence."""
     engagement = session.get(Engagement, engagement_id)
     if engagement is None:
         return JSONResponse({"detail": "engagement not found"}, status_code=404)
@@ -336,7 +334,10 @@ def add_hostname(
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
-    clean = name.strip().lower()  # normalize so manual adds dedup against scan data
+    try:
+        clean = normalize_hostname(name) if name.strip() else ""
+    except ValueError as exc:
+        return JSONResponse({"detail": str(exc), "field_errors": {"name": str(exc)}}, status_code=400)
     if clean:
         link_hostname(session, host_id, clean, datetime.now(UTC), engagement_id=engagement_id)
         session.commit()
@@ -348,24 +349,13 @@ def delete_hostname(request: Request, host_id: int, hostname_id: int, engagement
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
-    link = queries.get_owned(session, HostHostname, (host_id, hostname_id), engagement_id=engagement_id)
-    if link is not None:
-        link.hidden = True  # sticky: a re-scan won't bring it back
+    if hide_hostname(session, host_id, hostname_id, engagement_id=engagement_id):
         session.commit()
     return _hostnames_response(request, session, host, engagement_id=engagement_id)
 
 
 # --- manual host + service CRUD -----------------------------------------------
 
-def _normalize_ip(raw: str) -> str | None:
-    """Canonical IP string if ``raw`` is a valid IPv4/IPv6 address, else ``None``.
-    ``ipaddress`` is the trust-boundary authority — the client is never trusted to
-    have validated. Canonicalizing (e.g. ``2001:0DB8::1`` → ``2001:db8::1``) keeps
-    the unique-IP dedupe consistent regardless of how the operator typed it."""
-    try:
-        return str(ipaddress.ip_address(raw.strip()))
-    except ValueError:
-        return None
 
 
 def _invalid_ip_response(raw: str) -> JSONResponse:
@@ -384,13 +374,15 @@ def _duplicate_ip_response(norm: str) -> JSONResponse:
 def create_host(
     ip: str = Form(...), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
+    """Create or select the canonical engagement/IP identity; blank is a no-op."""
     clean = ip.strip()
     if not clean:
         return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
-    norm = _normalize_ip(clean)
-    if norm is None:
+    try:
+        norm = normalize_ip(clean)
+    except ValueError:
         return _invalid_ip_response(clean)
-    existing = session.exec(select(Host).where(Host.engagement_id == engagement_id).where(Host.ip == norm)).first()
+    existing = find_host_by_ip(session, norm, engagement_id=engagement_id)
     if existing is not None:
         return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{existing.id}", status_code=303)
     now = datetime.now(UTC)
@@ -405,17 +397,19 @@ def create_host(
 def edit_host(
     host_id: int, ip: str = Form(...), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)
 ) -> Response:
+    """Rename an owned identity without merging hosts; blank keeps its address."""
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
     clean = ip.strip()
     if not clean:  # empty = leave the IP unchanged
         return RedirectResponse(f"/e/{engagement_id}" + f"/hosts/{host_id}", status_code=303)
-    norm = _normalize_ip(clean)
-    if norm is None:
+    try:
+        norm = normalize_ip(clean)
+    except ValueError:
         return _invalid_ip_response(clean)
-    if norm != host.ip:
-        dup = session.exec(select(Host).where(Host.engagement_id == engagement_id).where(Host.ip == norm)).first()
+    if not same_ip(norm, host.ip):
+        dup = find_host_by_ip(session, norm, engagement_id=engagement_id, excluding=host_id)
         if dup is not None:
             return _duplicate_ip_response(norm)
         host.ip = norm
@@ -435,35 +429,11 @@ def delete_host(host_id: int, engagement_id: str = Depends(require_engagement), 
     return RedirectResponse(f"/e/{engagement_id}" + "/", status_code=303)
 
 
-def _clean(value: str) -> str | None:
-    v = value.strip()
-    return v or None
-
-
-def _service_snapshot(svc: Service, observation: Observation | None) -> tuple[State, Overrides]:
-    """Detach effective values and raw overrides before any service mutation."""
-    return (
-        queries.service_state(svc, observation),
-        queries.service_overrides(svc),
+def _invalid_command(exc: commands.InvalidCommand, *, status_code: int = 400) -> JSONResponse:
+    return JSONResponse(
+        {"detail": str(exc), "field_errors": {exc.field: str(exc)}},
+        status_code=status_code,
     )
-
-
-def _record_service_event(
-    session: Session, svc: Service,
-    before: tuple[State, Overrides] | None, after: tuple[State, Overrides] | None,
-) -> None:
-    """Stage an immutable value event in the service mutation's transaction."""
-    if before == after:
-        return
-    session.add(ManualServiceEvent(
-        engagement_id=svc.engagement_id, host_id=svc.host_id,
-        port=svc.port, proto=svc.proto,
-        kind="added" if before is None else "removed" if after is None else "changed",
-        before=asdict(before[0]) if before is not None else None,
-        after=asdict(after[0]) if after is not None else None,
-        before_overrides=asdict(before[1]) if before is not None else None,
-        after_overrides=asdict(after[1]) if after is not None else None,
-    ))
 
 
 @scoped.post("/hosts/{host_id}/services", response_class=JSONResponse)
@@ -483,23 +453,23 @@ def add_service(
     host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         return JSONResponse({"detail": "host not found"}, status_code=404)
+    try:
+        identity = commands.ServiceIdentity.parse(port, proto)
+        values = commands.ServiceOverrides.parse(state, service_name, product, version, creating=True)
+    except commands.InvalidCommand as exc:
+        return _invalid_command(exc)
     svc = session.exec(
         select(Service).where(Service.engagement_id == engagement_id).where(
-            Service.host_id == host_id, Service.port == port, Service.proto == proto.strip().lower()
+            Service.host_id == host_id, Service.port == identity.port, Service.proto == identity.proto
         )
     ).first()
     observation = queries.latest_observations(session, host_id, engagement_id=engagement_id).get(
-        (port, proto.strip().lower())
+        (identity.port, identity.proto)
     )
-    before = _service_snapshot(svc, observation) if svc is not None else None
+    creating = svc is None
     if svc is None:
-        svc = Service(host_id=host_id, port=port, proto=proto.strip().lower(), engagement_id=engagement_id)
-        session.add(svc)
-    svc.m_state = ObsState(state) if state else ObsState.open
-    svc.m_service_name = _clean(service_name)
-    svc.m_product = _clean(product)
-    svc.m_version = _clean(version)
-    _record_service_event(session, svc, before, _service_snapshot(svc, observation))
+        svc = Service(host_id=host_id, port=identity.port, proto=identity.proto, engagement_id=engagement_id)
+    commands.override_service(session, svc, values, observation, creating=creating)
     session.commit()
     return _services_response(request, session, host, table, engagement_id=engagement_id)
 
@@ -521,15 +491,14 @@ def edit_service(
     svc = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if svc is None:
         return JSONResponse({"detail": "service not found"}, status_code=404)
+    try:
+        values = commands.ServiceOverrides.parse(state, service_name, product, version)
+    except commands.InvalidCommand as exc:
+        return _invalid_command(exc)
     observation = queries.latest_observations(session, svc.host_id, engagement_id=engagement_id).get(
         (svc.port, svc.proto)
     )
-    before = _service_snapshot(svc, observation)
-    svc.m_state = ObsState(state) if state else None  # blank reverts to scan value
-    svc.m_service_name = _clean(service_name)
-    svc.m_product = _clean(product)
-    svc.m_version = _clean(version)
-    _record_service_event(session, svc, before, _service_snapshot(svc, observation))
+    commands.override_service(session, svc, values, observation)
     # one Save persists both the scan overrides and the triage annotation
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
@@ -554,10 +523,7 @@ def delete_service(
     observation = queries.latest_observations(session, svc.host_id, engagement_id=engagement_id).get(
         (svc.port, svc.proto)
     )
-    _record_service_event(session, svc, _service_snapshot(svc, observation), None)
-    # Only the current service and its annotations/links are deleted. Immutable
-    # observations and manual events remain available to host history.
-    session.delete(svc)
+    commands.remove_service(session, svc, observation)
     session.commit()
     return _services_response(request, session, host, table, engagement_id=engagement_id)
 
@@ -601,12 +567,10 @@ def edit_credential(
     if host_id is not None and queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="host not found")
     try:
-        cred.kind = CredKind(kind)
-    except ValueError:
-        cred.kind = CredKind.password
-    cred.username = username.strip()
-    cred.secret = secret.strip()
-    cred.notes = notes.strip()
+        values = commands.CredentialValues.parse(kind, username, secret, notes)
+    except commands.InvalidCommand as exc:
+        return _invalid_command(exc, status_code=422)
+    values.apply(cred)
     session.commit()
     if host_id is not None:
         return _host_credentials_response(request, session, host_id, engagement_id=engagement_id)
@@ -633,9 +597,10 @@ def create_credential(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    user, sec = username.strip(), secret.strip()
-    if not (user or sec):
-        return JSONResponse({"detail": "a credential must carry at least a username or a secret"}, status_code=422)
+    try:
+        values = commands.CredentialValues.parse(kind, username, secret, notes)
+    except commands.InvalidCommand as exc:
+        return _invalid_command(exc, status_code=422)
     selected_hosts = set(host_ids)
     selected_services = set(service_ids)
     for host_id in selected_hosts:
@@ -647,18 +612,20 @@ def create_credential(
             return JSONResponse({"detail": "service not found"}, status_code=422)
         if service.host_id not in selected_hosts:
             return JSONResponse({"detail": "service must belong to a selected host"}, status_code=422)
-    try:
-        k = CredKind(kind)
-    except ValueError:
-        k = CredKind.password
-    credential = Credential(kind=k, username=user, secret=sec, notes=notes.strip(), engagement_id=engagement_id)
+    credential = Credential(engagement_id=engagement_id)
+    values.apply(credential)
     session.add(credential)
     session.flush()
     assert credential.id is not None
     for host_id in selected_hosts:
-        session.add(CredentialHost(credential_id=credential.id, host_id=host_id, engagement_id=engagement_id))
+        host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+        assert host is not None
+        commands.link_credential_host(session, credential, host)
+    session.flush()  # service guards must see every staged host association
     for service_id in selected_services:
-        session.add(CredentialService(credential_id=credential.id, service_id=service_id, engagement_id=engagement_id))
+        service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
+        assert service is not None
+        commands.link_credential_service(session, credential, service)
     session.commit()
     return _credentials_response(request, session, engagement_id=engagement_id)
 
@@ -686,34 +653,28 @@ def delete_credential(
 @scoped.post("/credentials/{cred_id}/link/host", response_class=JSONResponse)
 def link_cred_host(request: Request, cred_id: int, host_id: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     hid = int(host_id) if host_id.strip().isdigit() else None
-    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
     if hid is None:
         raise HTTPException(status_code=422, detail="Select a host, then choose Link host.")
-    if queries.get_owned(session, Host, hid, engagement_id=engagement_id) is None:
+    host = queries.get_owned(session, Host, hid, engagement_id=engagement_id)
+    if host is None:
         raise HTTPException(status_code=404, detail="Host is no longer available. Reload credentials and select another host.")
-    if queries.get_owned(session, CredentialHost, (cred_id, hid), engagement_id=engagement_id) is None:
-        session.add(CredentialHost(credential_id=cred_id, host_id=hid, engagement_id=engagement_id))  # ignore duplicate links
-        session.commit()
+    commands.link_credential_host(session, credential, host)
+    session.commit()
     return _credentials_response(request, session, engagement_id=engagement_id)
 
 
 @scoped.post("/credentials/{cred_id}/unlink/host/{host_id}", response_class=JSONResponse)
 def unlink_cred_host(request: Request, cred_id: int, host_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
-    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    if host is None:
         raise HTTPException(status_code=404, detail="host not found")
-    service_links = session.exec(
-        select(CredentialService).where(CredentialService.engagement_id == engagement_id)
-        .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
-        .where(CredentialService.credential_id == cred_id, Service.host_id == host_id)
-    ).all()
-    for service_link in service_links:
-        session.delete(service_link)
-    link = queries.get_owned(session, CredentialHost, (cred_id, host_id), engagement_id=engagement_id)
-    if link is not None:
-        session.delete(link)
+    commands.unlink_credential_host(session, credential, host)
     session.commit()
     return _credentials_response(request, session, engagement_id=engagement_id)
 
@@ -728,17 +689,16 @@ def link_cred_service(
 ) -> Response:
     sid = int(service_id) if service_id.strip().isdigit() else None
     svc = queries.get_owned(session, Service, sid, engagement_id=engagement_id) if sid is not None else None
-    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
     if svc is None:
         raise HTTPException(status_code=422 if sid is None else 404, detail="Select an available service, then choose Link service. Reload credentials if the service is no longer available.")
-    # only services of a host already linked to this credential may be linked
-    linked_host = queries.get_owned(
-        session, CredentialHost, (cred_id, svc.host_id), engagement_id=engagement_id
-    )
-    if linked_host is not None and sid is not None and queries.get_owned(session, CredentialService, (cred_id, sid), engagement_id=engagement_id) is None:
-        session.add(CredentialService(credential_id=cred_id, service_id=sid, engagement_id=engagement_id))
-        session.commit()
+    try:
+        commands.link_credential_service(session, credential, svc)
+    except commands.InvalidCommand as exc:
+        return _invalid_command(exc, status_code=422)
+    session.commit()
     return _credentials_response(request, session, engagement_id=engagement_id)
 
 
@@ -844,6 +804,7 @@ def note_create(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
+    """Create a titled host note, preserving Markdown verbatim (no publish state)."""
     if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="host not found")
     clean_title = title.strip() or "Untitled"  # a note always has a title
@@ -861,6 +822,7 @@ def note_edit(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
+    """Replace note content and advance edit time; blank title becomes Untitled."""
     note = queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
     if note is None:
         return JSONResponse({"detail": "note not found"}, status_code=404)
@@ -931,11 +893,18 @@ class _OperationInput:
         clean_command = self.command.strip()
         if not clean_command:
             raise ValueError("Command is required.")
+        if parsed_start is not None and parsed_end is not None and (
+            (parsed_start.utcoffset() is None) != (parsed_end.utcoffset() is None)
+        ):
+            raise ValueError("Use the same timezone convention for started_at and ended_at.")
         if parsed_start is not None and parsed_end is not None and parsed_end < parsed_start:
             raise ValueError("ended_at must not be earlier than started_at.")
         return _OperationForm(
-            started_at=parsed_start,
-            ended_at=parsed_end,
+            # SQLite stores naive datetimes: aware inputs must first become UTC
+            # rather than silently losing their offset. Naive operator-local
+            # times remain naive; mixing the conventions is rejected above.
+            started_at=parsed_start.astimezone(UTC).replace(tzinfo=None) if parsed_start is not None and parsed_start.utcoffset() is not None else parsed_start,
+            ended_at=parsed_end.astimezone(UTC).replace(tzinfo=None) if parsed_end is not None and parsed_end.utcoffset() is not None else parsed_end,
             source=self.source.strip(),
             destination=self.destination.strip(),
             tool=self.tool.strip(),
@@ -996,10 +965,108 @@ def _save_operation_attachment(upload: UploadFile, *, engagement_id: str) -> tup
     try:
         with destination.open("xb") as target:
             shutil.copyfileobj(upload.file, target)
-    except Exception:
-        destination.unlink(missing_ok=True)
+    except Exception as exc:
+        try:
+            destination.unlink(missing_ok=True)
+        except OSError as cleanup:
+            exc.add_note(f"Partial attachment cleanup pending: {cleanup}")
         raise
     return original_name, str(destination.relative_to(DATA_DIR)), upload.content_type
+
+
+class _AttachmentAction(StrEnum):
+    keep = "keep"
+    replacement = "replace"
+    remove = "remove"
+
+
+@dataclass
+class _AttachmentChange:
+    """One guarded file transition; old bytes survive until metadata commits."""
+
+    action: _AttachmentAction
+    upload: UploadFile | None
+    old_path: str | None
+    new_path: str | None = None
+
+    @classmethod
+    def choose(cls, operation: OperationLog, upload: UploadFile | None, remove: bool = False) -> _AttachmentChange:
+        replacing = upload is not None and bool(upload.filename)
+        if replacing and remove:
+            raise ValueError("Cannot replace and remove an attachment in the same request.")
+        return cls(
+            _AttachmentAction.replacement if replacing else _AttachmentAction.remove if remove else _AttachmentAction.keep,
+            upload, operation.attachment_path,
+        )
+
+    def stage(self, operation: OperationLog) -> None:
+        if self.action == _AttachmentAction.replacement:
+            assert self.upload is not None
+            name, self.new_path, media_type = _save_operation_attachment(self.upload, engagement_id=operation.engagement_id)
+            operation.attachment_name = name
+            operation.attachment_path = self.new_path
+            operation.attachment_media_type = media_type
+        elif self.action == _AttachmentAction.remove:
+            operation.attachment_name = None
+            operation.attachment_path = None
+            operation.attachment_media_type = None
+
+    def compensate(self, engagement_id: str, failure: Exception) -> None:
+        try:
+            _remove_operation_attachment(self.new_path, engagement_id=engagement_id)
+        except OSError as cleanup:
+            failure.add_note(f"New attachment cleanup pending after rollback: {cleanup}")
+            logging.getLogger(__name__).warning("Rolled-back attachment cleanup pending: %s", cleanup)
+
+    def finish(self, engagement_id: str) -> bool:
+        if self.action == _AttachmentAction.keep:
+            return False
+        try:
+            _remove_operation_attachment(self.old_path, engagement_id=engagement_id)
+        except OSError:
+            logging.getLogger(__name__).warning("Committed operation attachment cleanup pending: %s", self.old_path, exc_info=True)
+            return True
+        return False
+
+
+def _commit_operation(
+    session: Session, operation: OperationLog, change: _AttachmentChange,
+    values: _OperationForm | None,
+) -> bool:
+    """Commit edit/create/delete, compensate only uncommitted new files.
+
+    Returns whether obsolete-file cleanup remains after a successful commit.
+    No exception from that cleanup may imply that the database mutation failed.
+    """
+    engagement_id = operation.engagement_id
+    try:
+        if values is None:
+            session.delete(operation)
+        else:
+            _apply_operation_form(operation, values)
+            operation.updated_at = datetime.now(UTC)
+            change.stage(operation)
+            session.add(operation)
+        session.commit()
+    except Exception as exc:
+        try:
+            session.rollback()
+        except Exception as rollback:
+            exc.add_note(f"Operation rollback failed: {rollback}")
+        change.compensate(engagement_id, exc)
+        raise
+    return change.finish(engagement_id)
+
+
+def _operation_committed_response(engagement_id: str, cleanup_pending: bool, *, deleted: bool = False) -> Response:
+    destination = f"/e/{engagement_id}/operations"
+    if cleanup_pending:
+        return JSONResponse({
+            "ok": True, "committed": True, "cleanup_pending": True,
+            "detail": f"Operation {'deleted' if deleted else 'saved'}; obsolete attachment cleanup could not finish.",
+            "redirect_to": destination,
+        })
+    return RedirectResponse(destination, status_code=303)
 
 
 @scoped.get("/operations", response_class=HTMLResponse)
@@ -1043,24 +1110,12 @@ def create_operation(
     except ValueError as exc:
         return _operation_bad_request(str(exc))
     operation = OperationLog(command=values.command, engagement_id=engagement_id)
-    _apply_operation_form(operation, values)
-    new_path: str | None = None
+    change = _AttachmentChange.choose(operation, attachment)
     try:
-        if attachment is not None and attachment.filename:
-            name, new_path, media_type = _save_operation_attachment(attachment, engagement_id=engagement_id)
-            operation.attachment_name = name
-            operation.attachment_path = new_path
-            operation.attachment_media_type = media_type
-        session.add(operation)
-        session.commit()
+        cleanup_pending = _commit_operation(session, operation, change, values)
     except ValueError as exc:
-        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         return _operation_bad_request(str(exc))
-    except Exception:
-        session.rollback()
-        _remove_operation_attachment(new_path, engagement_id=engagement_id)
-        raise
-    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
+    return _operation_committed_response(engagement_id, cleanup_pending)
 
 
 @scoped.post("/operations/{operation_id}/edit")
@@ -1075,45 +1130,16 @@ def edit_operation(
     operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
-    has_replacement = attachment is not None and bool(attachment.filename)
-    if remove_attachment and has_replacement:
-        return _operation_bad_request(
-            "Cannot replace and remove an attachment in the same request."
-        )
     try:
+        change = _AttachmentChange.choose(operation, attachment, remove_attachment)
         values = form.normalize()
     except ValueError as exc:
         return _operation_bad_request(str(exc))
-
-    old_path = operation.attachment_path
-    new_path: str | None = None
-    _apply_operation_form(operation, values)
-    operation.updated_at = datetime.now(UTC)
     try:
-        if has_replacement:
-            assert attachment is not None
-            name, new_path, media_type = _save_operation_attachment(attachment, engagement_id=engagement_id)
-            operation.attachment_name = name
-            operation.attachment_path = new_path
-            operation.attachment_media_type = media_type
-        elif remove_attachment:
-            operation.attachment_name = None
-            operation.attachment_path = None
-            operation.attachment_media_type = None
-        session.add(operation)
-        session.commit()
+        cleanup_pending = _commit_operation(session, operation, change, values)
     except ValueError as exc:
-        session.rollback()
-        _remove_operation_attachment(new_path, engagement_id=engagement_id)
         return _operation_bad_request(str(exc))
-    except Exception:
-        session.rollback()
-        _remove_operation_attachment(new_path, engagement_id=engagement_id)
-        raise
-
-    if has_replacement or remove_attachment:
-        _remove_operation_attachment(old_path, engagement_id=engagement_id)
-    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
+    return _operation_committed_response(engagement_id, cleanup_pending)
 
 
 @scoped.post("/operations/{operation_id}/delete")
@@ -1123,11 +1149,9 @@ def delete_operation(
     operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
-    old_path = operation.attachment_path
-    session.delete(operation)
-    session.commit()
-    _remove_operation_attachment(old_path, engagement_id=engagement_id)
-    return RedirectResponse(f"/e/{engagement_id}" + "/operations", status_code=303)
+    change = _AttachmentChange.choose(operation, None, remove=True)
+    cleanup_pending = _commit_operation(session, operation, change, None)
+    return _operation_committed_response(engagement_id, cleanup_pending, deleted=True)
 
 
 @scoped.get("/operations/{operation_id}/attachment")

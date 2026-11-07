@@ -1,4 +1,8 @@
-"""Parse nmap XML, retaining execution time and conservative coverage evidence."""
+"""Parse nmap XML into unique host identities and conservative scan evidence.
+
+Duplicate host records retain explicit ports (last occurrence wins per identity).
+Conflicting coverage summaries are discarded rather than implying port closure.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,16 @@ from datetime import UTC, datetime
 from typing import Any
 from xml.etree import ElementTree as ET
 
+from penrecon.inventory import normalize_hostname, normalize_ip, normalize_protocol
+from penrecon.models import ObsState
 from penrecon.parsers import HostResult, PortResult, ScanResult
+
+
+def _state(value: str) -> str:
+    try:
+        return ObsState(value).value
+    except ValueError as exc:
+        raise ValueError(f"Unknown nmap port state {value!r}") from exc
 
 
 def _port_set(value: str) -> set[int] | None:
@@ -57,7 +70,7 @@ def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> di
     scanned: dict[str, set[int]] = {}
     invalid: set[str] = set()
     for info in root.findall("scaninfo"):
-        proto = info.get("protocol", "")
+        proto = normalize_protocol(info.get("protocol", "")) if info.get("protocol", "").strip() else ""
         selected = _port_set(info.get("services", ""))
         count = _count(info.get("numservices"))
         if not proto or selected is None or (count is not None and len(selected) != count):
@@ -72,14 +85,14 @@ def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> di
     conflicted: set[tuple[str, int]] = set()
     outstanding: list[tuple[str, int]] = []
     for group in host.findall("ports/extraports"):
-        state = group.get("state", "")
+        state = _state(group.get("state", ""))
         total = _count(group.get("count"))
         if total is None:
             outstanding.append(("unknown", 1))
             continue
         named: set[tuple[str, int]] = set()
         for reason in group.findall("extrareasons"):
-            proto = reason.get("proto", "")
+            proto = normalize_protocol(reason.get("proto", "")) if reason.get("proto", "").strip() else ""
             values = _port_set(reason.get("ports", ""))
             count = _count(reason.get("count"))
             if not proto or values is None or count != len(values):
@@ -126,7 +139,7 @@ def parse(data: bytes) -> ScanResult:
         raise ValueError("Invalid nmap XML") from exc
     if root.tag != "nmaprun":
         raise ValueError("Expected nmap XML exported with -oX")
-    hosts: ScanResult = []
+    hosts: dict[str, HostResult] = {}
     finished = root.find("runstats/finished")
     for host in root.findall("host"):
         address = next(
@@ -135,6 +148,7 @@ def parse(data: bytes) -> ScanResult:
         )
         if address is None:
             continue
+        address = normalize_ip(address)
         ports: list[PortResult] = []
         for node in host.findall("ports/port"):
             number = _count(node.get("portid"))
@@ -149,18 +163,34 @@ def parse(data: bytes) -> ScanResult:
                 extra["scripts"] = {script.get("id", ""): script.get("output", "") for script in scripts}
             ports.append(PortResult(
                 port=number,
-                proto=proto,
-                state=state.get("state", ""),
+                proto=normalize_protocol(proto),
+                state=_state(state.get("state", "")),
                 service_name=service.get("name") or None if service is not None else None,
                 product=service.get("product") or None if service is not None else None,
                 version=service.get("version") or None if service is not None else None,
                 extra=extra,
             ))
-        hosts.append(HostResult(
+        ports = list({(port.port, port.proto): port for port in ports}.values())
+        names = list(dict.fromkeys(
+            normalize_hostname(node.get("name", ""))
+            for node in host.findall("hostnames/hostname") if node.get("name")
+        ))
+        result = HostResult(
             ip=address,
-            hostnames=[node.get("name", "") for node in host.findall("hostnames/hostname") if node.get("name")],
+            hostnames=names,
             ports=ports,
             scanned_at=_timestamp(host.get("starttime"), root.get("start"), host.get("endtime"), finished.get("time") if finished is not None else None),
             coverage=_coverage(root, host, ports),
-        ))
-    return hosts
+        )
+        previous = hosts.get(address)
+        if previous is not None:
+            result.hostnames = list(dict.fromkeys(previous.hostnames + names))
+            result.ports = list({
+                (port.port, port.proto): port for port in previous.ports + ports
+            }.values())
+            times = [value for value in (previous.scanned_at, result.scanned_at) if value is not None]
+            result.scanned_at = max(times) if times else None
+            if previous.coverage != result.coverage:
+                result.coverage = {}
+        hosts[address] = result
+    return list(hosts.values())

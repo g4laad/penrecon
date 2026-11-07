@@ -1,23 +1,16 @@
-import { useRef, useState, type ComponentPropsWithoutRef } from "react";
+import { useRef, type ComponentPropsWithoutRef } from "react";
 import { Copy } from "lucide-react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
+import { useClipboard } from "./use-clipboard";
 import "./markdown.css";
 
-function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
+function MarkdownCodeBlock({ children, node }: ComponentPropsWithoutRef<"pre"> & ExtraProps) {
   const codeRef = useRef<HTMLPreElement>(null);
-  const [status, setStatus] = useState("");
-
-  async function copyCode() {
-    setStatus("");
-    try {
-      await navigator.clipboard.writeText(codeRef.current?.textContent ?? "");
-      setStatus("Code copied.");
-    } catch {
-      setStatus("Clipboard unavailable. Select the code to copy it.");
-    }
-  }
+  const codeNode = node?.children[0];
+  const codeText = codeNode?.type === "element" ? codeNode.children[0] : undefined;
+  const clipboard = useClipboard(codeText?.type === "text" ? codeText.value : children);
 
   return (
     <div className="markdown-code-block">
@@ -27,8 +20,9 @@ function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
           type="button"
           variant="ghost"
           size="xs"
-          onClick={copyCode}
+          onClick={() => { void clipboard.copy(codeRef.current?.textContent ?? ""); }}
           aria-label="Copy code"
+          aria-busy={clipboard.status === "pending"}
         >
           <Copy aria-hidden="true" />
           Copy
@@ -38,7 +32,7 @@ function MarkdownCodeBlock({ children }: ComponentPropsWithoutRef<"pre">) {
         {children}
       </pre>
       <span className="markdown-copy-status" role="status">
-        {status}
+        {clipboard.status === "pending" ? "Copying code…" : clipboard.status === "copied" ? "Code copied." : clipboard.status === "error" ? "Clipboard unavailable. Select the code to copy it." : ""}
       </span>
     </div>
   );

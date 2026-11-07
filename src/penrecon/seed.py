@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -120,14 +120,52 @@ def _seed_host_timeline(
             ))
 
 
+@dataclass(frozen=True)
+class SeededEngagement:
+    """Committed result of creating one new synthetic workspace."""
+
+    engagement_id: str
+    name: str
+    counts: dict[str, int]
+
+
+def seed_mock_engagement(
+    session: Session, count: int = 100, *, name: str,
+) -> SeededEngagement:
+    """Create and seed a new engagement, committing it only with its contents.
+
+    This is the CLI's per-engagement command: a failed attempt rolls back the
+    new engagement as well as its rows. ``seed_database`` compensates retained
+    files on failure; previously completed engagements are never undone.
+    """
+    if not 100 <= count <= 131070:
+        raise ValueError("count must be between 100 and 131070")
+    engagement = Engagement(
+        name=name, description="Synthetic recon workspace for local testing only.",
+    )
+    session.add(engagement)
+    try:
+        session.flush()
+        engagement_id, engagement_name = engagement.id, engagement.name
+        counts = seed_database(session, count, engagement_id=engagement_id)
+    except Exception as failure:
+        try:
+            session.rollback()
+        except Exception as rollback:
+            failure.add_note(f"Seed engagement rollback failed: {rollback}")
+        raise
+    return SeededEngagement(engagement_id, engagement_name, counts)
+
+
 def seed_database(
     session: Session, count: int = 100, *, engagement_id: str
 ) -> dict[str, int]:
-    """Create at least ``count`` rows per domain table in an empty engagement.
+    """Seed only an existing, empty engagement after local DB initialization.
 
-    All addresses are in the benchmark-only 198.18.0.0/15 range and names use
-    .test. No network requests or commands are executed. The caller initializes
-    the database first. Rows commit together; failed writes remove generated files.
+    Count, engagement existence, and emptiness are checked before creating files
+    or rows. All addresses are in the benchmark-only 198.18.0.0/15 range and names
+    use .test. No network requests or commands are executed. Rows commit together;
+    failed writes roll back rows and remove only files created by this attempt.
     """
     if not 100 <= count <= 131070:
         raise ValueError("count must be between 100 and 131070")
@@ -251,17 +289,25 @@ def seed_database(
                     created_at=observed, updated_at=observed,
                 ),
             ])
+        session.flush()
+        counts = {
+            table.name: session.execute(
+                select(func.count()).select_from(table)
+                .where(table.c.engagement_id == engagement_id)
+            ).scalar_one()
+            for table in tables
+        }
         session.commit()
-    except Exception:
-        session.rollback()
+    except Exception as failure:
+        try:
+            session.rollback()
+        except Exception as rollback:
+            failure.add_note(f"Seed rollback failed: {rollback}")
         for path in created_files:
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as cleanup:
+                failure.add_note(f"Seed file cleanup pending at {path}: {cleanup}")
         raise
 
-    return {
-        table.name: session.execute(
-            select(func.count()).select_from(table)
-            .where(table.c.engagement_id == engagement_id)
-        ).scalar_one()
-        for table in tables
-    }
+    return counts

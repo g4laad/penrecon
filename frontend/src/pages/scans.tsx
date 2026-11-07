@@ -1,4 +1,6 @@
 import { ScopedLink } from "../common";
+import { useState } from "react";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,10 +19,78 @@ import {
   MutationForm,
   PageHeader,
   Section,
-  SelectField,
 } from "../common";
 import type { PageData } from "../types";
 
+type ScanUploadDraft = {
+  tool: string;
+  file: { kind: "empty" } | { kind: "selected"; file: File };
+};
+
+function initialUploadDraft(tools: string[]): ScanUploadDraft {
+  return { tool: tools.includes("nmap") ? "nmap" : tools[0] ?? "", file: { kind: "empty" } };
+}
+
+function ScanUpload({ tools }: { tools: string[] }) {
+  const [draft, setDraft] = useState(() => initialUploadDraft(tools));
+  const toolAvailable = tools.includes(draft.tool);
+  return (
+    <div onReset={() => setDraft(initialUploadDraft(tools))}>
+      <MutationForm
+        action="/scans"
+        className="flex flex-wrap items-end gap-3"
+        canSubmit={draft.file.kind === "selected" && toolAvailable}
+      >
+        <Field label="Tool format">
+          <NativeSelect
+            name="tool"
+            value={toolAvailable ? draft.tool : ""}
+            required
+            onChange={(event) => setDraft((current) => ({ ...current, tool: event.target.value }))}
+          >
+            {!toolAvailable && <NativeSelectOption value="">Select a tool format</NativeSelectOption>}
+            {tools.map((tool) => <NativeSelectOption key={tool} value={tool}>{tool}</NativeSelectOption>)}
+          </NativeSelect>
+        </Field>
+        <Field label="Scan result file" name="file">
+          <Input
+            type="file"
+            name="file"
+            required
+            className="max-w-md"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              setDraft((current) => ({ ...current, file: file ? { kind: "selected", file } : { kind: "empty" } }));
+            }}
+          />
+        </Field>
+        <Button type="submit">Upload &amp; ingest</Button>
+        <p className="muted w-full text-xs" role="status">
+          {!tools.length ? "No scan tool formats are available."
+            : draft.file.kind === "selected" ? `${draft.file.file.name} selected.` : "Select a scan result file to import."}
+        </p>
+      </MutationForm>
+    </div>
+  );
+}
+
+type ScanDiffResult = NonNullable<PageData["result"]>;
+type ScanDiffView =
+  | { kind: "unavailable"; reason: string }
+  | { kind: "selection" }
+  | { kind: "no-result" }
+  | { kind: "empty" | "differences"; result: ScanDiffResult };
+
+function scanDiffView(data: PageData, a: string, b: string): ScanDiffView {
+  const scans = data.scans ?? [];
+  if (!scans.length) return { kind: "unavailable", reason: "Import scans before comparing their observations." };
+  if (!scans.some((scan) => String(scan.id) === a) || !scans.some((scan) => String(scan.id) === b)) {
+    return { kind: "unavailable", reason: "A selected scan is unavailable. Select two available scans to compare." };
+  }
+  if (!data.result) return { kind: "no-result" };
+  if (String(data.result.scan_a.id) !== a || String(data.result.scan_b.id) !== b) return { kind: "selection" };
+  return { kind: data.result.entries.length ? "differences" : "empty", result: data.result };
+}
 export function ScansPage({ data }: { data: PageData }) {
   const scans = data.scans ?? [];
   const tools = data.tools ?? [];
@@ -31,21 +101,7 @@ export function ScansPage({ data }: { data: PageData }) {
         description="Imports preserve notes, annotations, and credentials."
       />
       <Section title="Import scan" id="scan-import">
-        <MutationForm
-          action="/scans"
-          className="flex flex-wrap items-end gap-3"
-        >
-          <SelectField
-            label="Tool format"
-            name="tool"
-            defaultValue={tools.includes("nmap") ? "nmap" : tools[0]}
-            options={tools}
-          />
-          <Field label="Scan result file" name="file">
-            <Input type="file" name="file" required className="max-w-md" />
-          </Field>
-          <Button type="submit">Upload &amp; ingest</Button>
-        </MutationForm>
+        <ScanUpload tools={tools} />
       </Section>
       <Section title={`Import history (${scans.length})`} id="scan-history">
         {scans.length ? (
@@ -94,12 +150,17 @@ export function ScansPage({ data }: { data: PageData }) {
 }
 
 export function DiffPage({ data }: { data: PageData }) {
+  return <ScanComparison key={`${data.a ?? ""}:${data.b ?? ""}`} data={data} />;
+}
+
+function ScanComparison({ data }: { data: PageData }) {
   const scans = data.scans ?? [];
-  const result = data.result;
-  const options = scans.map((scan) => ({
-    value: String(scan.id),
-    label: `#${scan.id} ${scan.filename} (${scan.imported_at.replace("T", " ").slice(0, 16)})`,
+  const [selection, setSelection] = useState(() => ({
+    a: String(data.a ?? scans[0]?.id ?? ""),
+    b: String(data.b ?? scans[0]?.id ?? ""),
   }));
+  const view = scanDiffView(data, selection.a, selection.b);
+  const result = view.kind === "empty" || view.kind === "differences" ? view.result : undefined;
   return (
     <div className="space-y-3">
       <PageHeader
@@ -108,18 +169,26 @@ export function DiffPage({ data }: { data: PageData }) {
       />
       {scans.length ? (
         <Filters>
-          <SelectField
-            label="Scan A · before"
-            name="a"
-            defaultValue={data.a == null ? undefined : String(data.a)}
-            options={options}
-          />
-          <SelectField
-            label="Scan B · after"
-            name="b"
-            defaultValue={data.b == null ? undefined : String(data.b)}
-            options={options}
-          />
+          {(["a", "b"] as const).map((side) => {
+            const available = scans.some((scan) => String(scan.id) === selection[side]);
+            return (
+              <Field key={side} label={side === "a" ? "Scan A · before" : "Scan B · after"}>
+                <NativeSelect
+                  name={side}
+                  value={available ? selection[side] : ""}
+                  required
+                  onChange={(event) => setSelection((current) => ({ ...current, [side]: event.target.value }))}
+                >
+                  {!available && <NativeSelectOption value="">Select an available scan</NativeSelectOption>}
+                  {scans.map((scan) => (
+                    <NativeSelectOption key={scan.id} value={String(scan.id)}>
+                      {`#${scan.id} ${scan.filename} (${scan.imported_at.replace("T", " ").slice(0, 16)})`}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            );
+          })}
           <Button type="submit">Compare</Button>
         </Filters>
       ) : (
@@ -130,6 +199,13 @@ export function DiffPage({ data }: { data: PageData }) {
           </ScopedLink>
           .
         </Empty>
+      )}
+      {scans.length > 0 && !result && (
+        <p className="muted text-sm" role="status">
+          {view.kind === "unavailable" ? view.reason
+            : view.kind === "selection" ? "Selection changed. Compare to see differences for this pair."
+              : "Select Compare to see differences. The same scan or either comparison order is allowed."}
+        </p>
       )}
       {result ? (
         <Section
@@ -144,7 +220,7 @@ export function DiffPage({ data }: { data: PageData }) {
           <p className="muted mb-2 text-xs break-words">
             {result.scan_a.filename} → {result.scan_b.filename}
           </p>
-          {result.entries.length ? (
+          {view.kind === "differences" ? (
             <div className="overflow-x-auto rounded-lg border bg-card">
               <Table className="data-table">
                 <TableHeader>

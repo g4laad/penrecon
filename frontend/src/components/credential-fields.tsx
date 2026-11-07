@@ -1,9 +1,21 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { CredentialSecretInput } from "./credential-secret-input";
 import { NativeSelect } from "./ui/native-select";
 import { Textarea } from "./ui/textarea";
 import { Field } from "../common";
 import type { Credential } from "../types";
+
+type CredentialDraft = { kind: string; secret: string };
+type CredentialDraftEvent =
+  | { type: "kind-selected"; kind: string }
+  | { type: "secret-edited"; secret: string };
+
+function transitionCredentialDraft(state: CredentialDraft, event: CredentialDraftEvent): CredentialDraft {
+  switch (event.type) {
+    case "kind-selected": return { ...state, kind: event.kind };
+    case "secret-edited": return { ...state, secret: event.secret };
+  }
+}
 
 export function CredentialFields({
   credential,
@@ -12,12 +24,14 @@ export function CredentialFields({
   credential?: Credential;
   kinds: string[];
 }) {
-  const [kind, setKind] = useState(credential?.kind ?? "password");
-  const [secret, setSecret] = useState(credential?.secret ?? "");
+  const [{ kind, secret }, dispatch] = useReducer(transitionCredentialDraft, {
+    kind: credential?.kind ?? "password",
+    secret: credential?.secret ?? "",
+  });
   return (
     <div className="form-grid">
       <Field label="Kind">
-        <NativeSelect name="kind" value={kind} onChange={(event) => setKind(event.target.value)}>
+        <NativeSelect name="kind" value={kind} onChange={(event) => dispatch({ type: "kind-selected", kind: event.target.value })}>
           {kinds.map((value) => <option key={value}>{value}</option>)}
         </NativeSelect>
       </Field>
@@ -28,7 +42,7 @@ export function CredentialFields({
         placeholder="admin"
       />
       <div className="col-span-full">
-        <CredentialSecretInput key={kind} kind={kind} value={secret} onChange={setSecret} />
+        <CredentialSecretInput kind={kind} value={secret} onChange={(value) => dispatch({ type: "secret-edited", secret: value })} />
       </div>
       <div className="col-span-full">
         <Field label="Notes" name="notes">

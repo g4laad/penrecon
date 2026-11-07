@@ -9,18 +9,43 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { CredentialFields } from "@/components/credential-fields";
 import {
   Empty,
+  Field,
   Modal,
   MutationForm,
   PageHeader,
-  SelectField,
 } from "../common";
 import type { PageData } from "../types";
 import { CredentialCreateForm } from "./credential-create";
+import { credentialDraftValidity, resolveCredentialScope, resolveCredentialSelection } from "./credential-workflow";
 
 type Credential = NonNullable<PageData["credentials"]>[number];
 type Host = NonNullable<PageData["hosts"]>[number];
 
+type AssociationPicker =
+  | { status: "available"; options: { value: string; label: string }[] }
+  | { status: "blocked"; message: string };
 
+function LinkAssociationForm({ credentialId, target, picker }: {
+  credentialId: number;
+  target: "host" | "service";
+  picker: AssociationPicker;
+}) {
+  const [selected, setSelected] = useState("");
+  if (picker.status === "blocked") return <p className="muted text-xs">{picker.message}</p>;
+  const resolution = !selected ? "unselected" : picker.options.some((option) => option.value === selected) ? "selected" : "unavailable";
+  const label = target === "host" ? "Link host" : "Link service";
+  return <MutationForm action={`/credentials/${credentialId}/link/${target}`} className="flex flex-wrap items-end gap-2" canSubmit={resolution === "selected"}>
+    <Field label={label}>
+      <NativeSelect name={`${target}_id`} value={selected} required onChange={(event) => setSelected(event.target.value)}>
+        <option value="">Select a {target}…</option>
+        {resolution === "unavailable" && <option value={selected} disabled>Selected {target} is no longer available</option>}
+        {picker.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </NativeSelect>
+    </Field>
+    <Button type="submit" variant="outline" size="sm" disabled={resolution !== "selected"}>{label}</Button>
+    {resolution === "unavailable" && <p role="status" className="muted w-full text-xs">Choose another {target} before linking.</p>}
+  </MutationForm>;
+}
 function CredentialLinks({
   credential,
   hosts,
@@ -31,6 +56,18 @@ function CredentialLinks({
   const availableHosts = hosts.filter(
     (host) => !credential.hosts.some((link) => link.host_id === host.id),
   );
+  const pickableServices = credential.pickable_services.filter((service) =>
+    credential.hosts.some((host) => host.host_id === service.host_id) &&
+    !credential.services.some((linked) => linked.service_id === service.service_id),
+  );
+  const hostPicker: AssociationPicker = availableHosts.length
+    ? { status: "available", options: availableHosts.map((host) => ({ value: String(host.id), label: host.ip })) }
+    : { status: "blocked", message: hosts.length ? "All hosts are already linked." : "Add a host before linking it to this credential." };
+  const servicePicker: AssociationPicker = !credential.hosts.length
+    ? { status: "blocked", message: "Link a host to pick its services." }
+    : pickableServices.length
+      ? { status: "available", options: pickableServices.map((service) => ({ value: String(service.service_id), label: `${service.ip}:${service.port}/${service.proto}${service.name ? ` ${service.name}` : ""}` })) }
+      : { status: "blocked", message: "No additional services available on linked hosts." };
   return (
     <div className="grid items-start gap-3 md:grid-cols-2">
       <div className="stack gap-2">
@@ -47,7 +84,7 @@ function CredentialLinks({
               className="mono min-w-0 break-all text-[13px] underline underline-offset-4">{host.ip}</ScopedLink>
               <MutationForm
                 action={`/credentials/${credential.id}/unlink/host/${host.host_id}`}
-                confirm={`Unlink host ${host.ip} from this credential?`}
+                confirm={`Unlink host ${host.ip} and its service links from this credential?`}
               >
                 <Button
                   type="submit"
@@ -65,26 +102,7 @@ function CredentialLinks({
             <span className="muted text-xs">No linked hosts.</span>
           )}
         </div>
-        {availableHosts.length > 0 && (
-          <MutationForm
-            action={`/credentials/${credential.id}/link/host`}
-            className="flex flex-wrap items-end gap-2"
-          >
-            <SelectField
-              label="Link host"
-              name="host_id"
-              empty="Select a host…"
-              required
-              options={availableHosts.map((host) => ({
-                value: String(host.id),
-                label: host.ip,
-              }))}
-            />
-            <Button type="submit" variant="outline" size="sm">
-              Link host
-            </Button>
-          </MutationForm>
-        )}
+        <LinkAssociationForm credentialId={credential.id} target="host" picker={hostPicker} />
       </div>
       <div className="stack gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide">
@@ -119,35 +137,25 @@ function CredentialLinks({
             <span className="muted text-xs">No linked services.</span>
           )}
         </div>
-        {!credential.hosts.length ? (
-          <p className="muted text-xs">Link a host to pick its services.</p>
-        ) : credential.pickable_services.length > 0 ? (
-          <MutationForm
-            action={`/credentials/${credential.id}/link/service`}
-            className="flex flex-wrap items-end gap-2"
-          >
-            <SelectField
-              label="Link service"
-              name="service_id"
-              empty="Select a service…"
-              required
-              options={credential.pickable_services.map((service) => ({
-                value: String(service.service_id),
-                label: `${service.ip}:${service.port}/${service.proto}${service.name ? ` ${service.name}` : ""}`,
-              }))}
-            />
-            <Button type="submit" variant="outline" size="sm">
-              Link service
-            </Button>
-          </MutationForm>
-        ) : (
-          <p className="muted text-xs">
-            No additional services available on linked hosts.
-          </p>
-        )}
+        <LinkAssociationForm credentialId={credential.id} target="service" picker={servicePicker} />
       </div>
     </div>
   );
+}
+function CredentialEditForm({ credential, kinds }: { credential: Credential; kinds: string[] }) {
+  const [draft, setDraft] = useState({ username: credential.username, secret: credential.secret });
+  const validity = credentialDraftValidity(draft.username, draft.secret);
+  return <MutationForm action={`/credentials/${credential.id}/edit`} canSubmit={validity === "valid"}>
+    <div onChange={(event) => {
+      const field = event.target;
+      if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && (field.name === "username" || field.name === "secret")) {
+        setDraft((current) => ({ ...current, [field.name]: field.value }));
+      }
+    }}>
+      <CredentialFields credential={credential} kinds={kinds} />
+    </div>
+    <div className="actions mt-4 justify-end"><Button type="submit" disabled={validity !== "valid"}>Save credential</Button></div>
+  </MutationForm>;
 }
 
 function CredentialDetail({
@@ -181,12 +189,7 @@ function CredentialDetail({
               </Button>
             }
           >
-            <MutationForm action={`/credentials/${credential.id}/edit`}>
-              <CredentialFields credential={credential} kinds={kinds} />
-              <div className="actions mt-4 justify-end">
-                <Button type="submit">Save credential</Button>
-              </div>
-            </MutationForm>
+            <CredentialEditForm credential={credential} kinds={kinds} />
           </Modal>
         </div>
       </header>
@@ -254,6 +257,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
   const query = currentUrl.searchParams.get("filter") ?? "";
   const kind = currentUrl.searchParams.get("kind") ?? "";
   const scope = currentUrl.searchParams.get("scope") ?? "";
+  const resolvedScope = resolveCredentialScope(scope);
   const all = data.credentials ?? [];
   const kinds = data.kinds ?? [];
   const hosts = data.hosts ?? [];
@@ -275,14 +279,12 @@ export function CredentialsPage({ data }: { data: PageData }) {
       .toLowerCase();
     return (
       (!kind || credential.kind === kind) &&
-      (!scope || (scope === "linked" ? linked : !linked)) &&
+      (resolvedScope === "all" || (resolvedScope === "linked" && linked) || (resolvedScope === "unlinked" && !linked)) &&
       text.includes(query.toLowerCase())
     );
   });
-  const selected =
-    credentials.find(
-      (credential) => currentUrl.hash === `#credential-${credential.id}`,
-    ) ?? credentials[0];
+  const selection = resolveCredentialSelection(currentUrl.hash, all, credentials);
+  const selected = selection.status === "selected" ? selection.credential : undefined;
   function filter(values: Record<string, string>) {
     const next = new URL(location.href);
     for (const [key, value] of Object.entries(values)) {
@@ -330,6 +332,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
           onChange={(event) => filter({ kind: event.target.value })}
         >
           <option value="">All kinds</option>
+          {kind && !kinds.includes(kind) && <option value={kind}>{kind}</option>}
           {kinds.map((value) => (
             <option key={value} value={value}>
               {value}
@@ -344,12 +347,17 @@ export function CredentialsPage({ data }: { data: PageData }) {
           <option value="">All associations</option>
           <option value="linked">Linked</option>
           <option value="unlinked">Unlinked</option>
+          {resolvedScope === "invalid" && <option value={scope} disabled>Unknown scope: {scope}</option>}
         </NativeSelect>
         <span className="muted text-xs" role="status">
           {credentials.length} of {all.length} credentials
         </span>
       </div>
-      {selected ? (
+      {resolvedScope === "invalid" && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+        <p>Unknown association filter. Choose a scope or clear this filter.</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => filter({ scope: "" })}>Clear scope filter</Button>
+      </div>}
+      {credentials.length > 0 || selection.status === "unavailable" ? (
         <div className="credential-workbench rounded-lg border bg-card">
           <section className="credential-list" aria-label="Credential list">
             <h2 className="credential-label border-b bg-muted/40 px-2.5 py-2 text-xs">
@@ -359,7 +367,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
               <ScopedLink key={credential.id}
               href={`?${currentUrl.searchParams}#credential-${credential.id}`}
               aria-current={
-                credential.id === selected.id ? "true" : undefined
+                credential.id === selected?.id ? "true" : undefined
               }
               className="credential-choice"
               onClick={(event) => {
@@ -401,12 +409,18 @@ export function CredentialsPage({ data }: { data: PageData }) {
               )}</ScopedLink>
             ))}
           </section>
-          <CredentialDetail
+          {selected ? <CredentialDetail
             key={selected.id}
             credential={selected}
             kinds={kinds}
             hosts={hosts}
-          />
+          /> : <Empty>
+            <p>{selection.status === "unavailable" && selection.reason === "filtered" ? "This credential is hidden by the current filters." : "The requested credential is unavailable. It may have been deleted."}</p>
+            <div className="actions mt-3 justify-center">
+              <Button type="button" variant="outline" onClick={() => filter({})}>Clear selection</Button>
+              {selection.status === "unavailable" && selection.reason === "filtered" && <Button type="button" variant="outline" onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>}
+            </div>
+          </Empty>}
         </div>
       ) : (
         <Empty>

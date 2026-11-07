@@ -9,11 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from penrecon.db import DATA_DIR
+from penrecon.inventory import same_ip
 from penrecon.models import Host, HostScanEvidence, ManualServiceEvent, Observation, Scan
 from penrecon.parsers import HostResult, get_parser
 
@@ -119,6 +120,19 @@ def _evidence(session: Session, host_id: int, engagement_id: str) -> list[_Evide
             HostScanEvidence.engagement_id == engagement_id, HostScanEvidence.host_id == host_id,
         )).all()
     }
+    # Canonical collisions are separate user records. Do not replay a modern
+    # scan onto a sibling when its durable evidence already names the owner.
+    attributed_elsewhere = {
+        scan_id for scan_id, ip in session.exec(
+            select(HostScanEvidence.scan_id, Host.ip)
+            .join(Host, Host.id == HostScanEvidence.host_id)  # type: ignore[arg-type]
+            .where(
+                HostScanEvidence.engagement_id == engagement_id,
+                Host.engagement_id == engagement_id, col(Host.id) != host_id,
+            )
+        ).all()
+        if same_ip(ip, host.ip)
+    }
     observations: dict[int, list[Observation]] = {}
     for row in session.exec(select(Observation).where(
         Observation.engagement_id == engagement_id, Observation.host_id == host_id,
@@ -134,8 +148,8 @@ def _evidence(session: Session, host_id: int, engagement_id: str) -> list[_Evide
         if stored is not None:
             scanned_at, coverage, ports = stored.scanned_at, stored.coverage, stored.ports
         else:
-            raw = _raw_hosts(session, scan)
-            recovered = next((row for row in raw or [] if row.ip == host.ip), None)
+            raw = None if scan.id in attributed_elsewhere else _raw_hosts(session, scan)
+            recovered = next((row for row in raw or [] if same_ip(row.ip, host.ip)), None)
             if recovered is not None:
                 scanned_at, coverage = recovered.scanned_at, recovered.coverage
                 ports = [vars(port).copy() for port in recovered.ports]
@@ -167,6 +181,41 @@ def _aggregate_state(coverage: dict[str, Any], port: int, proto: str) -> str | N
     return next(iter(states)) if len(states) == 1 else None
 
 
+@dataclass(frozen=True)
+class _PortTransition:
+    evidence: Literal["missing", "covered", "explicit"]
+    after: State | None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+def _reduce_port_evidence(
+    before: State | None, explicit: dict[str, Any] | None,
+    coverage: dict[str, Any], port: int, proto: str,
+) -> _PortTransition:
+    """Resolve one replay step without inventing observations from omission.
+
+    Explicit evidence replaces all observed details. Unambiguous coverage can
+    change only a known port's state, retaining its identity details. Missing
+    evidence leaves both the baseline and its latest observation untouched.
+    """
+    if explicit is not None:
+        return _PortTransition(
+            "explicit",
+            State(
+                str(explicit["state"]), explicit.get("service_name"),
+                explicit.get("product"), explicit.get("version"),
+            ),
+            explicit.get("extra", {}),
+        )
+    covered_state = _aggregate_state(coverage, port, proto)
+    if before is not None and covered_state is not None:
+        return _PortTransition(
+            "covered",
+            State(covered_state, before.service_name, before.product, before.version),
+        )
+    return _PortTransition("missing", before)
+
+
 def host_history(
     session: Session, host_id: int, *, engagement_id: str,
 ) -> tuple[list[TimelineEntry], dict[tuple[int, str], Observation]]:
@@ -183,27 +232,26 @@ def host_history(
         scan = evidence.scan
         assert scan.id is not None
         explicit = {(int(row["port"]), str(row["proto"])): row for row in evidence.ports}
-        reported = dict(explicit)
-        for port, proto in known.keys() - explicit.keys():
-            state = _aggregate_state(evidence.coverage, port, proto)
-            if state is not None:
-                previous = known[(port, proto)]
-                reported[(port, proto)] = {
-                    "port": port, "proto": proto, "state": state,
-                    "service_name": previous.service_name,
-                    "product": previous.product, "version": previous.version,
-                }
+        # Reduce only already-known identities and explicit reports. Coverage is
+        # never an instruction to manufacture every port in its ranges.
         entry = TimelineEntry(
             id=f"scan:{scan.id}", source="scan",
             scan_id=scan.id, filename=scan.filename, tool=scan.tool,
             occurred_at=evidence.occurred_at.isoformat(),
             imported_at=_utc(scan.imported_at).isoformat(), time_source=evidence.time_source,
             first_seen=not entries, coverage_known=bool(evidence.coverage.get("known")),
-            not_reported=[PortIdentity(port, proto) for port, proto in sorted(known.keys() - reported.keys())],
+            not_reported=[],
         )
-        for (port, proto), row in sorted(reported.items()):
-            after = State(str(row["state"]), row.get("service_name"), row.get("product"), row.get("version"))
+        for port, proto in sorted(known.keys() | explicit.keys()):
             before = known.get((port, proto))
+            transition = _reduce_port_evidence(
+                before, explicit.get((port, proto)), evidence.coverage, port, proto,
+            )
+            if transition.evidence == "missing":
+                entry.not_reported.append(PortIdentity(port, proto))
+                continue
+            after = transition.after
+            assert after is not None
             if before != after:
                 entry.changes.append(Change(port, proto, "added" if before is None else "changed", before, after))
             known[(port, proto)] = after
@@ -211,7 +259,7 @@ def host_history(
                 engagement_id=engagement_id, scan_id=scan.id, host_id=host_id,
                 port=port, proto=proto, state=after.state,
                 service_name=after.service_name, product=after.product, version=after.version,
-                extra=row.get("extra", {}), observed_at=evidence.occurred_at,
+                extra=transition.extra, observed_at=evidence.occurred_at,
             )
         entries.append(entry)
     return entries, latest

@@ -1,5 +1,5 @@
 import { QueryLink, ScopedLink } from "../common";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ComponentProps } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { ListFilter, Network, RotateCcw } from "lucide-react";
 import { Secret } from "@/components/secret";
@@ -18,6 +18,16 @@ import {
   usePage,
 } from "../common";
 import type { Credential, Note, PageData, Service } from "../types";
+import {
+  describeHostCommand,
+  initialHostView,
+  isHostSection,
+  reconcileHostView,
+  sectionFromHash,
+  transitionHostView,
+  type HostCommand,
+  type HostViewEvent,
+} from "./host-workflow";
 
 const MarkdownView = lazy(() =>
   import("@/components/markdown-view").then((module) => ({
@@ -33,6 +43,22 @@ const MarkdownEditor = lazy(() =>
 
 function timestamp(value: string) {
   return value.replace("T", " ").slice(0, 16);
+}
+
+function HostActionForm({
+  command,
+  ...props
+}: Omit<ComponentProps<typeof MutationForm>, "action" | "confirm" | "onSuccess"> & { command: HostCommand }) {
+  const { navigate } = usePage();
+  const { action, confirm, outcome } = describeHostCommand(command);
+  return (
+    <MutationForm
+      {...props}
+      action={action}
+      confirm={confirm}
+      onSuccess={outcome.type === "return-to-inventory" ? () => navigate(outcome.href) : undefined}
+    />
+  );
 }
 
 function ServiceContext({ data }: { data: PageData }) {
@@ -78,8 +104,8 @@ function ServiceDetail({
             Last seen: {service.last_seen || "Not seen in a scan"}
           </span>
         </div>
-        <MutationForm
-          action={`/services/${service.service_id}/edit`}
+        <HostActionForm
+          command={{ type: "save-service-overrides", serviceId: service.service_id }}
           className="stack"
         >
           <ServiceContext data={data} />
@@ -126,11 +152,10 @@ function ServiceDetail({
           <div className="actions">
             <Button type="submit">Save service</Button>
           </div>
-        </MutationForm>
+        </HostActionForm>
         <div className="flex flex-wrap gap-3 border-t pt-4">
-          <MutationForm
-            action={`/services/${service.service_id}/edit`}
-            confirm="Reset all manual service values to the latest scan? Triage status and tags will be kept."
+          <HostActionForm
+            command={{ type: "reset-service-overrides", serviceId: service.service_id }}
           >
             <ServiceContext data={data} />
             <input type="hidden" name="state" value="" />
@@ -150,16 +175,15 @@ function ServiceDetail({
             <Button type="submit" variant="outline">
               Reset scan overrides
             </Button>
-          </MutationForm>
-          <MutationForm
-            action={`/services/${service.service_id}/delete`}
-            confirm={`Delete ${service.port}/${service.proto} and its associated data? A future scan that sees it will re-add it.`}
+          </HostActionForm>
+          <HostActionForm
+            command={{ type: "delete-service", serviceId: service.service_id, label: `${service.port}/${service.proto}` }}
           >
             <ServiceContext data={data} />
             <Button type="submit" variant="destructive">
               Delete service
             </Button>
-          </MutationForm>
+          </HostActionForm>
         </div>
       </div>
     </Modal>
@@ -204,7 +228,7 @@ function CredentialDetail({
             <div className="min-w-0">
               <dt className="muted">Secret</dt>
               <dd className="min-w-0">
-                <Secret value={credential.secret} />
+                <Secret key={credential.secret} value={credential.secret} />
               </dd>
             </div>
             {credential.notes && (
@@ -233,23 +257,22 @@ function CredentialDetail({
             <p className="muted text-sm">
               Changes apply everywhere this credential is linked.
             </p>
-            <MutationForm
-              action={`/credentials/${credential.id}/edit`}
+            <HostActionForm
+              command={{ type: "save-linked-credential", credentialId: credential.id }}
               className="stack"
             >
               <input type="hidden" name="host_id" value={hostId} />
               <CredentialFields credential={credential} kinds={data.kinds ?? []} />
               <Button type="submit">Save credential</Button>
-            </MutationForm>
-            <MutationForm
-              action={`/credentials/${credential.id}/delete`}
-              confirm="Delete this credential and all its host and service links? This cannot be undone."
+            </HostActionForm>
+            <HostActionForm
+              command={{ type: "delete-linked-credential-everywhere", credentialId: credential.id }}
             >
               <input type="hidden" name="host_id" value={hostId} />
               <Button type="submit" variant="destructive">
                 Delete credential everywhere
               </Button>
-            </MutationForm>
+            </HostActionForm>
           </div>
         </Modal>
       </div>
@@ -283,7 +306,7 @@ function NoteDetail({ note }: { note: Note }) {
           }
         >
           <div className="stack">
-            <MutationForm action={`/notes/${note.id}/edit`} className="stack" encType="application/x-www-form-urlencoded">
+            <HostActionForm command={{ type: "save-note", noteId: note.id }} className="stack" encType="application/x-www-form-urlencoded">
               <Field
                 label="Title"
                 name="title"
@@ -292,15 +315,14 @@ function NoteDetail({ note }: { note: Note }) {
               />
               <MarkdownEditor defaultValue={note.body_md} />
               <Button type="submit">Save note</Button>
-            </MutationForm>
-            <MutationForm
-              action={`/notes/${note.id}/delete`}
-              confirm={`Delete note “${note.title}”? This cannot be undone.`}
+            </HostActionForm>
+            <HostActionForm
+              command={{ type: "delete-note", noteId: note.id, label: note.title }}
             >
               <Button type="submit" variant="destructive">
                 Delete note
               </Button>
-            </MutationForm>
+            </HostActionForm>
           </div>
         </Modal>
       </div>
@@ -312,9 +334,7 @@ function NoteDetail({ note }: { note: Note }) {
 }
 
 function ManageHost({ data }: { data: PageData }) {
-  const { navigate } = usePage();
   const host = data.host!;
-  const path = `/hosts/${host.id}`;
   return (
     <Modal
       title="Manage host"
@@ -337,14 +357,14 @@ function ManageHost({ data }: { data: PageData }) {
             </dd>
           </div>
         </dl>
-        <MutationForm action={`${path}/edit`}>
+        <HostActionForm command={{ type: "rename-host", hostId: host.id }}>
           <Field label="IP address" name="ip" defaultValue={host.ip} required />
           <div>
             <Button type="submit" variant="outline">
               Rename host
             </Button>
           </div>
-        </MutationForm>
+        </HostActionForm>
         <section className="space-y-3 border-t pt-4">
           <h3 className="font-semibold">Hostnames</h3>
           <ul className="flex flex-wrap gap-2" aria-label="Linked hostnames">
@@ -354,9 +374,8 @@ function ManageHost({ data }: { data: PageData }) {
                 className="flex items-center gap-2 rounded-md border py-1 pl-3 pr-1"
               >
                 <span className="mono break-all text-sm">{name}</span>
-                <MutationForm
-                  action={`${path}/hostnames/${id}/delete`}
-                  confirm={`Remove hostname ${name} from this host? It will stay hidden on future scans.`}
+                <HostActionForm
+                  command={{ type: "hide-hostname", hostId: host.id, hostnameId: id, label: name }}
                 >
                   <Button
                     type="submit"
@@ -366,15 +385,15 @@ function ManageHost({ data }: { data: PageData }) {
                   >
                     ×
                   </Button>
-                </MutationForm>
+                </HostActionForm>
               </li>
             ))}
           </ul>
           {!data.hostnames?.length && (
             <p className="muted text-sm">No hostnames yet.</p>
           )}
-          <MutationForm
-            action={`${path}/hostnames`}
+          <HostActionForm
+            command={{ type: "add-hostname", hostId: host.id }}
             className="flex flex-wrap items-end gap-3"
           >
             <Field
@@ -386,7 +405,7 @@ function ManageHost({ data }: { data: PageData }) {
             <Button type="submit" variant="outline">
               Add hostname
             </Button>
-          </MutationForm>
+          </HostActionForm>
         </section>
         <section className="space-y-3 border-t pt-4">
           <h3 className="font-semibold">Delete host</h3>
@@ -394,17 +413,15 @@ function ManageHost({ data }: { data: PageData }) {
             This permanently deletes this host, its services, notes, triage, and
             credential links. Credentials themselves are kept.
           </p>
-          <MutationForm
-            action={`${path}/delete`}
-            confirm={`Permanently delete host ${host.ip} and all its services and notes? This cannot be undone.`}
-            onSuccess={() => navigate("/")}
+          <HostActionForm
+            command={{ type: "delete-host", hostId: host.id, label: host.ip }}
           >
             <div>
               <Button type="submit" variant="destructive">
                 Permanently delete host
               </Button>
             </div>
-          </MutationForm>
+          </HostActionForm>
         </section>
       </div>
     </Modal>
@@ -417,7 +434,7 @@ function HostTriage({ data }: { data: PageData }) {
       title="Host triage"
       trigger={<Button variant="outline">Host triage</Button>}
     >
-      <MutationForm action="/annotation">
+      <HostActionForm command={{ type: "save-host-triage" }}>
         <input type="hidden" name="host_id" value={data.host!.id} />
         <div className="form-grid">
           <SelectField
@@ -436,7 +453,7 @@ function HostTriage({ data }: { data: PageData }) {
         <div>
           <Button type="submit">Save host triage</Button>
         </div>
-      </MutationForm>
+      </HostActionForm>
     </Modal>
   );
 }
@@ -444,7 +461,7 @@ function HostTriage({ data }: { data: PageData }) {
 function AddService({ data }: { data: PageData }) {
   return (
     <Modal title="Add service" trigger={<Button>Add service</Button>}>
-      <MutationForm action={`/hosts/${data.host!.id}/services`}>
+      <HostActionForm command={{ type: "create-or-update-service", hostId: data.host!.id }}>
         <ServiceContext data={data} />
         <div className="form-grid">
           <Field
@@ -473,7 +490,7 @@ function AddService({ data }: { data: PageData }) {
         <div>
           <Button type="submit">Add service</Button>
         </div>
-      </MutationForm>
+      </HostActionForm>
     </Modal>
   );
 }
@@ -481,14 +498,14 @@ function AddService({ data }: { data: PageData }) {
 function AddNote({ hostId }: { hostId: number }) {
   return (
     <Modal title="Add note" trigger={<Button>Add note</Button>} protectChanges className="sm:max-w-5xl">
-      <MutationForm action="/notes" encType="application/x-www-form-urlencoded">
+      <HostActionForm command={{ type: "create-note" }} encType="application/x-www-form-urlencoded">
         <input type="hidden" name="host_id" value={hostId} />
         <Field label="Title" name="title" required placeholder="Note title" />
         <MarkdownEditor />
         <div>
           <Button type="submit">Add note</Button>
         </div>
-      </MutationForm>
+      </HostActionForm>
     </Modal>
   );
 }
@@ -497,7 +514,12 @@ function ServiceFilters({ data }: { data: PageData }) {
   const filtered = Boolean(
     data.f_port || data.f_state || data.f_service || data.f_status,
   );
-  const [expanded, setExpanded] = useState(filtered);
+  const [disclosure, setDisclosure] = useState<"expanded" | "collapsed">(filtered ? "expanded" : "collapsed");
+  const expanded = disclosure === "expanded";
+  const appliedQuery = JSON.stringify([
+    data.f_port, data.f_state, data.f_service, data.f_status,
+    data.sort ?? "port", data.direction ?? "asc", data.per ?? "25",
+  ]);
   return (
     <>
       <div className="host-service-toolbar">
@@ -510,7 +532,7 @@ function ServiceFilters({ data }: { data: PageData }) {
           size="sm"
           aria-expanded={expanded}
           aria-controls="host-service-filters"
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => setDisclosure((current) => current === "expanded" ? "collapsed" : "expanded")}
         >
           <ListFilter />
           Filter and sort{filtered ? " · Filters active" : ""}
@@ -522,7 +544,7 @@ function ServiceFilters({ data }: { data: PageData }) {
         className="host-service-filters"
         hidden={!expanded}
       >
-        <Filters>
+        <Filters key={appliedQuery}>
           <Field
             label="Port filter"
             name="f_port"
@@ -572,6 +594,7 @@ function ServiceFilters({ data }: { data: PageData }) {
             ]}
           />
           <input type="hidden" name="per" value={data.per ?? "25"} />
+          <input type="hidden" name="page" value="1" />
           <Button type="submit" variant="outline">
             <ListFilter />
             Apply
@@ -591,22 +614,27 @@ function ServiceFilters({ data }: { data: PageData }) {
   );
 }
 
-type HostSection = "services" | "notes" | "credentials" | "timeline";
-function currentSection(): HostSection {
-  const hash = location.hash.slice(1);
-  return hash === "notes" || hash === "credentials" || hash === "timeline" ? hash : "services";
-}
-
 export function HostPage({ data }: { data: PageData }) {
-  const [section, setSection] = useState<HostSection>(currentSection);
-  const [serviceId, setServiceId] = useState<number>();
-  const [noteId, setNoteId] = useState<number>();
-  const [credentialId, setCredentialId] = useState<number>();
+  const [storedView, setView] = useState(() => initialHostView(data, sectionFromHash(location.hash)));
+  const view = reconcileHostView(storedView, data);
+  if (view !== storedView) setView(view);
+  const send = (event: HostViewEvent) => setView((current) => transitionHostView(current, event, data));
   useEffect(() => {
-    const sync = () => setSection(currentSection());
+    const sync = () => {
+      const section = sectionFromHash(location.hash);
+      if (location.hash !== `#${section}`) {
+        history.replaceState(history.state, "", `${location.pathname}${location.search}#${section}`);
+      }
+      setView((current) => transitionHostView(current, { type: "section-changed", section }, data));
+    };
+    sync();
     window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, []);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, [data]);
   const host = data.host;
   if (!host)
     return (
@@ -617,11 +645,9 @@ export function HostPage({ data }: { data: PageData }) {
   const services = data.services ?? [];
   const notes = data.host_notes ?? [];
   const credentials = data.host_credentials ?? [];
-  const service =
-    services.find((item) => item.service_id === serviceId) ?? services[0];
-  const note = notes.find((item) => item.id === noteId) ?? notes[0];
-  const credential =
-    credentials.find((item) => item.id === credentialId) ?? credentials[0];
+  const service = services.find((item) => item.service_id === view.serviceId);
+  const note = notes.find((item) => item.id === view.noteId);
+  const credential = credentials.find((item) => item.id === view.credentialId);
   const associatedCredentials = service
     ? credentials.filter((item) =>
         item.services.some((link) => link.service_id === service.service_id),
@@ -631,7 +657,7 @@ export function HostPage({ data }: { data: PageData }) {
     data.f_port || data.f_state || data.f_service || data.f_status,
   );
   return (
-    <div className="host-workbench-page">
+    <div className="host-workbench-page" key={host.id}>
       <header className="space-y-2 border-b pb-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <ScopedLink href="/" className="muted text-xs hover:underline">
@@ -671,11 +697,11 @@ export function HostPage({ data }: { data: PageData }) {
           </p>
         )}
       <Tabs.Root
-        value={section}
+        value={view.section}
         onValueChange={(value) => {
-          const next = value as HostSection;
-          setSection(next);
-          location.hash = next;
+          if (!isHostSection(value)) return;
+          send({ type: "section-changed", section: value });
+          location.hash = value;
         }}
         className="host-workbench-tabs"
       >
@@ -696,13 +722,7 @@ export function HostPage({ data }: { data: PageData }) {
         </Tabs.Panel>
         <Tabs.Panel value="services">
           <ServiceFilters
-            key={JSON.stringify([
-              host.id,
-              data.f_port,
-              data.f_state,
-              data.f_service,
-              data.f_status,
-            ])}
+            key={host.id}
             data={data}
           />
           <div className="host-inspector">
@@ -712,7 +732,7 @@ export function HostPage({ data }: { data: PageData }) {
                   key={item.service_id}
                   type="button"
                   aria-pressed={item.service_id === service?.service_id}
-                  onClick={() => setServiceId(item.service_id)}
+                  onClick={() => send({ type: "service-selected", id: item.service_id })}
                   className="host-item-choice host-service-choice"
                 >
                   <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -807,8 +827,7 @@ export function HostPage({ data }: { data: PageData }) {
                           type="button"
                           key={item.id}
                           onClick={() => {
-                            setCredentialId(item.id);
-                            setSection("credentials");
+                            send({ type: "linked-credential-opened", id: item.id });
                             location.hash = "credentials";
                           }}
                           className="block break-all text-left text-sm underline underline-offset-4"
@@ -845,7 +864,7 @@ export function HostPage({ data }: { data: PageData }) {
                   key={item.id}
                   type="button"
                   aria-pressed={item.id === note?.id}
-                  onClick={() => setNoteId(item.id)}
+                  onClick={() => send({ type: "note-selected", id: item.id })}
                   className="host-item-choice"
                 >
                   <span className="block font-medium">{item.title}</span>
@@ -887,7 +906,7 @@ export function HostPage({ data }: { data: PageData }) {
                   key={item.id}
                   type="button"
                   aria-pressed={item.id === credential?.id}
-                  onClick={() => setCredentialId(item.id)}
+                  onClick={() => send({ type: "credential-selected", id: item.id })}
                   className="host-item-choice"
                 >
                   <span className="mono block font-medium">
@@ -902,7 +921,7 @@ export function HostPage({ data }: { data: PageData }) {
             <div className="host-item-detail" aria-live="polite">
               {credential ? (
                 <CredentialDetail
-                  key={`${credential.id}-${credential.secret}`}
+                  key={credential.id}
                   credential={credential}
                   data={data}
                   hostId={host.id}

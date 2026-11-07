@@ -4,8 +4,8 @@ from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
-from penrecon.models import Host, HostHostname, Observation, ObsState, Service
-from penrecon.queries import _hostnames_for, resolved_services
+from penrecon.models import Host, HostHostname, ObsState, Service
+from penrecon.queries import _hostnames_for, latest_observations, resolved_services
 
 
 def _scan(ip: str, port: int, version: str, hostname: str) -> bytes:
@@ -40,14 +40,13 @@ def test_deleted_service_reappears_fresh_on_rescan(session: Session) -> None:
     assert host.id is not None
     svc = session.exec(select(Service).where(Service.port == 22)).one()
 
-    # hard delete (row + its observations), as the delete endpoint does
-    for obs in session.exec(
-        select(Observation).where(Observation.host_id == host.id, Observation.port == 22)
-    ).all():
-        session.delete(obs)
+    # Delete only current identity/overrides; immutable scan evidence survives.
+    svc.m_version = "discard-on-delete"
+    session.commit()
     session.delete(svc)
     session.commit()
     assert 22 not in {s.port for s in resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)}  # truly gone
+    assert latest_observations(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)[(22, "tcp")].version == "1.0"
 
     # a later scan re-creates it fresh (new row, new observation)
     ingest_scan(session, _scan("10.0.0.2", 22, "2.0", "b.example"), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)

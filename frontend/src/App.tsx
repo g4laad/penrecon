@@ -1,6 +1,7 @@
 import { ScopedLink, engagementUrl } from "./common";
 import { Textarea } from "@/components/ui/textarea";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   ArrowDownToLine,
   ListFilter,
@@ -31,6 +32,7 @@ import {
   Empty,
   Section,
   usePage,
+  WorkflowBoundary,
 } from "./common";
 import type { HostRow, PageData } from "./types";
 import { AppShell, navigation } from "./components/app-shell";
@@ -150,18 +152,22 @@ function HostTable({
     </Table>
   );
 }
+type InventoryState =
+  | { phase: "measuring" }
+  | { phase: "loading"; source: PageData; capacity: number; attempt: number }
+  | { phase: "ready"; source: PageData; capacity: number; attempt: number; data: PageData }
+  | { phase: "failed"; source: PageData; capacity: number; attempt: number; message: string };
+
 function Inventory({ data }: { data: PageData }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [capacity, setCapacity] = useState(0);
-  const [result, setResult] = useState<{
-    source: PageData;
-    data: PageData;
-    capacity: number;
-  }>();
-  const [error, setError] = useState("");
+  const [state, setState] = useState<InventoryState>({ phase: "measuring" });
   const [retry, setRetry] = useState(0);
-  const current = result?.source === data ? result.data : data;
-  const ready = result?.source === data && result.capacity === capacity;
+  const view: InventoryState = state.phase !== "measuring" && state.source === data && state.capacity === capacity && state.attempt === retry
+    ? state : capacity ? { phase: "loading", source: data, capacity, attempt: retry } : { phase: "measuring" };
+  const ready = view.phase === "ready";
+  const current = view.phase === "ready" ? view.data : data;
+  const error = view.phase === "failed" ? view.message : "";
   const filtered = Boolean(
     data.q || data.port || data.tag || data.status || data.change,
   );
@@ -194,7 +200,6 @@ function Inventory({ data }: { data: PageData }) {
   useEffect(() => {
     if (!capacity) return;
     const controller = new AbortController();
-    setError("");
     const params = new URLSearchParams(location.search);
     const previousSize = Number(params.get("fit"));
     if (previousSize > 0 && previousSize !== capacity) {
@@ -215,14 +220,14 @@ function Inventory({ data }: { data: PageData }) {
         if (controller.signal.aborted) return;
         params.set("page", String(next.page ?? 1));
         history.replaceState(null, "", engagementUrl(`/?${params}`));
-        setError("");
-        setResult({ source: data, data: next, capacity });
+        setState({ phase: "ready", source: data, data: next, capacity, attempt: retry });
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
-          setError(
-            cause instanceof Error ? cause.message : "Unable to load hosts",
-          );
+          setState({
+            phase: "failed", source: data, capacity, attempt: retry,
+            message: cause instanceof Error ? cause.message : "Unable to load hosts",
+          });
         }
       });
     return () => controller.abort();
@@ -240,6 +245,7 @@ function Inventory({ data }: { data: PageData }) {
       <div className="inventory-toolbar">
         <Modal
           title="Filter hosts"
+          protectChanges={false}
           trigger={
             <Button variant="outline">
               <ListFilter />
@@ -545,6 +551,11 @@ function EngagementsPage({ data }: { data: PageData }) {
   );
 }
 
+type QueryState =
+  | { phase: "ready" }
+  | { phase: "loading"; url: string }
+  | { phase: "failed"; url: string; message: string };
+
 export default function App() {
   const [data, setData] = useState<PageData>(
     () =>
@@ -564,42 +575,51 @@ export default function App() {
     }
     queryFocus.current = null;
   }, [data]);
-  const [queryPending, setQueryPending] = useState(false);
-  const [queryError, setQueryError] = useState<{ url: string; message: string } | null>(null);
-  const loadQuery = useCallback(async (url: string, push: boolean) => {
+  const [query, setQuery] = useState<QueryState>({ phase: "ready" });
+  const queryPending = query.phase === "loading";
+  const queryError = query.phase === "failed" ? query : null;
+  const [notice, setNotice] = useState<string | null>(null);
+  const loadQuery = useCallback(async (url: string, push: boolean, propagateError = false) => {
     const target = new URL(url, location.href);
     if (target.origin !== location.origin || target.pathname !== pagePath.current) return;
     queryRequest.current?.abort();
     const controller = new AbortController();
     queryRequest.current = controller;
-    setQueryPending(true);
-    setQueryError((previous) => previous?.url === target.href ? previous : null);
+    setQuery({ phase: "loading", url: target.href });
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     try {
       const response = await fetch(target.pathname + target.search, {
         headers: { Accept: "application/json" }, signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Unable to update timeline (${response.status}). Try again.`);
+      if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
       const next = await response.json() as PageData;
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (propagateError) throw new Error("View update was superseded. Refresh the view again.");
+        return;
+      }
       const oldURL = location.href;
       if (push && target.href !== oldURL) history.pushState(null, "", target.href);
       loadedQuery.current = target.pathname + target.search;
       queryFocus.current = focused;
-      setQueryError(null);
-      setData(next);
+      // Native form.reset() runs after refresh resolves and must see the
+      // reconciled props/default values, not the previous render's defaults.
+      flushSync(() => {
+        setQuery({ phase: "ready" });
+        setData(next);
+      });
       if (new URL(oldURL).hash !== target.hash) {
         window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: target.href }));
       }
     } catch (error) {
-      if (!controller.signal.aborted) setQueryError({
+      if (!controller.signal.aborted) setQuery({
+        phase: "failed",
         url: target.href,
-        message: error instanceof Error ? error.message : "Unable to update timeline. Try again.",
+        message: error instanceof Error ? error.message : "Unable to update view. Try again.",
       });
+      if (propagateError) throw error;
     } finally {
       if (queryRequest.current === controller) {
         queryRequest.current = null;
-        setQueryPending(false);
       }
     }
   }, []);
@@ -611,8 +631,7 @@ export default function App() {
       } else {
         queryRequest.current?.abort();
         queryRequest.current = null;
-        setQueryPending(false);
-        setQueryError(null);
+        setQuery({ phase: "ready" });
       }
     };
     window.addEventListener("popstate", syncQuery);
@@ -622,11 +641,9 @@ export default function App() {
     };
   }, [loadQuery]);
   const refresh = async () => {
-    const response = await fetch(location.pathname + location.search, {
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) throw new Error(`Unable to refresh (${response.status})`);
-    setData((await response.json()) as PageData);
+    // Refresh and navigation share request ownership; older responses cannot
+    // overwrite a mutation's newly reconciled data.
+    await loadQuery(location.href, false, true);
   };
   const navigate = (url: string) => {
     location.assign(engagementUrl(url));
@@ -656,7 +673,7 @@ export default function App() {
     document.title = `${title}${data.engagement?.name ? ` — ${data.engagement.name}` : ""} — penrecon`;
   }, [data.host?.ip, data.engagement?.name, path]);
   return (
-    <PageContext.Provider value={{ data, refresh, navigate, updateQuery: (url) => { void loadQuery(url, true); }, queryPending }}>
+    <PageContext.Provider value={{ data, refresh, navigate, updateQuery: (url) => { void loadQuery(url, true); }, queryPending, notify: setNotice }}>
       <AppShell data={data} path={path}
         className={
           path === "/"
@@ -671,11 +688,16 @@ export default function App() {
         }
       >
         <main id="main" className="shell py-4" tabIndex={-1}>
-          <p role="status" className="sr-only">{queryPending ? "Updating timeline…" : ""}</p>
+          <p role="status" className="sr-only">{queryPending ? "Updating view…" : ""}</p>
+          {notice && <div role="alert" className="flex flex-none flex-wrap items-center gap-2 text-sm">
+            <p>{notice}</p>
+            <Button type="button" variant="outline" size="sm" onClick={() => setNotice(null)}>Dismiss notice</Button>
+          </div>}
           {queryError && <div className="flex flex-none flex-wrap items-center gap-2 text-sm" role="alert">
             <p>{queryError.message}</p>
             <Button type="button" variant="outline" size="sm" aria-disabled={queryPending} onClick={() => { if (!queryPending) void loadQuery(queryError.url, true); }}>Retry</Button>
           </div>}
+          <WorkflowBoundary>
           <Suspense fallback={<p role="status" className="muted">Loading page…</p>}>
           {path === "/engagements" ? (
             <EngagementsPage data={data} />
@@ -695,6 +717,7 @@ export default function App() {
             <Inventory data={data} />
           )}
           </Suspense>
+          </WorkflowBoundary>
         </main>
       </AppShell>
     </PageContext.Provider>

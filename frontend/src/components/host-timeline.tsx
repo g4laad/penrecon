@@ -1,9 +1,25 @@
 import { Empty, QueryLink, usePage } from "../common";
 import type { HostTimeline as HostTimelineData, TimelineChange, TimelineEntry, TimelineState } from "../types";
 
+type TimelineQuery = { page: number; showUnchanged: boolean };
+type TimelineNavigation =
+  | { type: "show-unchanged"; enabled: boolean }
+  | { type: "newer" }
+  | { type: "older" }
+  | { type: "first-page" };
+
+function transitionTimelineQuery(current: TimelineQuery, event: TimelineNavigation, pages: number): TimelineQuery {
+  switch (event.type) {
+    case "show-unchanged": return { page: 1, showUnchanged: event.enabled };
+    case "first-page": return { ...current, page: 1 };
+    case "newer": return { ...current, page: Math.max(1, Math.min(pages, current.page - 1)) };
+    case "older": return { ...current, page: Math.min(pages, current.page + 1) };
+  }
+}
+
 export function timelineUrl(page: number, showUnchanged: boolean) {
   const params = new URLSearchParams(location.search);
-  params.set("timeline_page", String(page));
+  params.set("timeline_page", String(Number.isSafeInteger(page) && page > 0 ? page : 1));
   params.set("timeline_unchanged", String(showUnchanged));
   return `?${params.toString()}#timeline`;
 }
@@ -60,24 +76,41 @@ function ChangeDetail({ change, manual }: { change: TimelineChange; manual: bool
   </details>;
 }
 
+type TimelineContent = "unavailable" | "events" | "empty-page" | "no-matching-events" | "no-history";
+
 export function HostTimeline({ timeline }: { timeline?: HostTimelineData }) {
   const { updateQuery, queryPending } = usePage();
-  const showUnchanged = timeline?.show_unchanged ?? false;
-  const page = timeline?.page ?? 1;
+  const query: TimelineQuery = { page: timeline?.page ?? 1, showUnchanged: timeline?.show_unchanged ?? false };
+  const { page, showUnchanged } = query;
   const pages = Math.max(1, timeline?.pages ?? 1);
+  const content: TimelineContent = !timeline ? "unavailable"
+    : timeline.entries.length ? "events"
+    : page !== 1 || timeline.total > 0 || timeline.latest_change ? "empty-page"
+    : !showUnchanged ? "no-matching-events"
+    : "no-history";
+  const firstPage = transitionTimelineQuery(query, { type: "first-page" }, pages);
+  const newer = transitionTimelineQuery(query, { type: "newer" }, pages);
+  const older = transitionTimelineQuery(query, { type: "older" }, pages);
   return <section aria-label="Host service history" aria-busy={queryPending} className="min-w-0 space-y-4 pe-3 pb-3" style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", scrollbarGutter: "stable" }}>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h2 className="text-sm font-semibold">Host service history</h2>
       <label className="flex min-h-6 cursor-pointer items-center gap-2 text-sm">
-        <input type="checkbox" name="timeline_unchanged" checked={showUnchanged} aria-disabled={queryPending} onChange={(event) => { if (!queryPending) updateQuery(timelineUrl(1, event.target.checked)); }} />
+        <input type="checkbox" name="timeline_unchanged" checked={showUnchanged} disabled={queryPending} onChange={(event) => {
+          if (queryPending) return;
+          const next = transitionTimelineQuery(query, { type: "show-unchanged", enabled: event.target.checked }, pages);
+          updateQuery(timelineUrl(next.page, next.showUnchanged));
+        }} />
         Show unchanged scans
       </label>
     </div>
     <p className="muted text-xs">Scan evidence and manual service changes, newest first. Missing ports in scans do not prove a service is closed.</p>
-    {!timeline?.entries.length ? <Empty>
-      {showUnchanged || !timeline?.latest_change ? <><p>No service history for this host yet.</p><p>Ingest a scan containing this host or add, edit, or remove a service to record an event.</p></> : <><p>No events on this timeline page.</p><QueryLink className="underline underline-offset-4" href={timelineUrl(1, true)}>Show unchanged scans</QueryLink></>}
+    {content !== "events" ? <Empty>
+      {content === "unavailable" ? <><p>Service history is unavailable.</p><QueryLink className="underline underline-offset-4" href={timelineUrl(1, showUnchanged)}>Reload service history</QueryLink></>
+        : content === "empty-page" ? <><p>No events on this timeline page.</p><QueryLink className="underline underline-offset-4" href={timelineUrl(firstPage.page, firstPage.showUnchanged)}>Return to the newest events</QueryLink></>
+        : content === "no-matching-events" ? <><p>No change events to show.</p><QueryLink className="underline underline-offset-4" href={timelineUrl(1, true)}>Show unchanged scans</QueryLink></>
+        : <><p>No service history for this host yet.</p><p>Ingest a scan containing this host or add, edit, or remove a service to record an event.</p></>}
     </Empty> : <ol className="space-y-4">
-      {timeline.entries.map((entry) => <li key={entry.id} className="min-w-0 rounded border p-3">
+      {(timeline?.entries ?? []).map((entry) => <li key={entry.id} className="min-w-0 rounded border p-3">
         <article className="min-w-0 space-y-3">
           <header className="min-w-0 space-y-1">
             <h3 className="break-words text-sm font-semibold"><TimelineTime entry={entry} /></h3>
@@ -99,8 +132,8 @@ export function HostTimeline({ timeline }: { timeline?: HostTimelineData }) {
     {(timeline?.total ?? 0) > 0 && <nav aria-label="Timeline pagination" className="flex flex-wrap items-center justify-between gap-3 text-xs">
       <span className="muted">{timeline?.total} events · Page {page} of {pages}</span>
       <div className="flex flex-wrap gap-4">
-        {page > 1 && <QueryLink className="inline-flex min-h-6 items-center underline underline-offset-4" href={timelineUrl(page - 1, showUnchanged)}>Newer events</QueryLink>}
-        {page < pages && <QueryLink className="inline-flex min-h-6 items-center underline underline-offset-4" href={timelineUrl(page + 1, showUnchanged)}>Older events</QueryLink>}
+        {page > 1 && <QueryLink className="inline-flex min-h-6 items-center underline underline-offset-4" href={timelineUrl(newer.page, newer.showUnchanged)}>Newer events</QueryLink>}
+        {page < pages && <QueryLink className="inline-flex min-h-6 items-center underline underline-offset-4" href={timelineUrl(older.page, older.showUnchanged)}>Older events</QueryLink>}
       </div>
     </nav>}
   </section>;

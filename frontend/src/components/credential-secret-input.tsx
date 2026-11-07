@@ -4,19 +4,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
-export function CredentialSecretInput({ kind, value, onChange }: {
+type CredentialSecretInputProps = {
   kind: string;
   value: string;
   onChange: (value: string) => void;
-}) {
-  const [reveal, setReveal] = useState(false);
+};
+type SecretVisibility = "masked" | "revealed";
+
+export function CredentialSecretInput(props: CredentialSecretInputProps) {
+  // The owner retains the draft value; a kind change resets only presentation.
+  return <SecretInputForKind key={props.kind} {...props} />;
+}
+
+function SecretInputForKind({ kind, value, onChange }: CredentialSecretInputProps) {
+  const [visibility, setVisibility] = useState<SecretVisibility>("masked");
+  const reveal = visibility === "revealed";
   const id = useId();
   const hintId = useId();
   const label = kind === "key" ? "Private key" : kind === "hash" ? "Hash" : kind === "token" ? "Token" : "Secret";
   return <div className="grid min-w-0 gap-1.5">
     <div className="flex items-center justify-between gap-2">
       <label htmlFor={id} className="text-sm font-medium">{label}</label>
-      <Button type="button" size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
+      <Button type="button" size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setVisibility((current) => current === "masked" ? "revealed" : "masked")}>
         {reveal ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}{reveal ? "Hide" : "Reveal"}
       </Button>
     </div>

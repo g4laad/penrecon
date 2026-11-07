@@ -1,9 +1,10 @@
 import { ScopedLink } from "../common";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useClipboard } from "@/components/use-clipboard";
 import { CalendarIcon, Copy, Paperclip } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
@@ -23,30 +24,38 @@ import {
   Pager,
 } from "../common";
 import type { Operation, PageData } from "../types";
+import {
+  attachmentFile,
+  resolveOperationSelection,
+  timestampComplete,
+  timestampDraft,
+  timestampValue,
+  transitionAttachment,
+  transitionTimestamp,
+  type AttachmentDraft,
+  type TimestampDraft,
+  type TimestampEvent,
+} from "./operation-workflow";
 
 function OperationTimestamp({
   label,
   name,
-  defaultValue,
+  draft,
+  onChange,
 }: {
   label: string;
   name: string;
-  defaultValue?: string | null;
+  draft: TimestampDraft;
+  onChange: (event: TimestampEvent) => void;
 }) {
-  const [date, setDate] = useState(defaultValue?.slice(0, 10) ?? "");
-  const [time, setTime] = useState(defaultValue?.slice(11, 16) || "00:00");
-  const [dateOpen, setDateOpen] = useState(false);
-  const timestampInput = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    // Calendar changes update a hidden value rather than firing a native input event.
-    timestampInput.current?.dispatchEvent(new Event("input", { bubbles: true }));
-  }, [date, time]);
+  const [calendar, setCalendar] = useState<"closed" | "open">("closed");
+  const date = draft.kind === "dated" ? draft.date : "";
   const selectedDate = date ? parseISO(date) : undefined;
   return (
-    <fieldset className="grid min-w-0 gap-1.5">
+    <fieldset className="grid min-w-0 gap-1.5" data-draft-value={JSON.stringify(draft)}>
       <legend className="mb-1.5 text-sm font-medium">{label}</legend>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
-        <Popover open={dateOpen} onOpenChange={setDateOpen}>
+        <Popover open={calendar === "open"} onOpenChange={(open) => setCalendar(open ? "open" : "closed")}>
           <PopoverTrigger
             render={
               <Button
@@ -67,8 +76,8 @@ function OperationTimestamp({
               defaultMonth={selectedDate}
               autoFocus
               onSelect={(day) => {
-                setDate(day ? format(day, "yyyy-MM-dd") : "");
-                setDateOpen(false);
+                onChange(day ? { type: "select-date", date: format(day, "yyyy-MM-dd") } : { type: "clear-date" });
+                setCalendar("closed");
               }}
             />
             <Button
@@ -76,8 +85,8 @@ function OperationTimestamp({
               variant="ghost"
               className="m-2 mt-0"
               onClick={() => {
-                setDate("");
-                setDateOpen(false);
+                onChange({ type: "clear-date" });
+                setCalendar("closed");
               }}
             >
               Clear date
@@ -87,33 +96,66 @@ function OperationTimestamp({
         <Input
           type="time"
           aria-label={`${label} time`}
-          value={time}
-          required={Boolean(date)}
-          onChange={(event) => setTime(event.target.value)}
+          value={draft.kind === "dated" ? draft.time : ""}
+          disabled={draft.kind === "absent"}
+          required={draft.kind === "dated"}
+          onChange={(event) => onChange({ type: "edit-time", time: event.target.value })}
         />
       </div>
-      <p className="muted text-xs">Time defaults to midnight.</p>
-      <input ref={timestampInput} type="hidden" name={name} value={date ? `${date}T${time}` : ""} />
+      <p className="muted text-xs">Time defaults to midnight after you pick a date.</p>
+      <input type="hidden" name={name} value={timestampValue(draft)} />
     </fieldset>
   );
 }
 
-function OperationFields({ operation }: { operation?: Operation }) {
+function OperationForm({ operation }: { operation?: Operation }) {
   const attachmentId = useId();
-  const removeId = useId();
   const attachmentInput = useRef<HTMLInputElement>(null);
-  const [removeAttachment, setRemoveAttachment] = useState(false);
+  const fields = useRef<HTMLDivElement>(null);
+  const mounted = useRef(false);
+  const [attachment, setAttachment] = useState<AttachmentDraft>({ intent: "keep" });
+  const [started, setStarted] = useState(() => timestampDraft(operation?.started_at));
+  const [ended, setEnded] = useState(() => timestampDraft(operation?.ended_at));
+  const hasAttachment = Boolean(operation?.attachment_name);
+  useEffect(() => {
+    if (mounted.current) {
+      // Calendar and intent buttons change submitted values without native input.
+      fields.current?.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    mounted.current = true;
+  }, [started, ended, attachment]);
+  function setAttachmentDraft(next: AttachmentDraft) {
+    const input = attachmentInput.current;
+    if (input) {
+      const files = new DataTransfer();
+      const file = attachmentFile(next);
+      if (file) files.items.add(file);
+      input.files = files.files;
+    }
+    setAttachment(next);
+  }
   return (
-    <div className="form-grid">
+    <div onReset={() => {
+      setStarted(timestampDraft(operation?.started_at));
+      setEnded(timestampDraft(operation?.ended_at));
+      setAttachment({ intent: "keep" });
+    }}>
+      <MutationForm
+        action={operation ? `/operations/${operation.id}/edit` : "/operations"}
+        canSubmit={timestampComplete(started) && timestampComplete(ended)}
+      >
+    <div ref={fields} className="form-grid">
       <OperationTimestamp
         label="Started"
         name="started_at"
-        defaultValue={operation?.started_at}
+        draft={started}
+        onChange={(event) => setStarted((draft) => transitionTimestamp(draft, event))}
       />
       <OperationTimestamp
         label="Ended"
         name="ended_at"
-        defaultValue={operation?.ended_at}
+        draft={ended}
+        onChange={(event) => setEnded((draft) => transitionTimestamp(draft, event))}
       />
       <Field
         label="Source"
@@ -194,30 +236,22 @@ function OperationFields({ operation }: { operation?: Operation }) {
           <ScopedLink href={`/operations/${operation.id}/attachment`}
           className="break-all text-sm underline underline-offset-4"
           download>{operation.attachment_name}</ScopedLink>
-          <label htmlFor={removeId} className="flex items-center gap-2 text-sm">
-            <input
-              id={removeId}
-              type="checkbox"
-              name="remove_attachment"
-              value="true"
-              checked={removeAttachment}
-              className="size-4 accent-primary"
-              onChange={(event) => {
-                const checked = event.target.checked;
-                if (
-                  checked &&
-                  !window.confirm(
-                    `Remove attachment ${operation.attachment_name}? The file will be deleted when you save.`,
-                  )
-                )
-                  return;
-                setRemoveAttachment(checked);
-                if (checked && attachmentInput.current)
-                  attachmentInput.current.value = "";
-              }}
-            />
-            Remove attachment when saving
-          </label>
+          <input type="hidden" name="remove_attachment" value={attachment.intent === "remove" ? "true" : ""} />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              if (attachment.intent === "remove") {
+                setAttachmentDraft(transitionAttachment(attachment, { type: "undo-remove" }, hasAttachment));
+              } else if (window.confirm(
+                `Remove attachment ${operation.attachment_name}? The file will be deleted when you save. Any selected replacement will be retained if you cancel removal.`,
+              )) {
+                setAttachmentDraft(transitionAttachment(attachment, { type: "remove" }, hasAttachment));
+              }
+            }}
+          >
+            {attachment.intent === "remove" ? "Cancel attachment removal" : "Remove attachment when saving"}
+          </Button>
         </div>
       )}
       <div className="stack col-span-full gap-2">
@@ -229,27 +263,46 @@ function OperationFields({ operation }: { operation?: Operation }) {
           ref={attachmentInput}
           type="file"
           name="attachment"
-          disabled={removeAttachment}
+          disabled={attachment.intent === "remove"}
           onChange={(event) => {
-            if (
-              event.currentTarget.files?.length &&
-              operation?.attachment_name &&
-              !window.confirm(
-                `Replace attachment ${operation.attachment_name}? The current file will be deleted when you save.`,
-              )
-            ) {
-              event.currentTarget.value = "";
+            const file = event.currentTarget.files?.[0];
+            if (!file) {
+              setAttachmentDraft(transitionAttachment(attachment, { type: "clear-file" }, hasAttachment));
+              return;
             }
+            if (hasAttachment && !window.confirm(
+              `Replace attachment ${operation?.attachment_name} with ${file.name}? The current file will be deleted when you save.`,
+            )) {
+              // The browser already replaced FileList. Restore the accepted draft.
+              setAttachmentDraft(attachment);
+              return;
+            }
+            setAttachmentDraft(transitionAttachment(attachment, { type: "select-file", file }, hasAttachment));
           }}
         />
-        {operation?.attachment_name && (
-          <p className="muted text-xs">
-            {removeAttachment
-              ? "Attachment removal selected. Uncheck removal to upload a replacement instead."
-              : "Uploading a replacement deletes the current attachment when saved."}
-          </p>
+        {(attachment.intent === "new" || attachment.intent === "replace") && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="self-start"
+            onClick={() => setAttachmentDraft(transitionAttachment(attachment, { type: "clear-file" }, hasAttachment))}
+          >
+            Cancel {attachment.intent === "replace" ? "replacement" : "attachment"} upload
+          </Button>
         )}
+        <p className="muted text-xs" role="status">
+          {attachment.intent === "remove"
+            ? "Attachment removal selected. Cancel removal to restore your previous attachment choice."
+            : attachment.intent === "new" || attachment.intent === "replace"
+              ? `${attachment.file.name} selected. ${attachment.intent === "replace" ? "The current attachment will be replaced when saved." : "The file will be attached when saved."}`
+              : hasAttachment ? "The current attachment will be kept unless you select a replacement or removal." : "No attachment selected."}
+        </p>
       </div>
+    </div>
+        <div className="actions mt-4 justify-end">
+          <Button type="submit">{operation ? "Save operation" : "Add operation"}</Button>
+        </div>
+      </MutationForm>
     </div>
   );
 }
@@ -257,12 +310,7 @@ function OperationFields({ operation }: { operation?: Operation }) {
 function OperationEditor({ operation }: { operation: Operation }) {
   return (
     <div className="stack">
-      <MutationForm action={`/operations/${operation.id}/edit`}>
-        <OperationFields operation={operation} />
-        <div className="actions mt-4 justify-end">
-          <Button type="submit">Save operation</Button>
-        </div>
-      </MutationForm>
+      <OperationForm operation={operation} />
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="muted text-xs">
           Created {operation.created_at.replace("T", " ").slice(0, 16)}
@@ -283,7 +331,7 @@ function OperationEditor({ operation }: { operation: Operation }) {
 }
 
 function OperationDetails({ operation }: { operation: Operation }) {
-  const [copyStatus, setCopyStatus] = useState("");
+  const { status: copyStatus, copy } = useClipboard(operation.command);
   const metadata = [
     ["Start", operation.started_at?.replace("T", " ").slice(0, 16)],
     ["End", operation.ended_at?.replace("T", " ").slice(0, 16)],
@@ -342,27 +390,18 @@ function OperationDetails({ operation }: { operation: Operation }) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(operation.command);
-                setCopyStatus("Command copied.");
-              } catch {
-                setCopyStatus(
-                  "Unable to copy. Select the command and copy it manually.",
-                );
-              }
-            }}
+            onClick={() => void copy(operation.command)}
           >
             <Copy className="size-3.5" aria-hidden="true" />
-            Copy command
+            {copyStatus === "pending" ? "Copy again" : "Copy command"}
           </Button>
         </div>
         <pre className="operation-code bg-muted">{operation.command}</pre>
-        {copyStatus && (
-          <p className="muted mt-1 text-xs" role="status">
-            {copyStatus}
-          </p>
-        )}
+        <p className="muted mt-1 text-xs" role="status">
+          {copyStatus === "pending" ? "Copying command…"
+            : copyStatus === "copied" ? "Command copied."
+              : copyStatus === "error" ? "Unable to copy. Select the command and copy it manually." : ""}
+        </p>
       </section>
       {operation.output && (
         <section>
@@ -393,7 +432,7 @@ function OperationDetails({ operation }: { operation: Operation }) {
 }
 
 export function OperationsPage({ data }: { data: PageData }) {
-  const operations = data.operations ?? [];
+  const operations = useMemo(() => data.operations ?? [], [data.operations]);
   const [hash, setHash] = useState(() => location.hash);
   useEffect(() => {
     const sync = () => setHash(location.hash);
@@ -404,9 +443,16 @@ export function OperationsPage({ data }: { data: PageData }) {
       window.removeEventListener("popstate", sync);
     };
   }, []);
-  const selected =
-    operations.find((operation) => hash === `#operation-${operation.id}`) ??
-    operations[0];
+  useEffect(() => {
+    if (hash || !operations.length) return;
+    const next = new URL(location.href);
+    const oldURL = location.href;
+    next.hash = `operation-${operations[0].id}`;
+    history.replaceState(null, "", next);
+    window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: next.href }));
+  }, [hash, operations]);
+  const selection = resolveOperationSelection(operations, hash);
+  const selected = selection.kind === "selected" ? selection.operation : undefined;
   return (
     <div className="operation-workbench-page">
       <div className="operation-toolbar">
@@ -438,12 +484,7 @@ export function OperationsPage({ data }: { data: PageData }) {
             protectChanges="Discard unsaved operation changes?"
             trigger={<Button type="button">Add operation</Button>}
           >
-            <MutationForm action="/operations">
-              <OperationFields />
-              <div className="actions mt-4 justify-end">
-                <Button type="submit">Add operation</Button>
-              </div>
-            </MutationForm>
+            <OperationForm />
           </Modal>
         </PageHeader>
       </div>
@@ -451,7 +492,7 @@ export function OperationsPage({ data }: { data: PageData }) {
         {data.total ?? operations.length} matched operation
         {(data.total ?? operations.length) === 1 ? "" : "s"}
       </p>
-      {selected ? (
+      {operations.length || selection.kind === "unavailable" ? (
         <div className="operation-workbench rounded-lg border bg-card">
           <nav
             className="operation-list"
@@ -463,7 +504,7 @@ export function OperationsPage({ data }: { data: PageData }) {
                 type="button"
                 className="operation-choice"
                 key={operation.id}
-                aria-pressed={operation.id === selected.id}
+                aria-pressed={operation.id === selected?.id}
                 title={operation.command}
                 onClick={() => {
                   const next = new URL(location.href);
@@ -493,10 +534,13 @@ export function OperationsPage({ data }: { data: PageData }) {
               </button>
             ))}
           </nav>
-          <OperationDetails
-            key={`${selected.id}:${selected.updated_at}`}
-            operation={selected}
-          />
+          {selected ? (
+            <OperationDetails key={selected.id} operation={selected} />
+          ) : (
+            <Empty>
+              The selected operation is not available on this page. It may have been deleted or be outside the current search or page. Select an operation from the list or adjust the search and page.
+            </Empty>
+          )}
         </div>
       ) : (
         <Empty>

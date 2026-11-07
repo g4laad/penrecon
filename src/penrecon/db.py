@@ -42,10 +42,12 @@ enable_sqlite_fks(engine)
 
 
 def init_db() -> None:
-    """Create the data root and tables without altering an existing schema.
+    """Ensure local storage is ready before opening CLI or web sessions.
 
-    Schema changes require an explicit manual database reset; existing data is
-    never migrated or removed automatically.
+    This idempotent command creates missing tables, not engagement contents.
+    It never alters existing tables: incompatible schemas require an explicit
+    manual database reset, never an automatic migration or deletion. Readiness
+    is derived from storage, not recorded as another persisted lifecycle flag.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata

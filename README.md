@@ -288,6 +288,53 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   inputs; the browser/system chooses 12- or 24-hour display. A selected date
   defaults to midnight; use Clear date to omit that timestamp.
 
+## Workflow guarantees
+
+- **Mutation outcomes:** forms distinguish rejected input, an unconfirmed save,
+  confirmed save/reconciliation, and a confirmed save whose view refresh failed.
+  Confirmed-save recovery only refreshes the view; it never repeats the POST.
+  Unconfirmed requests keep the draft locked until you check current data or
+  explicitly return to editing, because the earlier request may have committed.
+- **Drafts:** editing modals protect unsaved changes by default, including
+  incomplete timestamp drafts and attachment choices. Closing is blocked during
+  submission/reconciliation. Intentional filter navigation is not a draft save.
+  Successful reconciliation commits the new page data before resetting forms.
+  Failed saves and failed refreshes do not reset drafts.
+- **Request ownership:** query navigation, viewport-sized host loading,
+  credential service loading, and clipboard feedback reject stale completions.
+  New navigation supersedes older requests; lazy-load failures offer page reload.
+- **Selections:** unavailable credential/operation hashes show recovery instead
+  of another record. Host inspectors commit their fallback selection, so an old
+  selection does not reappear unexpectedly when filters or pages change.
+  Empty timeline pages retain the filter and offer navigation back to page one.
+- **Credential associations:** selected hosts/services survive filtering,
+  pagination, and closing the association disclosure. Each selected host has an
+  explicit loading/ready/error/cancelled lifecycle with retry or deselection.
+  Submission checks readiness as well as a nonempty username or secret.
+  Create and edit enforce the same identity requirement on the server. Linking a
+  service without its host link is rejected; unlinking a host removes dependent
+  service links without deleting the credential.
+- **Import persistence:** parsing and staging precede raw-file retention and
+  commit. Pre-commit failure rolls back inventory and removes partial raw files;
+  cleanup failures preserve the original error. Unique retained filenames avoid
+  overwriting earlier bytes. Duplicate hosts in one import merge deterministically;
+  conflicting coverage does not invent closure. All six nmap port states survive
+  in both stored observations and current/history views.
+- **Operation attachments:** keep, replace, and remove are distinct intents.
+  Cancelling removal restores the previous replacement choice. New files are
+  compensated on rollback; old files are removed only after metadata commits.
+  If obsolete-file cleanup fails after commit, the operation remains saved and
+  the interface reports cleanup pending instead of offering to save again.
+  Mixed timezone-aware/naive timestamp pairs are rejected; aware pairs are
+  normalized to UTC for storage.
+
+These workflows do not change the evidence rules: omitted ports retain their
+last known state indefinitely, manual overrides take precedence until reset,
+hidden hostname associations stay hidden, and later explicit scans can recreate
+deleted services. Status and credential-kind labels remain freely editable
+classifications, not required progressions. Operation logs record commands;
+they do not execute them.
+
 ## Amass imports
 
 For Amass v5 (including v5.1.3), export discovered names with their IP addresses
@@ -352,8 +399,11 @@ refresh page data after success.
 
 ### Shared feature seams
 
-- `inventory.py` owns hostname/link persistence for both ingestion and manual
-  edits. Callers normalize inputs and commit; existing hidden links stay hidden.
+- `inventory.py` owns canonical identity lookup and hostname-link transitions for
+  ingestion and manual edits. Existing primary identities and hidden links survive
+  normalization; callers own commits.
+- `commands.py` owns validated service override/removal and credential association
+  transitions. `history.py` owns explicit/missing/covered scan-evidence replay.
 - `queries.latest_observations()` and the shared service-name resolver keep
   inventory, exports, and credential associations on the same current state.
   Credential assembly reuses each host's observation map.
@@ -362,3 +412,8 @@ refresh page data after success.
   handler, after ownership and attachment-conflict checks.
 - `components/credential-fields.tsx` supplies both credential editors, including
   masked, kind-aware secret controls and multiline notes.
+- Frontend page workflow modules own host selection/commands, credential
+  association readiness, and operation timestamp/attachment transitions.
+  `common.tsx` owns modal and mutation outcomes; `App.tsx` owns query/request
+  reconciliation and viewport inventory loading. Shared clipboard ownership
+  lives in `components/use-clipboard.ts`.

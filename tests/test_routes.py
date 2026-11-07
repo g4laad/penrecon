@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from starlette.testclient import TestClient
+from sqlmodel import Session
 
 from tests.fixtures import SCAN_A, SCAN_B
 from tests.fixtures import ENGAGEMENT_PREFIX
@@ -403,3 +404,132 @@ def test_search_serializes_all_result_sources(client: TestClient) -> None:
     assert data["results"]["hosts"][0]["ip"] == "10.0.0.5"
     assert data["results"]["notes"][0]["href"] == path
     assert data["results"]["credentials"][0]["username"] == "needle"
+
+
+@pytest.mark.parametrize("fields", [
+    {"port": "-1"}, {"port": "65536"}, {"port": "22", "proto": "bogus"},
+    {"port": "22", "state": "bogus"},
+])
+def test_manual_service_rejects_invalid_identity_or_state(client: TestClient, fields: dict[str, str]) -> None:
+    path = _create_host(client)
+    response = client.post(f"{path}/services", data=fields)
+    assert response.status_code == 400
+    assert response.json()["field_errors"]
+    assert client.get(path).json()["services"] == []
+
+
+def test_invalid_service_edit_preserves_overrides_and_annotation(client: TestClient) -> None:
+    path = _create_host(client)
+    service = client.post(f"{path}/services", data={"port": "22", "version": "keep"}).json()["services"][0]
+    response = client.post(ENGAGEMENT_PREFIX + f"/services/{service['service_id']}/edit", data={
+        "state": "bogus", "version": "discard", "status": "exploited",
+    })
+    assert response.status_code == 400
+    current = client.get(path).json()["services"][0]
+    assert current["version"] == "keep"
+    assert current["annotation"] is None
+
+
+def test_empty_credential_edit_is_rejected_without_changing_record(client: TestClient) -> None:
+    credential = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "root"}).json()["credentials"][0]
+    response = client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential['id']}/edit", data={
+        "username": " ", "secret": " ", "notes": "discard",
+    })
+    assert response.status_code == 422
+    persisted = client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]
+    assert persisted["username"] == "root"
+    assert persisted["notes"] == ""
+
+
+def test_credential_service_requires_explicit_host_link(client: TestClient) -> None:
+    path = _create_host(client)
+    host_id = path.rsplit("/", 1)[1]
+    service_id = client.post(f"{path}/services", data={"port": "22"}).json()["services"][0]["service_id"]
+    credential_id = client.post(ENGAGEMENT_PREFIX + "/credentials", data={"username": "root"}).json()["credentials"][0]["id"]
+    route = ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/service"
+    assert client.post(route, data={"service_id": str(service_id)}).status_code == 422
+    client.post(ENGAGEMENT_PREFIX + f"/credentials/{credential_id}/link/host", data={"host_id": host_id})
+    assert client.post(route, data={"service_id": str(service_id)}).status_code == 200
+    assert client.post(route, data={"service_id": str(service_id)}).status_code == 200
+    assert len(client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"][0]["services"]) == 1
+
+
+def test_annotation_edit_advances_timestamp_and_allows_free_classification(client: TestClient) -> None:
+    host_id = _create_host(client).rsplit("/", 1)[1]
+    route = ENGAGEMENT_PREFIX + "/annotation"
+    first = client.post(route, data={"host_id": host_id, "status": "exploited"}).json()["ann"]
+    second = client.post(route, data={"host_id": host_id, "status": "new"}).json()["ann"]
+    assert second["updated_at"] > first["updated_at"]
+    assert second["status"] == "new"
+
+
+def test_service_override_reset_delete_and_scan_recreation_keep_action_history(client: TestClient) -> None:
+    _upload(client, SCAN_A, "baseline.xml")
+    path = _create_host(client, "10.0.0.1")
+    host_id = path.rsplit("/", 1)[1]
+    service = next(service for service in client.get(path).json()["services"] if service["port"] == 22)
+    service_id = service["service_id"]
+    route = ENGAGEMENT_PREFIX + f"/services/{service_id}"
+    client.post(route + "/edit", data={"state": "filtered", "version": "override", "status": "interesting", "tags": "keep"})
+    credential_id = client.post(ENGAGEMENT_PREFIX + "/credentials", data={
+        "username": "root", "host_ids": [host_id], "service_ids": [str(service_id)],
+    }).json()["credentials"][0]["id"]
+    _upload(client, SCAN_B, "newer.xml")
+    detail = client.get(path).json()
+    overridden = next(service for service in detail["services"] if service["port"] == 22)
+    assert (overridden["state"], overridden["version"]) == ("filtered", "override")
+
+    reset = client.post(route + "/edit", data={"state": "", "version": "", "status": "interesting", "tags": "keep"})
+    inherited = next(service for service in reset.json()["services"] if service["port"] == 22)
+    assert (inherited["state"], inherited["version"]) == ("open", "9.0")
+    assert inherited["annotation"]["tags"] == ["keep"]
+    assert inherited["overrides"]["version"] is None
+    assert client.post(route + "/delete").status_code == 200
+    removed = client.get(path).json()
+    assert 22 not in [service["port"] for service in removed["services"]]
+    assert len([entry for entry in removed["host_timeline"]["entries"] if entry["source"] == "manual"]) == 3
+    credential = next(credential for credential in client.get(ENGAGEMENT_PREFIX + "/credentials").json()["credentials"] if credential["id"] == credential_id)
+    assert credential["services"] == []
+    assert len(credential["hosts"]) == 1
+
+    _upload(client, SCAN_B, "rediscovered.xml")
+    recreated = next(service for service in client.get(path).json()["services"] if service["port"] == 22)
+    assert recreated["version"] == "9.0"
+    assert recreated["annotation"] is None
+    assert all(value is None for value in recreated["overrides"].values())
+    entries = client.get(path).json()["host_timeline"]["entries"]
+    actions = [entry["changes"][0] for entry in entries if entry["source"] == "manual"]
+    assert [action["kind"] for action in actions] == ["removed", "changed", "changed"]
+    assert actions[1]["before_overrides"]["version"] == "override"
+    assert actions[1]["after_overrides"]["version"] is None
+
+
+def test_manual_host_commands_reuse_legacy_equivalence_and_guard_collisions(
+    client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from penrecon.db import get_session
+    from penrecon.models import Host, Note
+    from penrecon.web.app import app
+    from tests.fixtures import TEST_ENGAGEMENT_ID
+
+    legacy = Host(ip="2001:0DB8::0001", engagement_id=TEST_ENGAGEMENT_ID)
+    canonical = Host(ip="2001:db8::1", engagement_id=TEST_ENGAGEMENT_ID)
+    target = Host(ip="2001:db8::2", engagement_id=TEST_ENGAGEMENT_ID)
+    session.add_all([legacy, canonical, target])
+    session.flush()
+    session.add(Note(host_id=legacy.id, title="Keep", body_md="legacy notes", engagement_id=TEST_ENGAGEMENT_ID))
+    session.commit()
+    monkeypatch.setitem(app.dependency_overrides, get_session, lambda: session)
+    legacy_path = ENGAGEMENT_PREFIX + f"/hosts/{legacy.id}"
+    created = client.post(ENGAGEMENT_PREFIX + "/hosts", data={"ip": "2001:db8:0:0::1"}, follow_redirects=False)
+    assert created.status_code == 303
+    assert created.headers["location"] == legacy_path
+    unchanged = client.post(legacy_path + "/edit", data={"ip": "2001:db8::1"}, follow_redirects=False)
+    assert unchanged.status_code == 303
+    detail = client.get(legacy_path).json()
+    assert detail["host"]["ip"] == "2001:0DB8::0001"
+    assert detail["host_notes"][0]["body_md"] == "legacy notes"
+    rejected = client.post(ENGAGEMENT_PREFIX + f"/hosts/{target.id}/edit", data={"ip": "2001:db8:0:0::1"}, follow_redirects=False)
+    assert rejected.status_code == 409
+    rows = client.get(ENGAGEMENT_PREFIX + "/").json()["rows"]
+    assert {row["ip"] for row in rows} == {"2001:0DB8::0001", "2001:db8::1", "2001:db8::2"}

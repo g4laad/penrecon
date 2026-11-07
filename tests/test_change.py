@@ -3,9 +3,10 @@ from __future__ import annotations
 from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session, select
 
+from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
 from penrecon.models import Host, Scan, Service
-from penrecon.queries import host_change
+from penrecon.queries import host_change, host_rows, resolved_services
 
 
 def _change(session: Session, ip: str) -> str:
@@ -79,3 +80,84 @@ def test_manual_edit_never_flags(session: Session) -> None:
     session.commit()
     # manual overrides carry no observation; the scan story is unchanged
     assert _change(session, "10.0.0.5") == ""
+
+
+def _evidence_scan(timestamp: int, ports: str, scaninfo: str = "") -> bytes:
+    return (
+        f'<nmaprun start="{timestamp}">{scaninfo}<host><status state="up"/>'
+        '<address addr="10.0.0.20" addrtype="ipv4"/>'
+        f"<ports>{ports}</ports></host></nmaprun>"
+    ).encode()
+
+
+def test_replay_missing_covered_and_explicit_evidence_in_scan_order(session: Session) -> None:
+    baseline = _evidence_scan(
+        100,
+        '<port protocol="tcp" portid="80"><state state="open"/>'
+        '<service name="http" product="nginx" version="1.0"/></port>',
+    )
+    covered = _evidence_scan(
+        300, '<extraports state="closed" count="2"/>',
+        '<scaninfo protocol="tcp" services="22,80" numservices="2"/>',
+    )
+    partial = _evidence_scan(
+        200, '<port protocol="tcp" portid="443"><state state="open"/>'
+        '<service name="https"/></port>',
+    )
+    explicit = _evidence_scan(
+        400, '<port protocol="tcp" portid="80"><state state="filtered"/></port>',
+    )
+    # Import order is not scan chronology: the partial scan predates closure.
+    for filename, data in [
+        ("baseline.xml", baseline), ("covered.xml", covered),
+        ("partial.xml", partial), ("explicit.xml", explicit),
+    ]:
+        ingest_scan(session, data, filename, "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    host = host_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+    entries, latest = host_history(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
+
+    assert [entry.filename for entry in entries] == [
+        "baseline.xml", "partial.xml", "covered.xml", "explicit.xml",
+    ]
+    assert [(port.port, port.proto) for port in entries[1].not_reported] == [(80, "tcp")]
+    assert [(port.port, port.proto) for port in entries[2].not_reported] == [(443, "tcp")]
+    closure = entries[2].changes[0]
+    assert closure.port == 80
+    assert closure.before is not None and closure.after is not None
+    assert (closure.before.state, closure.after.state) == ("open", "closed")
+    assert (closure.after.service_name, closure.after.product, closure.after.version) == (
+        "http", "nginx", "1.0",
+    )
+    # Aggregate coverage never creates a previously unknown port (22).
+    assert set(latest) == {(80, "tcp"), (443, "tcp")}
+    # Explicit evidence, unlike coverage, can clear previously observed details.
+    assert latest[(80, "tcp")].state == "filtered"
+    assert latest[(80, "tcp")].service_name is None
+    assert latest[(80, "tcp")].product is None
+    assert latest[(80, "tcp")].version is None
+    services = resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert {(service.port, service.state) for service in services} == {
+        (80, "filtered"), (443, "open"),
+    }
+
+
+def test_coverage_without_a_unique_state_keeps_last_known_port(session: Session) -> None:
+    ambiguous = _evidence_scan(
+        300,
+        '<extraports state="closed" count="1"/>'
+        '<extraports state="filtered" count="1"/>',
+        '<scaninfo protocol="tcp" services="22,80" numservices="2"/>',
+    )
+    baseline = _evidence_scan(
+        100, '<port protocol="tcp" portid="80"><state state="open"/>'
+        '<service name="http" product="nginx" version="1.0"/></port>',
+    )
+    ingest_scan(session, baseline, "baseline.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    ingest_scan(session, ambiguous, "ambiguous.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    host = host_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+    entries, _ = host_history(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
+    entry = next(entry for entry in entries if entry.filename == "ambiguous.xml")
+    assert entry.changes == []
+    assert [(port.port, port.proto) for port in entry.not_reported] == [(80, "tcp")]
+    services = resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [(service.port, service.state, service.version) for service in services] == [(80, "open", "1.0")]

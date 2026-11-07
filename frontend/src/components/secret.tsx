@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { Copy, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useClipboard } from "./use-clipboard";
+
+type SecretVisibility = "masked" | "revealed";
 
 export function Secret({ value }: { value: string }) {
-  const [visible, setVisible] = useState(false);
-  const [status, setStatus] = useState("");
-  if (!value)
-    return <span className="muted flex min-h-7 items-center">No secret</span>;
+  // New content starts masked and cannot inherit an earlier copy request.
+  return value ? <SecretValue key={value} value={value} /> : <span className="muted flex min-h-7 items-center">No secret</span>;
+}
+
+function SecretValue({ value }: { value: string }) {
+  const [visibility, setVisibility] = useState<SecretVisibility>("masked");
+  const clipboard = useClipboard(value);
+  const visible = visibility === "revealed";
+
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setStatus("Secret copied.");
-    } catch {
-      setVisible(true);
-      setStatus(
-        "Clipboard unavailable. Select the revealed secret to copy it.",
-      );
-    }
+    if (await clipboard.copy(value) === "error") setVisibility("revealed");
   }
   return (
     <div className="stack gap-1">
@@ -29,7 +29,7 @@ export function Secret({ value }: { value: string }) {
             type="button"
             variant="ghost"
             size="icon-sm"
-            onClick={() => setVisible(!visible)}
+            onClick={() => setVisibility((current) => current === "masked" ? "revealed" : "masked")}
             aria-label={visible ? "Hide secret" : "Reveal secret"}
             title={visible ? "Hide secret" : "Reveal secret"}
             aria-pressed={visible}
@@ -43,13 +43,14 @@ export function Secret({ value }: { value: string }) {
             onClick={copy}
             aria-label="Copy secret"
             title="Copy secret"
+            aria-busy={clipboard.status === "pending"}
           >
             <Copy aria-hidden="true" />
           </Button>
         </div>
       </div>
       <span role="status" className="muted text-xs">
-        {status}
+        {clipboard.status === "pending" ? "Copying secret…" : clipboard.status === "copied" ? "Secret copied." : clipboard.status === "error" ? "Clipboard unavailable. Select the revealed secret to copy it." : ""}
       </span>
     </div>
   );

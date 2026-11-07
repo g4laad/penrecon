@@ -339,3 +339,83 @@ def test_failed_attachment_write_and_commit_leave_no_new_file(
                 attachment=("orphan.txt", b"payload", "text/plain"),
             )
     assert _attachment_files() == before_commit
+
+
+def test_operation_mixed_timezone_inputs_return_validation_error(client: TestClient) -> None:
+    response = _create_operation(client, data={
+        "started_at": "2026-09-22T10:00+02:00", "ended_at": "2026-09-22T11:00",
+    })
+    assert response.status_code == 400
+    assert "timezone" in response.json()["detail"].lower()
+    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
+
+
+def test_operation_aware_dates_are_normalized_before_storage(client: TestClient) -> None:
+    response = _create_operation(client, data={
+        "started_at": "2026-09-22T10:00+02:00", "ended_at": "2026-09-22T08:30Z",
+    })
+    assert response.status_code == 303
+    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    assert operation["started_at"] == "2026-09-22T08:00:00"
+    assert operation["ended_at"] == "2026-09-22T08:30:00"
+
+
+@pytest.mark.parametrize("action", ["replace", "remove", "delete"])
+def test_attachment_cleanup_failure_reports_committed_mutation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
+    before = _attachment_files()
+    assert _create_operation(client, attachment=("old.txt", b"old", "text/plain")).status_code == 303
+    old_file = next(iter(_attachment_files() - before))
+    operation_id = _only_operation_id(client)
+    original_unlink = Path.unlink
+
+    def deny_old_unlink(path: Path, missing_ok: bool = False) -> None:
+        if path.resolve() == old_file:
+            raise PermissionError("locked attachment")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", deny_old_unlink)
+    if action == "delete":
+        response = client.post(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/delete", follow_redirects=False)
+    else:
+        response = client.post(
+            ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+            data={"command": "committed", "remove_attachment": str(action == "remove").lower()},
+            files={"attachment": ("new.txt", b"new", "text/plain")} if action == "replace" else None,
+            follow_redirects=False,
+        )
+    assert response.status_code == 200
+    assert response.json()["committed"] is True
+    assert response.json()["cleanup_pending"] is True
+    assert old_file.is_file()
+    operations = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"]
+    if action == "delete":
+        assert operations == []
+    else:
+        assert operations[0]["command"] == "committed"
+        download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
+        assert download.content == b"new" if action == "replace" else download.status_code == 404
+
+
+def test_failed_attachment_replacement_keeps_old_metadata_and_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _create_operation(client, command="original", attachment=("old.txt", b"old", "text/plain")).status_code == 303
+    operation_id = _only_operation_id(client)
+    before = _attachment_files()
+
+    def fail_commit(session: Session) -> None:
+        raise RuntimeError("replacement commit failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Session, "commit", fail_commit)
+        with pytest.raises(RuntimeError, match="replacement commit failed"):
+            client.post(
+                ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+                data={"command": "discard"},
+                files={"attachment": ("new.txt", b"new", "text/plain")},
+            )
+    assert _attachment_files() == before
+    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]["command"] == "original"
+    assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").content == b"old"

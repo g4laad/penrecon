@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from sqlalchemy import inspect
@@ -159,7 +160,10 @@ def upsert_annotation(
     host_id: int | None = None,
     service_id: int | None = None,
 ) -> Annotation:
-    """Create or update the triage annotation (status/tags) for a host or service."""
+    """Save a free status classification and tags; existence means triaged.
+
+    No status is terminal and returning to ``new`` does not remove triage.
+    """
     ann = get_annotation(
         session, host_id=host_id, service_id=service_id, engagement_id=engagement_id
     )
@@ -168,6 +172,7 @@ def upsert_annotation(
         session.add(ann)
     ann.status = status
     ann.tags = tags
+    ann.updated_at = datetime.now(UTC)
     session.commit()
     return ann
 
@@ -335,6 +340,9 @@ def host_change(
 
     Preserve the first-sighting baseline rule: only a host introduced in the
     latest imported scan is new, and only when an earlier scan exists.
+    Otherwise ``changed`` describes the last scan of this host, not freshness:
+    unrelated later scans and manual actions do not clear it. Missing evidence
+    never expires an open service.
     """
     entries, _ = host_history(session, host_id, engagement_id=engagement_id)
     if not entries:

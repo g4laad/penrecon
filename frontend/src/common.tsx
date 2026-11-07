@@ -1,5 +1,6 @@
 import {
   createContext,
+  Component,
   useContext,
   useId,
   useState,
@@ -47,8 +48,9 @@ export const PageContext = createContext<{
   navigate: (url: string) => void;
   updateQuery: (url: string) => void;
   queryPending: boolean;
+  notify: (message: string) => void;
 } | null>(null);
-const CloseModal = createContext<(() => void) | null>(null);
+const CloseModal = createContext<{ close: () => void; committed: () => void } | null>(null);
 const FieldErrors = createContext<Record<string, string>>({});
 export function usePage() {
   const value = useContext(PageContext);
@@ -133,11 +135,30 @@ export function SelectField({
     </Field>
   );
 }
+/** Lazy-load failures are recoverable navigation states, not a blank application. */
+export class WorkflowBoundary extends Component<{ children: ReactNode }, { phase: "ready" | "failed" }> {
+  state: { phase: "ready" | "failed" } = { phase: "ready" };
+
+  static getDerivedStateFromError() {
+    return { phase: "failed" as const };
+  }
+
+  render() {
+    if (this.state.phase === "failed") {
+      return <div role="alert" className="stack">
+        <p>Unable to load this view. Reload the page to try again.</p>
+        <Button type="button" variant="outline" onClick={() => location.reload()}>Reload page</Button>
+      </div>;
+    }
+    return this.props.children;
+  }
+}
+
 export function Modal({
   title,
   trigger,
   children,
-  protectChanges = false,
+  protectChanges = true,
   className,
 }: {
   title: string;
@@ -146,28 +167,41 @@ export function Modal({
   protectChanges?: boolean | string;
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [phase, setPhase] = useState<"closed" | "clean" | "dirty" | "committed">("closed");
+  const open = phase !== "closed";
   const content = useRef<HTMLDivElement>(null);
   const initialForms = useRef<string[]>([]);
   const snapshot = useCallback((root: HTMLDivElement) =>
     Array.from(root.querySelectorAll("form"), (form) =>
-      JSON.stringify(Array.from(new FormData(form).entries(), ([name, value]) => [
-        name,
-        value instanceof File
-          ? value.name ? [value.name, value.size, value.type, value.lastModified] : null
-          : value,
-      ])),
+      JSON.stringify({
+        fields: Array.from(new FormData(form).entries(), ([name, value]) => [
+          name,
+          value instanceof File
+            ? value.name ? [value.name, value.size, value.type, value.lastModified] : null
+            : value,
+        ]),
+        // Incomplete controlled drafts may intentionally serialize no server
+        // value, but still contain work that must be protected on dismissal.
+        drafts: Array.from(form.querySelectorAll("[data-draft-value]"), (element) => element.getAttribute("data-draft-value")),
+      }),
     ), []);
+  const hasChanges = useCallback(() => content.current
+    ? JSON.stringify(snapshot(content.current)) !== JSON.stringify(initialForms.current)
+    : false, [snapshot]);
+  const trackDraft = () => queueMicrotask(() => {
+    const next = hasChanges() ? "dirty" : "clean";
+    setPhase((current) => current === "closed" || current === "committed" ? current : next);
+  });
   useEffect(() => {
-    if (!protectChanges || !dirty) return;
+    if (!protectChanges || !open || phase === "committed") return;
     const warn = (event: BeforeUnloadEvent) => {
+      if (!hasChanges()) return;
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, protectChanges]);
+  }, [open, phase, protectChanges, hasChanges]);
   const captureContent = useCallback((node: HTMLDivElement | null) => {
     content.current = node;
     if (node && protectChanges) {
@@ -176,12 +210,11 @@ export function Modal({
   }, [protectChanges, snapshot]);
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
-      if (!nextOpen && protectChanges) {
-        if (content.current?.querySelector("fieldset:disabled")) return;
-        if (dirty && !window.confirm(typeof protectChanges === "string" ? protectChanges : "Discard unsaved note changes?")) return;
+      if (!nextOpen) {
+        if (content.current?.querySelector('form[aria-busy="true"]')) return;
+        if (protectChanges && phase !== "committed" && hasChanges() && !window.confirm(typeof protectChanges === "string" ? protectChanges : "Discard unsaved changes?")) return;
       }
-      setDirty(false);
-      setOpen(nextOpen);
+      setPhase(nextOpen ? "clean" : "closed");
     }}>
       <DialogTrigger
         render={
@@ -195,27 +228,37 @@ export function Modal({
       <DialogContent className={`max-h-[90dvh] overflow-y-auto ${className ?? "sm:max-w-2xl"}`}>
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="sr-only">{title} form</DialogDescription>
-        <CloseModal.Provider value={() => { setDirty(false); setOpen(false); }}>
+        <CloseModal.Provider value={{
+          close: () => setPhase("closed"),
+          committed: () => setPhase("committed"),
+        }}>
+          <WorkflowBoundary>
           <Suspense fallback={<p role="status" className="muted text-sm">Loading form…</p>}>
           <div
             ref={captureContent}
             className="contents"
-            onInput={protectChanges ? () => {
-              if (content.current) {
-                setDirty(JSON.stringify(snapshot(content.current)) !== JSON.stringify(initialForms.current));
-              }
-            } : undefined}
+            onInput={protectChanges ? trackDraft : undefined}
+            onChange={protectChanges ? trackDraft : undefined}
           >
             {children}
           </div>
           </Suspense>
+          </WorkflowBoundary>
         </CloseModal.Provider>
       </DialogContent>
     </Dialog>
   );
 }
+type MutationState =
+  | { phase: "idle" | "saved" }
+  | { phase: "submitting" | "checking-unconfirmed" }
+  | { phase: "rejected"; message: string; fields: Record<string, string> }
+  | { phase: "unconfirmed"; message: string }
+  | { phase: "reconciling"; response: Response }
+  | { phase: "committed-refresh-failed"; response: Response };
+
 const saveRecoveryMessage =
-  "Save could not be confirmed. Check that the local penrecon server is running and your connection is available before trying again.";
+  "Save could not be confirmed. Check the current data before deciding whether to submit again.";
 
 export function MutationForm({
   action,
@@ -224,6 +267,7 @@ export function MutationForm({
   confirm: confirmation,
   className = "stack",
   encType = "multipart/form-data",
+  canSubmit = true,
 }: {
   action: string;
   children: ReactNode;
@@ -231,18 +275,60 @@ export function MutationForm({
   confirm?: string;
   className?: string;
   encType?: "multipart/form-data" | "application/x-www-form-urlencoded";
+  canSubmit?: boolean;
 }) {
-  const { refresh, navigate } = usePage();
-  const close = useContext(CloseModal);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const { refresh, navigate, notify } = usePage();
+  const modal = useContext(CloseModal);
+  const [state, setState] = useState<MutationState>({ phase: "idle" });
+  // Own the active operation synchronously, including two submits in one event turn.
+  const operation = useRef<symbol | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const busy = state.phase === "submitting" || state.phase === "reconciling" || state.phase === "checking-unconfirmed";
+  const editable = state.phase === "idle" || state.phase === "saved" || state.phase === "rejected";
+  const fieldErrors = state.phase === "rejected" ? state.fields : {};
   useEffect(() => {
-    if (!busy && Object.keys(fieldErrors).length) {
+    if (state.phase === "rejected") {
       formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
     }
-  }, [busy, fieldErrors]);
+  }, [state]);
+
+  async function reconcile(response: Response) {
+    setState({ phase: "reconciling", response });
+    try {
+      if (onSuccess) await onSuccess(response);
+      else if (response.redirected && new URL(response.url).pathname !== location.pathname) {
+        navigate(response.url);
+      } else {
+        await refresh();
+        formRef.current?.reset();
+      }
+      setState({ phase: "saved" });
+      modal?.close();
+    } catch {
+      // The POST already succeeded. Recovery must never submit it again.
+      setState({ phase: "committed-refresh-failed", response });
+    }
+  }
+
+  async function recover() {
+    if (operation.current) return;
+    operation.current = Symbol("recovery");
+    try {
+      if (state.phase === "committed-refresh-failed") await reconcile(state.response);
+      else if (state.phase === "unconfirmed") {
+        setState({ phase: "checking-unconfirmed" });
+        try {
+          await refresh();
+          setState({ phase: "unconfirmed", message: "Current data loaded. Check whether your change was saved before submitting again." });
+        } catch {
+          setState({ phase: "unconfirmed", message: "Unable to load current data. Check that the local server is running, then check again." });
+        }
+      }
+    } finally {
+      operation.current = null;
+    }
+  }
+
   return (
     <form
       ref={formRef}
@@ -250,75 +336,90 @@ export function MutationForm({
       method="post"
       encType={encType}
       className={className}
+      data-mutation-state={state.phase}
+      aria-busy={busy}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (busy || (confirmation && !window.confirm(confirmation))) return;
-        const form = event.currentTarget;
-        const body = new FormData(form);
-        setBusy(true);
-        setError("");
-        setFieldErrors({});
+        if (operation.current || !editable) return;
+        if (!canSubmit) {
+          setState({ phase: "rejected", message: "Complete the required fields and wait for selected targets to load before saving.", fields: {} });
+          return;
+        }
+        if (confirmation && !window.confirm(confirmation)) return;
+        const body = new FormData(event.currentTarget);
+        operation.current = Symbol("submission");
+        setState({ phase: "submitting" });
         try {
-          const response = await fetch(engagementUrl(action), {
-            method: "POST",
-            // Multipart serialization normalizes newlines to CRLF. Text-only
-            // Markdown forms use URL encoding to preserve their exact source.
-            body: encType === "application/x-www-form-urlencoded"
-              ? new URLSearchParams(Array.from(body, ([key, value]) => [key, String(value)]))
-              : body,
-            headers: { Accept: "application/json" },
-          });
+          let response: Response;
+          try {
+            response = await fetch(engagementUrl(action), {
+              method: "POST",
+              // URL encoding preserves exact Markdown newlines.
+              body: encType === "application/x-www-form-urlencoded"
+                ? new URLSearchParams(Array.from(body, ([key, value]) => [key, String(value)]))
+                : body,
+              headers: { Accept: "application/json" },
+            });
+          } catch {
+            setState({ phase: "unconfirmed", message: saveRecoveryMessage });
+            return;
+          }
           if (!response.ok) {
-            const text = await response.text();
-            let message = saveRecoveryMessage;
+            let message = response.status >= 500 ? saveRecoveryMessage : `Unable to save (${response.status}). Check the form and try again.`;
+            let fields: Record<string, string> = {};
             try {
-              const parsed = JSON.parse(text) as { detail?: unknown; field_errors?: Record<string, string> };
-              setFieldErrors(parsed.field_errors ?? {});
-              message =
-                typeof parsed.detail === "string"
-                  ? parsed.detail
-                  : saveRecoveryMessage;
-            } catch {
-              // Unstructured server responses do not provide recovery instructions.
-              message = saveRecoveryMessage;
-            }
-            throw new Error(message);
+              const parsed = await response.json() as { detail?: unknown; field_errors?: unknown };
+              if (typeof parsed.detail === "string") message = parsed.detail;
+              if (parsed.field_errors && typeof parsed.field_errors === "object") {
+                fields = Object.fromEntries(Object.entries(parsed.field_errors).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+              }
+            } catch { /* Keep actionable fallback for unstructured responses. */ }
+            setState(response.status >= 500
+              ? { phase: "unconfirmed", message: saveRecoveryMessage }
+              : { phase: "rejected", message, fields });
+            return;
           }
-          if (onSuccess) await onSuccess(response);
-          else if (
-            response.redirected &&
-            new URL(response.url).pathname !== location.pathname
-          )
-            navigate(response.url);
-          else {
-            await refresh();
-            form.reset();
+          if (response.headers.get("content-type")?.includes("application/json")) {
+            try {
+              const outcome = await response.clone().json() as { committed?: unknown; cleanup_pending?: unknown; detail?: unknown };
+              if (outcome.committed === true && outcome.cleanup_pending === true && typeof outcome.detail === "string") {
+                notify(outcome.detail);
+              }
+            } catch { /* Successful responses need not carry a mutation notice. */ }
           }
-          close?.();
-        } catch (reason) {
-          setError(reason instanceof TypeError || !(reason instanceof Error)
-            ? saveRecoveryMessage
-            : reason.message);
+          modal?.committed();
+          await reconcile(response);
         } finally {
-          setBusy(false);
+          operation.current = null;
         }
       }}
     >
       <FieldErrors.Provider value={fieldErrors}>
-        <fieldset disabled={busy} className="contents">
+        <fieldset disabled={!editable} className="contents">
           {children}
         </fieldset>
       </FieldErrors.Provider>
-      {busy && (
-        <p role="status" className="muted text-sm">
-          Saving…
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {Object.keys(fieldErrors).length ? "Correct the highlighted fields and submit again." : error}
-        </p>
-      )}
+      <p role="status" className={busy ? "muted text-sm" : "sr-only"}>
+        {state.phase === "submitting" ? "Saving…" : state.phase === "reconciling" ? "Saved. Updating view…" : state.phase === "checking-unconfirmed" ? "Checking current data…" : ""}
+      </p>
+      {state.phase === "rejected" && <p role="alert" className="text-sm text-destructive">
+        {Object.keys(state.fields).length ? "Correct the highlighted fields and submit again." : state.message}
+      </p>}
+      {state.phase === "committed-refresh-failed" && <div role="alert" className="stack text-sm">
+        <p>Saved, but the view could not be updated. Refresh the view without submitting again.</p>
+        <Button type="button" variant="outline" onClick={() => void recover()}>Refresh view</Button>
+      </div>}
+      {state.phase === "unconfirmed" && <div role="alert" className="stack text-sm">
+        <p>{state.message}</p>
+        <div className="actions">
+          <Button type="button" variant="outline" onClick={() => void recover()}>Check current data</Button>
+          <Button type="button" variant="outline" onClick={() => {
+            if (window.confirm("The earlier request may have saved. Submitting again could duplicate it. Return to editing?")) {
+              setState({ phase: "idle" });
+            }
+          }}>Return to editing</Button>
+        </div>
+      </div>}
     </form>
   );
 }

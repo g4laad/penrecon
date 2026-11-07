@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useReducer, useRef } from "react";
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -112,6 +112,30 @@ function insertCode(view: EditorView) {
 }
 
 type EditorMode = "write" | "preview" | "split";
+type EditorSize = "compact" | "expanded";
+type EditorEditability = "editable" | "locked";
+type MarkdownWorkspace = {
+  source: string;
+  mode: EditorMode;
+  size: EditorSize;
+  editability: EditorEditability;
+};
+type MarkdownWorkspaceEvent =
+  | { type: "source-edited"; source: string }
+  | { type: "mode-selected"; mode: EditorMode }
+  | { type: "size-toggled" }
+  | { type: "editability-changed"; editability: EditorEditability };
+type EditorLifecycle = { phase: "detached" } | { phase: "ready"; view: EditorView };
+
+function transitionMarkdownWorkspace(state: MarkdownWorkspace, event: MarkdownWorkspaceEvent): MarkdownWorkspace {
+  switch (event.type) {
+    // CodeMirror's transaction filter, not React's asynchronous render, guards edits.
+    case "source-edited": return { ...state, source: event.source };
+    case "editability-changed": return { ...state, editability: event.editability };
+    case "mode-selected": return state.editability === "locked" ? state : { ...state, mode: event.mode };
+    case "size-toggled": return state.editability === "locked" ? state : { ...state, size: state.size === "compact" ? "expanded" : "compact" };
+  }
+}
 
 export function MarkdownEditor({
   defaultValue = "",
@@ -121,12 +145,15 @@ export function MarkdownEditor({
   name?: string;
 }) {
   // A failed save or a parent rerender must not replace an in-progress draft.
-  const initialSource = useRef(defaultValue);
-  const [source, setSource] = useState(defaultValue);
-  const [mode, setMode] = useState<EditorMode>("write");
-  const [expanded, setExpanded] = useState(false);
+  const draft = useRef(defaultValue);
+  const [{ source, mode, size, editability: workspaceEditability }, dispatch] = useReducer(transitionMarkdownWorkspace, {
+    source: defaultValue,
+    mode: "write",
+    size: "compact",
+    editability: "editable",
+  });
   const editorParent = useRef<HTMLDivElement>(null);
-  const editor = useRef<EditorView | null>(null);
+  const editor = useRef<EditorLifecycle>({ phase: "detached" });
   const hiddenInput = useRef<HTMLInputElement>(null);
   const labelId = useId();
   const helpId = useId();
@@ -149,7 +176,7 @@ export function MarkdownEditor({
     const view = new EditorView({
       parent,
       state: EditorState.create({
-        doc: initialSource.current,
+        doc: draft.current,
         extensions: [
           // Keep CR characters in existing CRLF/mixed-line-ending notes rather
           // than silently normalizing the saved source when the editor mounts.
@@ -187,15 +214,22 @@ export function MarkdownEditor({
             // Update FormData before notifying the parent's draft guard. No
             // event is emitted for initial content or read-only reconfiguration.
             input.value = nextSource;
-            setSource(nextSource);
+            draft.current = nextSource;
+            dispatch({ type: "source-edited", source: nextSource });
             input.dispatchEvent(new Event("input", { bubbles: true }));
           }),
         ],
       }),
     });
-    editor.current = view;
+    editor.current = { phase: "ready", view };
+    let currentEditability: EditorEditability = input.matches(":disabled") ? "locked" : "editable";
+    dispatch({ type: "editability-changed", editability: currentEditability });
     const observer = new MutationObserver(() => {
+      const nextEditability = input.matches(":disabled") ? "locked" : "editable";
+      if (nextEditability === currentEditability) return;
+      currentEditability = nextEditability;
       view.dispatch({ effects: editability.reconfigure(editableExtensions()) });
+      dispatch({ type: "editability-changed", editability: nextEditability });
     });
     for (let ancestor = input.parentElement; ancestor; ancestor = ancestor.parentElement) {
       if (ancestor instanceof HTMLFieldSetElement) {
@@ -204,23 +238,24 @@ export function MarkdownEditor({
     }
     return () => {
       observer.disconnect();
-      editor.current = null;
+      editor.current = { phase: "detached" };
       view.destroy();
     };
   }, [helpId, labelId]);
 
   useEffect(() => {
-    if (mode !== "preview") editor.current?.requestMeasure();
-  }, [mode, expanded]);
+    if (mode !== "preview" && editor.current.phase === "ready") editor.current.view.requestMeasure();
+  }, [mode, size]);
 
   function format(command: (view: EditorView) => boolean) {
-    const view = editor.current;
-    if (!view || hiddenInput.current?.matches(":disabled")) return;
-    command(view);
-    view.focus();
+    const lifecycle = editor.current;
+    if (lifecycle.phase !== "ready" || mode === "preview" || hiddenInput.current?.matches(":disabled")) return;
+    command(lifecycle.view);
+    lifecycle.view.focus();
   }
 
-  const paneHeight = expanded ? "min(55dvh, 40rem)" : "18rem";
+  const paneHeight = size === "expanded" ? "min(55dvh, 40rem)" : "18rem";
+  const formattingDisabled = mode === "preview" || workspaceEditability === "locked";
 
   return (
     <div className="min-w-0 space-y-2">
@@ -235,7 +270,7 @@ export function MarkdownEditor({
               variant={mode === value ? "secondary" : "ghost"}
               aria-pressed={mode === value}
               aria-controls={value === "write" ? editorId : value === "preview" ? previewId : `${editorId} ${previewId}`}
-              onClick={() => setMode(value)}
+              onClick={() => dispatch({ type: "mode-selected", mode: value })}
             >
               {value === "write" ? "Write" : value === "preview" ? "Preview" : "Split"}
             </Button>
@@ -244,20 +279,20 @@ export function MarkdownEditor({
             type="button"
             size="sm"
             variant="ghost"
-            aria-pressed={expanded}
-            onClick={() => setExpanded(!expanded)}
+            aria-pressed={size === "expanded"}
+            onClick={() => dispatch({ type: "size-toggled" })}
           >
-            {expanded ? "Compact editor" : "Expand editor"}
+            {size === "expanded" ? "Compact editor" : "Expand editor"}
           </Button>
         </div>
       </div>
       <div role="group" aria-label="Markdown formatting" className="flex flex-wrap gap-1">
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} title="Bold (Ctrl/Cmd+B)" onClick={() => format((view) => wrapSelection(view, "**", "**"))}><strong>Bold</strong></Button>
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} title="Italic (Ctrl/Cmd+I)" onClick={() => format((view) => wrapSelection(view, "*", "*"))}><em>Italic</em></Button>
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} onClick={() => format((view) => prefixLines(view, "## "))}>Heading</Button>
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} onClick={() => format((view) => prefixLines(view, "- "))}>List</Button>
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} onClick={() => format((view) => wrapSelection(view, "[", "]()"))}>Link</Button>
-        <Button type="button" size="sm" variant="outline" disabled={mode === "preview"} onClick={() => format(insertCode)}>Code</Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} title="Bold (Ctrl/Cmd+B)" onClick={() => format((view) => wrapSelection(view, "**", "**"))}><strong>Bold</strong></Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} title="Italic (Ctrl/Cmd+I)" onClick={() => format((view) => wrapSelection(view, "*", "*"))}><em>Italic</em></Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} onClick={() => format((view) => prefixLines(view, "## "))}>Heading</Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} onClick={() => format((view) => prefixLines(view, "- "))}>List</Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} onClick={() => format((view) => wrapSelection(view, "[", "]()"))}>Link</Button>
+        <Button type="button" size="sm" variant="outline" disabled={formattingDisabled} onClick={() => format(insertCode)}>Code</Button>
       </div>
       <div className={mode === "split" ? "grid min-w-0 gap-3 md:grid-cols-2" : "min-w-0"}>
         <div

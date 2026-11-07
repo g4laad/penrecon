@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-from ipaddress import ip_address
 from typing import Any
 
+from penrecon.inventory import normalize_hostname, normalize_ip
 from penrecon.parsers import HostResult, ScanResult
 
 _ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
@@ -37,12 +37,13 @@ def parse(data: bytes) -> ScanResult:
     hosts: dict[str, HostResult] = {}
 
     def add(name: str, addresses: list[str], location: str) -> None:
-        name = name.strip().rstrip(".").lower()
-        if not name or any(char.isspace() for char in name):
-            raise ValueError(f"Invalid Amass hostname at {location}")
+        try:
+            name = normalize_hostname(name)
+        except ValueError as exc:
+            raise ValueError(f"Invalid Amass hostname at {location}") from exc
         for address in addresses:
             try:
-                ip = str(ip_address(address.strip()))
+                ip = normalize_ip(address)
             except ValueError as exc:
                 raise ValueError(f"Invalid Amass IP address {address!r} at {location}") from exc
             host = hosts.setdefault(ip, HostResult(ip=ip))

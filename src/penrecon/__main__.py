@@ -68,7 +68,7 @@ def _ingest(args: argparse.Namespace) -> None:
 
 
 def _seed(args: argparse.Namespace) -> None:
-    from penrecon.seed import seed_database
+    from penrecon.seed import seed_mock_engagement
 
     if not 100 <= args.count <= 131070:
         raise SystemExit("count must be between 100 and 131070")
@@ -76,18 +76,14 @@ def _seed(args: argparse.Namespace) -> None:
     print("Creating 10 mock engagements (no network commands executed):")
     with Session(engine) as session:
         for number in range(1, 11):
-            engagement = Engagement(
-                name=f"Mock engagement {number:02d}",
-                description="Synthetic recon workspace for local testing only.",
-            )
-            session.add(engagement)
-            session.flush()
             try:
-                counts = seed_database(session, args.count, engagement_id=engagement.id)
+                outcome = seed_mock_engagement(
+                    session, args.count, name=f"Mock engagement {number:02d}",
+                )
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
-            print(f"{engagement.id}\t{engagement.name}")
-            for table, count in counts.items():
+            print(f"{outcome.engagement_id}\t{outcome.name}")
+            for table, count in outcome.counts.items():
                 print(f"  {table}: {count}")
     print("Created 10 mock engagements.")
 
