@@ -134,9 +134,16 @@ export interface Engagement {
   description: string;
   created_at: string;
 }
-export interface PageData {
-  engagement?: Pick<Engagement, "id" | "name">;
-  engagements: Engagement[];
+export type EngagementOption = Pick<Engagement, "id" | "name">;
+export type ServiceOption = Pick<Service, "service_id" | "port" | "proto" | "service_name">;
+
+export interface BootstrapData {
+  engagement?: EngagementOption;
+  engagements: EngagementOption[];
+}
+
+export interface PageData extends BootstrapData {
+  catalog?: Engagement[];
   rows?: HostRow[];
   total?: number;
   matched?: number;
@@ -154,7 +161,6 @@ export interface PageData {
   states?: string[];
   kinds?: string[];
   host?: Host;
-  hosts?: Pick<Host, "id" | "ip">[];
   hostnames?: [number, string][];
   host_ann?: Annotation | null;
   host_notes?: Note[];

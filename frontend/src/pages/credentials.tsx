@@ -17,9 +17,9 @@ import {
 import type { PageData } from "../types";
 import { CredentialCreateForm } from "./credential-create";
 import { credentialDraftValidity, resolveCredentialScope, resolveCredentialSelection } from "./credential-workflow";
+import { useHostOptions, type HostOptions } from "./credential-host-options";
 
 type Credential = NonNullable<PageData["credentials"]>[number];
-type Host = NonNullable<PageData["hosts"]>[number];
 
 type AssociationPicker =
   | { status: "available"; options: { value: string; label: string }[] }
@@ -48,11 +48,12 @@ function LinkAssociationForm({ credentialId, target, picker }: {
 }
 function CredentialLinks({
   credential,
-  hosts,
+  hostOptions,
 }: {
   credential: Credential;
-  hosts: Host[];
+  hostOptions: HostOptions;
 }) {
+  const hosts = hostOptions.hosts;
   const availableHosts = hosts.filter(
     (host) => !credential.hosts.some((link) => link.host_id === host.id),
   );
@@ -102,7 +103,12 @@ function CredentialLinks({
             <span className="muted text-xs">No linked hosts.</span>
           )}
         </div>
-        <LinkAssociationForm credentialId={credential.id} target="host" picker={hostPicker} />
+        <p role="status" className="muted text-xs">{hostOptions.status === "idle" || hostOptions.status === "loading" ? "Loading hosts…" : ""}</p>
+        {hostOptions.status === "error" && <div className="grid gap-2">
+          <p role="alert" className="text-xs text-destructive">Unable to load hosts. Retry to link a host.</p>
+          <Button type="button" variant="outline" size="sm" onClick={hostOptions.load}>Retry hosts</Button>
+        </div>}
+        {hostOptions.status === "ready" && <LinkAssociationForm credentialId={credential.id} target="host" picker={hostPicker} />}
       </div>
       <div className="stack gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide">
@@ -161,11 +167,11 @@ function CredentialEditForm({ credential, kinds }: { credential: Credential; kin
 function CredentialDetail({
   credential,
   kinds,
-  hosts,
+  hostOptions,
 }: {
   credential: Credential;
   kinds: string[];
-  hosts: Host[];
+  hostOptions: HostOptions;
 }) {
   return (
     <article className="credential-detail" aria-labelledby="credential-title">
@@ -205,7 +211,7 @@ function CredentialDetail({
         <h3 id="credential-scope" className="credential-label text-xs">
           Scope
         </h3>
-        <CredentialLinks credential={credential} hosts={hosts} />
+        <CredentialLinks credential={credential} hostOptions={hostOptions} />
         <p className="muted text-xs">
           Associations only; links do not establish that access was verified.
         </p>
@@ -260,7 +266,6 @@ export function CredentialsPage({ data }: { data: PageData }) {
   const resolvedScope = resolveCredentialScope(scope);
   const all = data.credentials ?? [];
   const kinds = data.kinds ?? [];
-  const hosts = data.hosts ?? [];
   const credentials = all.filter((credential) => {
     const linked = Boolean(
       credential.hosts.length || credential.services.length,
@@ -285,6 +290,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
   });
   const selection = resolveCredentialSelection(currentUrl.hash, all, credentials);
   const selected = selection.status === "selected" ? selection.credential : undefined;
+  const hostOptions = useHostOptions(Boolean(selected));
   function filter(values: Record<string, string>) {
     const next = new URL(location.href);
     for (const [key, value] of Object.entries(values)) {
@@ -303,7 +309,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
           protectChanges="Discard unsaved credential changes?"
           trigger={<Button type="button">Add credential</Button>}
         >
-          <CredentialCreateForm kinds={kinds} hosts={hosts} />
+          <CredentialCreateForm kinds={kinds} hostOptions={hostOptions} />
         </Modal>
       </PageHeader>
       <div
@@ -413,7 +419,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
             key={selected.id}
             credential={selected}
             kinds={kinds}
-            hosts={hosts}
+            hostOptions={hostOptions}
           /> : <Empty>
             <p>{selection.status === "unavailable" && selection.reason === "filtered" ? "This credential is hidden by the current filters." : "The requested credential is unavailable. It may have been deleted."}</p>
             <div className="actions mt-3 justify-center">

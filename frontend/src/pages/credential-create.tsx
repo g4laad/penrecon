@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Field, MutationForm, engagementUrl } from "../common";
-import type { Host, PageData } from "../types";
+import type { Host, ServiceOption } from "../types";
 import { associationReadiness, credentialDraftValidity, initialAssociations, transitionAssociations, type AssociationEvent, type CredentialTarget } from "./credential-workflow";
+import type { HostOptions } from "./credential-host-options";
 
 const HOSTS_PER_PAGE = 50;
 
@@ -24,13 +25,13 @@ function HostServices({ host, target, dispatch }: {
     dispatch({ type: "started", hostId: host.id, attempt, request });
     void (async () => {
       try {
-        const response = await fetch(engagementUrl(`/hosts/${host.id}?per=all`), {
+        const response = await fetch(engagementUrl(`/options/hosts/${host.id}/services`), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         if (!response.ok) throw new Error("Unable to load services.");
-        const page = await response.json() as PageData;
+        const options = await response.json() as { services: ServiceOption[] };
         if (!controller.signal.aborted) {
-          dispatch({ type: "loaded", hostId: host.id, attempt, request, services: page.services ?? [] });
+          dispatch({ type: "loaded", hostId: host.id, attempt, request, services: options.services });
         }
       } catch {
         if (!controller.signal.aborted) dispatch({ type: "failed", hostId: host.id, attempt, request });
@@ -59,7 +60,8 @@ function HostServices({ host, target, dispatch }: {
   </div>;
 }
 
-export function CredentialCreateForm({ hosts, kinds }: { hosts: Pick<Host, "id" | "ip">[]; kinds: string[] }) {
+export function CredentialCreateForm({ hostOptions, kinds }: { hostOptions: HostOptions; kinds: string[] }) {
+  const hosts = hostOptions.hosts;
   const [kind, setKind] = useState(() => kinds.includes("password") ? "password" : kinds[0] ?? "");
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
@@ -99,17 +101,25 @@ export function CredentialCreateForm({ hosts, kinds }: { hosts: Pick<Host, "id" 
     </div>
     <CredentialSecretInput key={kind} kind={kind} value={secret} onChange={setSecret} />
     <Field label="Discovery notes (optional)"><Textarea name="notes" rows={3} placeholder="Where was it found? What context should you keep?" /></Field>
-    <details className="rounded-md border p-3" onToggle={(event) => setDisclosure(event.currentTarget.open ? "open" : "closed")}>
+    <details className="rounded-md border p-3" onToggle={(event) => {
+      setDisclosure(event.currentTarget.open ? "open" : "closed");
+      if (event.currentTarget.open) hostOptions.load();
+    }}>
       <summary className="cursor-pointer text-sm font-semibold">Target associations · {hostIds.length} hosts / {serviceCount} services</summary>
       {disclosure !== "unopened" && <section className="grid gap-3 pt-4" aria-label="Target associations">
         <div><h3 className="text-sm font-semibold">Link targets <span className="font-normal text-muted-foreground">· optional</span></h3><p className="mt-1 text-xs text-muted-foreground">Choose hosts, then specific services. Links record scope, not verified access.</p></div>
+        <p role="status" className="text-xs text-muted-foreground">{hostOptions.status === "idle" || hostOptions.status === "loading" ? "Loading hosts… You can still save an unlinked credential." : ""}</p>
+        {hostOptions.status === "error" && <div className="grid gap-2">
+          <p role="alert" className="text-xs text-destructive">Unable to load hosts. Retry or save an unlinked credential.</p>
+          <Button type="button" variant="outline" size="sm" onClick={hostOptions.load}>Retry hosts</Button>
+        </div>}
         <Input type="search" aria-label="Search target hosts" placeholder="Search hosts by IP…" value={query} onChange={(event) => { setQuery(event.target.value); setHostPage(1); }} />
         <div className="max-h-56 overflow-y-auto rounded-md border">
           {renderedHosts.map((host) => <div key={host.id} hidden={!visibleHostIds.has(host.id)} className="border-b last:border-b-0">
             <label className="flex min-w-0 cursor-pointer items-center gap-3 p-3 text-sm hover:bg-muted/40"><input type="checkbox" className="size-4 shrink-0 accent-primary" value={host.id} checked={host.id in targets} onChange={() => dispatch({ type: "toggle-host", hostId: host.id })} /><span className="mono min-w-0 break-all">{host.ip}</span></label>
             {host.id in targets && <HostServices host={host} target={targets[host.id]} dispatch={dispatch} />}
           </div>)}
-          {!hosts.length && <p className="p-3 text-sm text-muted-foreground">No hosts yet. You can save an unlinked credential.</p>}
+          {hostOptions.status === "ready" && !hosts.length && <p className="p-3 text-sm text-muted-foreground">No hosts yet. You can save an unlinked credential.</p>}
           {hosts.length > 0 && !matchingHosts.length && <p className="p-3 text-sm text-muted-foreground">No matching hosts. Existing selections are kept.</p>}
         </div>
         {matchingHosts.length > HOSTS_PER_PAGE && <nav aria-label="Target host pagination" className="flex flex-wrap items-center justify-between gap-2">

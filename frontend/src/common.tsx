@@ -46,7 +46,7 @@ export const PageContext = createContext<{
   data: PageData;
   refresh: () => Promise<void>;
   navigate: (url: string) => void;
-  updateQuery: (url: string) => void;
+  updateQuery: (url: string, replace?: boolean) => void;
   queryPending: boolean;
   notify: (message: string) => void;
 } | null>(null);
@@ -475,15 +475,30 @@ export function Section({
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
+function QueryForm({ children, resetPage = false, ...props }: ComponentProps<"form"> & { resetPage?: boolean }) {
+  const { updateQuery } = usePage();
+  return <form {...props} method="get" onSubmit={(event) => {
+    event.preventDefault();
+    const target = new URL(location.href);
+    const fields = new FormData(event.currentTarget);
+    if (resetPage) target.searchParams.set("page", "1");
+    for (const key of new Set(fields.keys())) {
+      target.searchParams.delete(key);
+      for (const value of fields.getAll(key)) target.searchParams.append(key, String(value));
+    }
+    updateQuery(target.href);
+  }}>{children}</form>;
+}
+
 export function Filters({ children }: { children: ReactNode }) {
   return (
-    <form
-      method="get"
+    <QueryForm
+      resetPage
       className="mb-3 flex flex-wrap items-end gap-2"
       role="search"
     >
       {children}
-    </form>
+    </QueryForm>
   );
 }
 export function SortLink({
@@ -502,7 +517,7 @@ export function SortLink({
   );
   params.set("page", "1");
   return (
-    <a
+    <QueryLink
       className="inline-flex items-center gap-1 hover:text-foreground"
       href={"?" + params.toString()}
     >
@@ -510,7 +525,7 @@ export function SortLink({
       <span aria-hidden="true">
         {data.sort === column ? (data.direction === "desc" ? "↓" : "↑") : "↕"}
       </span>
-    </a>
+    </QueryLink>
   );
 }
 export function Pager({
@@ -536,7 +551,7 @@ export function Pager({
         {total !== undefined ? `${total} results · ` : ""}Page {page} of {pages}
       </span>
       <div className="flex flex-wrap items-end gap-2">
-        <form method="get" className="flex flex-wrap items-end gap-2">
+        <QueryForm className="flex flex-wrap items-end gap-2">
           {Array.from(new URLSearchParams(location.search))
             .filter(([key]) => key !== "per" && key !== "page")
             .map(([key, value], index) => (
@@ -560,18 +575,18 @@ export function Pager({
           <Button type="submit" variant="outline">
             Go
           </Button>
-        </form>
+        </QueryForm>
         <Button
           variant="outline"
           disabled={page <= 1}
-          render={<a href={url(page - 1)} aria-label="Previous page" />}
+          render={<QueryLink href={url(page - 1)} aria-label="Previous page" />}
         >
           Previous
         </Button>
         <Button
           variant="outline"
           disabled={page >= pages}
-          render={<a href={url(page + 1)} aria-label="Next page" />}
+          render={<QueryLink href={url(page + 1)} aria-label="Next page" />}
         >
           Next
         </Button>

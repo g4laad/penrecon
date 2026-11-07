@@ -1,4 +1,4 @@
-import { ScopedLink } from "../common";
+import { QueryLink, ScopedLink, engagementUrl } from "../common";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -472,7 +472,7 @@ export function OperationsPage({ data }: { data: PageData }) {
           {data.q && (
             <Button
               variant="ghost"
-              render={<ScopedLink href={`/operations?per=${data.per ?? "25"}`} />}
+              render={<QueryLink href={engagementUrl(`/operations?per=${data.per ?? "25"}`)} />}
             >
               Reset
             </Button>

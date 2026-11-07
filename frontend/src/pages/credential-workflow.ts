@@ -1,4 +1,4 @@
-import type { Credential, Service } from "../types";
+import type { Credential, ServiceOption } from "../types";
 
 export type DraftValidity = "empty" | "valid";
 export function credentialDraftValidity(username: string, secret: string): DraftValidity {
@@ -7,7 +7,7 @@ export function credentialDraftValidity(username: string, secret: string): Draft
 
 export type ServiceLoad =
   | { status: "loading"; request: symbol | null }
-  | { status: "ready"; services: Service[] }
+  | { status: "ready"; services: ServiceOption[] }
   | { status: "error" }
   | { status: "aborted" };
 
@@ -27,7 +27,7 @@ export type AssociationEvent =
   | { type: "toggle-service"; hostId: number; serviceId: number }
   | { type: "retry"; hostId: number }
   | { type: "started"; hostId: number; attempt: number; request: symbol }
-  | { type: "loaded"; hostId: number; attempt: number; request: symbol; services: Service[] }
+  | { type: "loaded"; hostId: number; attempt: number; request: symbol; services: ServiceOption[] }
   | { type: "failed" | "aborted"; hostId: number; attempt: number; request: symbol };
 
 export function transitionAssociations(state: AssociationState, event: AssociationEvent): AssociationState {

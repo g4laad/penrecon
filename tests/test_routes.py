@@ -45,7 +45,7 @@ def _upload(client: TestClient, content: str, filename: str) -> None:
 
 
 @pytest.mark.parametrize("accept", ["text/html", "*/*", ""])
-def test_page_shell_embeds_same_safe_data_and_local_assets(client: TestClient, accept: str) -> None:
+def test_page_shell_embeds_safe_context_bootstrap_and_local_assets(client: TestClient, accept: str) -> None:
     query = '</script><script>alert("x")</script>&>\u2028\u2029tail'
     expected = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": query}).json()
     response = client.get(ENGAGEMENT_PREFIX + "/search", params={"q": query}, headers={"Accept": accept})
@@ -61,7 +61,7 @@ def test_page_shell_embeds_same_safe_data_and_local_assets(client: TestClient, a
     assert match is not None
     embedded = match.group(1)
     assert not any(character in embedded for character in "<>&\u2028\u2029")
-    assert json.loads(embedded) == expected
+    assert json.loads(embedded) == {**client.get(ENGAGEMENT_PREFIX + "/bootstrap").json(), **expected}
     assert expected["q"] == query
     assert "request" not in expected
 
@@ -105,15 +105,14 @@ def test_page_json_contexts(client: TestClient, path: str, key: str) -> None:
     assert response.headers["vary"] == "Accept"
     data = response.json()
     assert key in data
-    assert data["engagement"]["id"] == ENGAGEMENT_PREFIX.rsplit("/", 1)[1]
-    assert any(item["id"] == data["engagement"]["id"] for item in data["engagements"])
+    assert "engagement" not in data
+    assert "engagements" not in data
     assert "request" not in data
-    assert "per_page_choices" not in data
     html = client.get(path, headers={"Accept": "text/html"})
     assert html.status_code == 200
     match = re.search(r'<script id="page-data" type="application/json">(.*?)</script>', html.text)
     assert match is not None
-    assert "per_page_choices" not in json.loads(match.group(1))
+    assert json.loads(match.group(1))["engagement"]["id"] == ENGAGEMENT_PREFIX.rsplit("/", 1)[1]
 
 
 def test_missing_host_404(client: TestClient) -> None:

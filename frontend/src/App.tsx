@@ -37,6 +37,7 @@ import {
 } from "./common";
 import type { HostRow, PageData } from "./types";
 import { AppShell, navigation } from "./components/app-shell";
+import { queryResources } from "./lib/query-data";
 
 const HostPage = lazy(() =>
   import("./pages/host").then((module) => ({ default: module.HostPage })),
@@ -153,22 +154,13 @@ function HostTable({
     </Table>
   );
 }
-type InventoryState =
-  | { phase: "measuring" }
-  | { phase: "loading"; source: PageData; capacity: number; attempt: number }
-  | { phase: "ready"; source: PageData; capacity: number; attempt: number; data: PageData }
-  | { phase: "failed"; source: PageData; capacity: number; attempt: number; message: string };
 
 function Inventory({ data }: { data: PageData }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [capacity, setCapacity] = useState(0);
-  const [state, setState] = useState<InventoryState>({ phase: "measuring" });
-  const [retry, setRetry] = useState(0);
-  const view: InventoryState = state.phase !== "measuring" && state.source === data && state.capacity === capacity && state.attempt === retry
-    ? state : capacity ? { phase: "loading", source: data, capacity, attempt: retry } : { phase: "measuring" };
-  const ready = view.phase === "ready";
-  const current = view.phase === "ready" ? view.data : data;
-  const error = view.phase === "failed" ? view.message : "";
+  const { updateQuery, queryPending } = usePage();
+  const ready = capacity > 0 && data.rows !== undefined;
+  const current = data;
   const filtered = Boolean(
     data.q || data.port || data.tag || data.status || data.change,
   );
@@ -200,8 +192,8 @@ function Inventory({ data }: { data: PageData }) {
 
   useEffect(() => {
     if (!capacity) return;
-    const controller = new AbortController();
     const params = new URLSearchParams(location.search);
+    if (params.get("fit") === String(capacity) && data.rows !== undefined) return;
     const previousSize = Number(params.get("fit"));
     if (previousSize > 0 && previousSize !== capacity) {
       const firstRow =
@@ -210,29 +202,8 @@ function Inventory({ data }: { data: PageData }) {
     }
     params.set("fit", String(capacity));
     params.delete("per");
-    void fetch(engagementUrl(`/?${params}`), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok)
-          throw new Error(`Unable to load hosts (${response.status})`);
-        const next = (await response.json()) as PageData;
-        if (controller.signal.aborted) return;
-        params.set("page", String(next.page ?? 1));
-        history.replaceState(null, "", engagementUrl(`/?${params}`));
-        setState({ phase: "ready", source: data, data: next, capacity, attempt: retry });
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted) {
-          setState({
-            phase: "failed", source: data, capacity, attempt: retry,
-            message: cause instanceof Error ? cause.message : "Unable to load hosts",
-          });
-        }
-      });
-    return () => controller.abort();
-  }, [capacity, data, retry]);
+    updateQuery(engagementUrl(`/?${params}`), true);
+  }, [capacity, data.rows, updateQuery]);
 
   function pageUrl(page: number): string {
     const params = new URLSearchParams(location.search);
@@ -298,7 +269,7 @@ function Inventory({ data }: { data: PageData }) {
             </Button>
           </Filters>
         </Modal>
-        <Button variant="outline" render={<ScopedLink href="/" />}>
+        <Button variant="outline" render={<QueryLink href={engagementUrl(`/?fit=${capacity || 1}`)} />}>
           <RotateCcw />
           Reset
         </Button>
@@ -337,29 +308,14 @@ function Inventory({ data }: { data: PageData }) {
           className="shrink-0 border-b px-3 py-1.5 text-xs text-muted-foreground"
           role="status"
         >
-          {error
-            ? "Hosts could not be loaded."
-            : ready
-              ? `${current.matched ?? 0} of ${current.total ?? 0} hosts`
-              : "Loading hosts…"}
+          {ready ? `${current.matched ?? 0} of ${current.total ?? 0} hosts` : "Loading hosts…"}
         </div>
         <div
           className="inventory-viewport"
           ref={viewport}
-          aria-busy={!ready && !error}
+          aria-busy={!ready || queryPending}
         >
-          {error ? (
-            <div className="p-3 text-sm" role="alert">
-              {error}
-              <Button
-                variant="outline"
-                className="ml-2"
-                onClick={() => setRetry((value) => value + 1)}
-              >
-                Retry
-              </Button>
-            </div>
-          ) : ready ? (
+          {ready ? (
             current.rows?.length ? (
               <HostTable rows={current.rows} sortable />
             ) : (
@@ -380,7 +336,7 @@ function Inventory({ data }: { data: PageData }) {
           <Button
             variant="outline"
             nativeButton={false}
-            disabled={!ready || (current.page ?? 1) <= 1}
+            disabled={!ready || queryPending || (current.page ?? 1) <= 1}
             render={
               <QueryLink href={engagementUrl(pageUrl((current.page ?? 1) - 1))}
               aria-label="Previous page" />
@@ -391,7 +347,7 @@ function Inventory({ data }: { data: PageData }) {
           <Button
             variant="outline"
             nativeButton={false}
-            disabled={!ready || (current.page ?? 1) >= (current.pages ?? 1)}
+            disabled={!ready || queryPending || (current.page ?? 1) >= (current.pages ?? 1)}
             render={
               <QueryLink href={engagementUrl(pageUrl((current.page ?? 1) + 1))}
               aria-label="Next page" />
@@ -516,7 +472,7 @@ function EngagementsPage({ data }: { data: PageData }) {
         </Modal>
       </PageHeader>
       <Section title="Engagements" id="engagement-catalog">
-        {data.engagements.length ? (
+        {data.catalog?.length ? (
           <div className="engagement-table">
           <Table>
             <TableHeader><TableRow>
@@ -524,7 +480,7 @@ function EngagementsPage({ data }: { data: PageData }) {
               <TableHead aria-sort={data.sort === "created_at" ? (data.direction === "desc" ? "descending" : "ascending") : "none"}><SortLink column="created_at">Created</SortLink></TableHead>
               <TableHead className="w-12"><span className="sr-only">Actions</span></TableHead>
             </TableRow></TableHeader>
-            <TableBody>{data.engagements.map((engagement) => (
+            <TableBody>{data.catalog.map((engagement) => (
               <TableRow key={engagement.id}>
                 <TableCell className="min-w-40 max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/e/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
                 <TableCell className="min-w-48 max-w-xl whitespace-pre-wrap [overflow-wrap:anywhere]">{engagement.description}</TableCell>
@@ -589,24 +545,39 @@ export default function App() {
     setQuery({ phase: "loading", url: target.href });
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     try {
-      const response = await fetch(target.pathname + target.search, {
-        headers: { Accept: "application/json" }, signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
-      const next = await response.json() as PageData;
+      const resources = propagateError
+        ? { urls: [target.pathname + target.search], partial: false }
+        : queryResources(target, new URL(loadedQuery.current, location.origin));
+      const patches = await Promise.all(resources.urls.map(async (resource) => {
+        const response = await fetch(resource, {
+          headers: { Accept: "application/json" }, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
+        return await response.json() as Partial<PageData>;
+      }));
+      const next = Object.assign({}, ...patches) as Partial<PageData>;
       if (controller.signal.aborted) {
         if (propagateError) throw new Error("View update was superseded. Refresh the view again.");
         return;
       }
+      if (next.page !== undefined) target.searchParams.set("page", String(next.page));
+      if (next.host_timeline && target.searchParams.has("timeline_page")) {
+        target.searchParams.set("timeline_page", String(next.host_timeline.page));
+      }
       const oldURL = location.href;
-      if (push && target.href !== oldURL) history.pushState(null, "", target.href);
+      if (target.href !== oldURL) {
+        if (push) history.pushState(null, "", target.href);
+        else history.replaceState(null, "", target.href);
+      }
       loadedQuery.current = target.pathname + target.search;
       queryFocus.current = focused;
       // Native form.reset() runs after refresh resolves and must see the
       // reconciled props/default values, not the previous render's defaults.
       flushSync(() => {
         setQuery({ phase: "ready" });
-        setData(next);
+        setData((previous) => resources.partial
+          ? { ...previous, ...next }
+          : { ...next, engagement: previous.engagement, engagements: previous.engagements });
       });
       if (new URL(oldURL).hash !== target.hash) {
         window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: target.href }));
@@ -624,6 +595,9 @@ export default function App() {
       }
     }
   }, []);
+  const updateQuery = useCallback((url: string, replace = false) => {
+    void loadQuery(url, !replace);
+  }, [loadQuery]);
   useEffect(() => {
     const syncQuery = () => {
       if (location.pathname !== pagePath.current) return;
@@ -674,7 +648,7 @@ export default function App() {
     document.title = `${title}${data.engagement?.name ? ` — ${data.engagement.name}` : ""} — penrecon`;
   }, [data.host?.ip, data.engagement?.name, path]);
   return (
-    <PageContext.Provider value={{ data, refresh, navigate, updateQuery: (url) => { void loadQuery(url, true); }, queryPending, notify: setNotice }}>
+    <PageContext.Provider value={{ data, refresh, navigate, updateQuery, queryPending, notify: setNotice }}>
       <AppShell data={data} path={path}
         className={
           path === "/"

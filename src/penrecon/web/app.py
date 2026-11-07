@@ -43,25 +43,27 @@ from penrecon.web.serialization import encode_page, host_credential
 _HERE = Path(__file__).parent
 
 
+def _bootstrap(request: Request, session: Session) -> dict[str, object]:
+    engagement = getattr(request.state, "engagement", None)
+    if engagement is None:
+        return {"engagement": None, "engagements": []}
+    return {
+        "engagement": {"id": engagement.id, "name": engagement.name},
+        "engagements": [
+            {"id": engagement_id, "name": name}
+            for engagement_id, name in session.exec(
+                select(Engagement.id, Engagement.name).order_by(col(Engagement.created_at).desc())
+            ).all()
+        ],
+    }
+
+
 def page_response(request: Request, session: Session, context: dict[str, object]) -> Response:
-    """Return the same page data to JSON consumers and the local React shell."""
-    engagements = getattr(request.state, "engagements", None)
-    if engagements is None:
-        engagements = session.exec(
-            select(Engagement).order_by(col(Engagement.created_at).desc())
-        ).all()
-    data = encode_page({
-        **context,
-        "engagement": (
-            {"id": engagement.id, "name": engagement.name}
-            if (engagement := getattr(request.state, "engagement", None)) is not None
-            else None
-        ),
-        "engagements": engagements,
-    })
+    """Return page context as JSON; only HTML also loads the navigation shell."""
     headers = {"Vary": "Accept"}
     if "application/json" in request.headers.get("accept", "").lower():
-        return JSONResponse(data, headers=headers)
+        return JSONResponse(encode_page(context), headers=headers)
+    data = encode_page({**_bootstrap(request, session), **context})
     # Escape HTML-significant characters even inside a non-executable script:
     # the HTML parser still recognizes a literal </script> in JSON strings.
     serialized = json.dumps(data, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
@@ -116,6 +118,15 @@ def require_engagement(
 scoped = APIRouter(prefix="/e/{engagement_id}")
 
 
+@scoped.get("/bootstrap")
+def bootstrap(
+    request: Request,
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return JSONResponse(_bootstrap(request, session))
+
+
 @app.get("/")
 def landing() -> RedirectResponse:
     return RedirectResponse("/engagements", status_code=303)
@@ -130,13 +141,13 @@ def engagements_page(request: Request, session: Session = Depends(get_session)) 
     if direction not in ("asc", "desc"):
         direction = "asc" if sort == "name" else "desc"
     order = col(Engagement.name).collate("NOCASE") if sort == "name" else col(Engagement.created_at)
-    request.state.engagements = session.exec(
+    engagements = session.exec(
         select(Engagement).order_by(
             order.desc() if direction == "desc" else order.asc(),
             col(Engagement.id).asc(),
         )
     ).all()
-    return page_response(request, session, {"sort": sort, "direction": direction})
+    return page_response(request, session, {"catalog": engagements, "sort": sort, "direction": direction})
 
 
 @app.post("/engagements")
@@ -184,28 +195,38 @@ def edit_engagement(
     return JSONResponse({"ok": True})
 
 
-@scoped.get("/", response_class=HTMLResponse)
-def index(
-    request: Request,
-    q: str = "",
-    port: str = "",  # str: forms submit empty values
-    tag: str = "",
-    status: str = "",
-    change: str = "",
-    sort: str = "change",
-    dir: str = "",
-    page: str = "1",
-    per: str = "",
-    engagement_id: str = Depends(require_engagement),
-    session: Session = Depends(get_session),
-) -> Response:
+@dataclass(frozen=True)
+class _HostTable:
+    q: str = ""
+    port: str = ""
+    tag: str = ""
+    status: str = ""
+    change: str = ""
+    sort: str = "change"
+    dir: str = ""
+    page: str = "1"
+    per: str = ""
+    fit: str = ""
+
+
+def _hosts_ctx(
+    session: Session, table: _HostTable, *, engagement_id: str, load_rows: bool = True,
+) -> dict[str, object]:
+    q, port, tag, status, change = table.q, table.port, table.tag, table.status, table.change
+    sort = table.sort
     port_val = int(port) if port.strip().isdigit() else None
-    direction = dir if dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
-    page_no = int(page) if page.strip().isdigit() else 1
-    per_limit = queries.resolve_per_page(per)
-    fit = request.query_params.get("fit", "")
+    direction = table.dir if table.dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(sort, "asc")
+    page_no = int(table.page) if table.page.strip().isdigit() else 1
+    per_limit = queries.resolve_per_page(table.per)
+    fit = table.fit
     if len(fit) <= 2 and fit.isascii() and fit.isdecimal() and 1 <= int(fit) <= 50:
         per_limit = int(fit)
+    state: dict[str, object] = {
+        "q": q, "port": port, "tag": tag, "status": status, "change": change,
+        "sort": sort, "direction": direction,
+    }
+    if not load_rows:
+        return {**state, "page": max(1, page_no)}
     all_rows = queries.host_rows(session, engagement_id=engagement_id)
     rows = queries.filter_hosts(
         all_rows, q=q, port=port_val, tag=tag, status=status, change=change
@@ -213,11 +234,31 @@ def index(
     rows = queries.sort_hosts(rows, sort, direction)
     matched = len(rows)
     page_rows, page_no, pages = queries.paginate(rows, page_no, per_limit)
-    ctx: dict[str, object] = {"rows": page_rows, "total": len(all_rows), "matched": matched,
-           "page": page_no, "pages": pages,
-           "q": q, "port": port, "tag": tag, "status": status, "change": change,
-           "sort": sort, "direction": direction, "statuses": list(Status)}
-    return page_response(request, session, ctx)
+    return {**state, "rows": page_rows, "total": len(all_rows), "matched": matched,
+            "page": page_no, "pages": pages}
+
+
+@scoped.get("/", response_class=HTMLResponse)
+def index(
+    request: Request,
+    table: _HostTable = Depends(_HostTable),
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return page_response(request, session, {
+        **_hosts_ctx(session, table, engagement_id=engagement_id,
+                     load_rows="application/json" in request.headers.get("accept", "").lower()),
+        "statuses": list(Status),
+    })
+
+
+@scoped.get("/data/hosts")
+def hosts_data(
+    table: _HostTable = Depends(_HostTable),
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return JSONResponse(encode_page(_hosts_ctx(session, table, engagement_id=engagement_id)))
 
 
 @scoped.get("/search", response_class=HTMLResponse)
@@ -273,13 +314,73 @@ def _services_ctx(
     page_no = int(table.page) if table.page.strip().isdigit() else 1
     per_limit = queries.resolve_per_page(table.per)
     page_services, page_no, pages = queries.paginate(services, page_no, per_limit)
-    return {"host": host, "services": page_services, "svc_total": total,
+    return {"services": page_services, "svc_total": total,
             "page": page_no, "pages": pages, "sort": table.sort, "direction": direction,
             "per": "all" if per_limit is None else str(per_limit),
             "f_port": table.f_port, "f_state": table.f_state,
-            "f_service": table.f_service, "f_status": table.f_status,
-            "statuses": list(Status), "states": list(ObsState)}
+            "f_service": table.f_service, "f_status": table.f_status}
 
+
+def _owned_host(session: Session, host_id: int, *, engagement_id: str) -> Host:
+    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="host not found")
+    return host
+
+
+@scoped.get("/data/hosts/{host_id}/services")
+def services_data(
+    host_id: int,
+    table: _ServiceTable = Depends(_ServiceTable),
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    host = _owned_host(session, host_id, engagement_id=engagement_id)
+    return JSONResponse(encode_page(_services_ctx(session, host, table, engagement_id=engagement_id)))
+
+
+@scoped.get("/data/hosts/{host_id}/timeline")
+def timeline_data(
+    host_id: int,
+    timeline_page: int = 1,
+    timeline_unchanged: bool = False,
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    _owned_host(session, host_id, engagement_id=engagement_id)
+    return JSONResponse(encode_page({
+        "host_timeline": queries.host_timeline(
+            session, host_id, engagement_id=engagement_id,
+            page=timeline_page, show_unchanged=timeline_unchanged,
+        ),
+    }))
+
+
+@scoped.get("/options/hosts")
+def host_options(
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return JSONResponse({"hosts": [
+        {"id": host_id, "ip": ip}
+        for host_id, ip in session.exec(
+            select(Host.id, Host.ip).where(Host.engagement_id == engagement_id).order_by(Host.ip)
+        ).all()
+    ]})
+
+
+@scoped.get("/options/hosts/{host_id}/services")
+def service_options(
+    host_id: int,
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    _owned_host(session, host_id, engagement_id=engagement_id)
+    return JSONResponse({"services": [
+        {"service_id": service.service_id, "port": service.port,
+         "proto": service.proto, "service_name": service.service_name}
+        for service in queries.resolved_services(session, host_id, engagement_id=engagement_id)
+    ]})
 
 @scoped.get("/hosts/{host_id}", response_class=HTMLResponse)
 def host_detail(
@@ -291,11 +392,12 @@ def host_detail(
     timeline_page: int = 1,
     timeline_unchanged: bool = False,
 ) -> Response:
-    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
-    if host is None:
-        return JSONResponse({"detail": "host not found"}, status_code=404)
+    host = _owned_host(session, host_id, engagement_id=engagement_id)
     svc_ctx = _services_ctx(session, host, table, engagement_id=engagement_id)
     return page_response(request, session, {
+        "host": host,
+        "statuses": list(Status),
+        "states": list(ObsState),
         "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
@@ -517,12 +619,6 @@ def delete_service(
 def _credential_context(session: Session, *, engagement_id: str) -> dict[str, object]:
     return {
         "credentials": queries.credential_views(session, engagement_id=engagement_id),
-        "hosts": [
-            {"id": host.id, "ip": host.ip}
-            for host in session.exec(
-                select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
-            ).all()
-        ],
     }
 
 
@@ -1028,15 +1124,9 @@ def _operation_committed_response(request: Request, engagement_id: str, cleanup_
     return _mutation_response(request, destination)
 
 
-@scoped.get("/operations", response_class=HTMLResponse)
-def operations_page(
-    request: Request,
-    q: str = "",
-    page: int = 1,
-    per: str = "25",
-    engagement_id: str = Depends(require_engagement),
-    session: Session = Depends(get_session),
-) -> Response:
+def _operations_ctx(
+    session: Session, q: str, page: int, per: str, *, engagement_id: str,
+) -> dict[str, object]:
     normalized_per = (
         per
         if per == "all" or (per.isdigit() and int(per) in queries.PER_PAGE_OPTIONS)
@@ -1046,7 +1136,7 @@ def operations_page(
     page_rows, page, pages = queries.paginate(
         matches, page, queries.resolve_per_page(normalized_per)
     )
-    context: dict[str, object] = {
+    return {
         "operations": page_rows,
         "total": len(matches),
         "q": q,
@@ -1054,7 +1144,31 @@ def operations_page(
         "pages": pages,
         "per": normalized_per,
     }
-    return page_response(request, session, context)
+
+
+@scoped.get("/operations", response_class=HTMLResponse)
+def operations_page(
+    request: Request,
+    q: str = "",
+    page: int = 1,
+    per: str = "25",
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return page_response(
+        request, session, _operations_ctx(session, q, page, per, engagement_id=engagement_id),
+    )
+
+
+@scoped.get("/data/operations")
+def operations_data(
+    q: str = "",
+    page: int = 1,
+    per: str = "25",
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    return JSONResponse(encode_page(_operations_ctx(session, q, page, per, engagement_id=engagement_id)))
 
 
 @scoped.post("/operations")

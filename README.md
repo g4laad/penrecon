@@ -400,17 +400,38 @@ smoke-tests its CLI.
 React source lives in `frontend/src`. Shared components are shadcn/ui's
 `base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
 icons. Add components with `npx shadcn@latest add <component> -c frontend`.
-Existing page URLs return the React shell, or the same page context as JSON
-with `Accept: application/json`. Mutations retain their form endpoints. Successful
+Page URLs return the React shell with initial page data and a slim navigation
+bootstrap. With `Accept: application/json`, they return only page context, without
+the engagement catalog or current-engagement identity. Mutations retain their form endpoints. Successful
 JSON mutations return only `{"ok": true}`, plus `redirect_to` when a destination
 is needed; they never issue HTTP redirects or return refreshed page collections.
 The frontend refreshes the current URL once for same-page outcomes, preserving
 filters and pagination, or navigates once for a different destination. HTML form
 submissions retain redirects where applicable. Attachment cleanup failures retain
 their committed-success notice; retrying a failed refresh never repeats the POST.
-Engagement ownership validation loads only the requested engagement. The page-data
-boundary loads the catalog for the workspace selector, reusing the catalog page's
-sorted results; redirects, exports, and attachment downloads do not query it.
+Engagement ownership validation loads only the requested engagement. HTML
+bootstrap and `GET /e/{engagement_id}/bootstrap` load the workspace selector as
+ID/name pairs; the engagements page separately returns full records in `catalog`.
+Table, timeline, selector, mutation, export, and download responses do not load
+the navigation catalog.
+Scoped JSON reads use these resource URLs:
+
+| URL below `/e/{engagement_id}` | Response |
+| --- | --- |
+| `/data/hosts` | Inventory rows, counts, pagination, filters, and sort state |
+| `/data/hosts/{host_id}/services` | Service rows and service-table state |
+| `/data/hosts/{host_id}/timeline` | Host timeline only |
+| `/data/operations` | Paginated operations and query state |
+| `/options/hosts` | Host ID/address pairs |
+| `/options/hosts/{host_id}/services` | Service ID, port, protocol, and name |
+
+Query navigation keeps document URLs in browser history and merges resource
+responses into existing state, preserving unrelated host sections and navigation.
+Back/Forward restores the affected sections; failed requests retain the previous
+view and offer Retry. Mutation refreshes still reload full page context once.
+Inventory HTML defers rows until the browser measures its viewport, avoiding a
+discarded initial table query. Credential selectors load host options separately
+and service options only for selected hosts, with cancellation and retry.
 Page-data responses project only consumer-facing fields: storage paths,
 engagement ownership columns, and query-only filtering metadata stay server-side.
 Row-count choices live in the frontend; responses do not include

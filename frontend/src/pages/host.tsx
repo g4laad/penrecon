@@ -581,7 +581,7 @@ function ServiceFilters({ data }: { data: PageData }) {
           <Button
             variant="outline"
             render={
-              <ScopedLink href={`/hosts/${data.host!.id}?per=${encodeURIComponent(data.per ?? "25")}`} />
+              <QueryLink href={`?per=${encodeURIComponent(data.per ?? "25")}&timeline_page=${data.host_timeline?.page ?? 1}&timeline_unchanged=${data.host_timeline?.show_unchanged ?? false}#services`} />
             }
           >
             <RotateCcw />
