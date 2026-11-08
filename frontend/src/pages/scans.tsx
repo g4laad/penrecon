@@ -18,6 +18,7 @@ import {
   Filters,
   MutationForm,
   PageHeader,
+  Pager,
   Section,
 } from "../common";
 import type { PageData } from "../types";
@@ -103,7 +104,7 @@ export function ScansPage({ data }: { data: PageData }) {
       <Section title="Import scan" id="scan-import">
         <ScanUpload tools={tools} />
       </Section>
-      <Section title={`Import history (${scans.length})`} id="scan-history">
+      <Section title={`Import history (${data.total ?? 0})`} id="scan-history">
         {scans.length ? (
           <div className="scan-history-table rounded-lg border bg-card">
             <Table className="data-table">
@@ -145,6 +146,7 @@ export function ScansPage({ data }: { data: PageData }) {
           </Empty>
         )}
       </Section>
+      <Pager data={data} total={data.total} />
     </div>
   );
 }
@@ -169,6 +171,7 @@ function ScanComparison({ data }: { data: PageData }) {
       />
       {scans.length ? (
         <Filters>
+          <input type="hidden" name="per" value={data.per ?? "25"} />
           {(["a", "b"] as const).map((side) => {
             const available = scans.some((scan) => String(scan.id) === selection[side]);
             return (
@@ -212,8 +215,8 @@ function ScanComparison({ data }: { data: PageData }) {
           title={`#${result.scan_a.id} → #${result.scan_b.id}`}
           action={
             <span className="muted text-xs">
-              {result.entries.length} difference
-              {result.entries.length === 1 ? "" : "s"}
+              {data.total ?? 0} difference
+              {data.total === 1 ? "" : "s"}
             </span>
           }
         >
@@ -262,6 +265,7 @@ function ScanComparison({ data }: { data: PageData }) {
           ) : (
             <Empty>No differences between these scans.</Empty>
           )}
+          <Pager data={data} total={data.total} />
         </Section>
       ) : null}
     </div>

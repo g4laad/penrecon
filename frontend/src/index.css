@@ -160,7 +160,7 @@
   .credential-workbench-page { gap: .75rem; }
   .host-workbench-page { gap: .75rem; }
   .scans-page { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; gap: .75rem; }
-  .scans-page > header, #scan-import { flex: none; margin: 0; }
+  .scans-page > header, .scans-page > nav, #scan-import { flex: none; margin: 0; }
   #scan-import { max-height: 32dvh; overflow-y: auto; }
   #scan-history { display: flex; flex: 1; min-height: 0; min-width: 0; flex-direction: column; margin: 0; }
   #scan-history > :first-child { flex: none; }

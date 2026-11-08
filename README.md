@@ -36,6 +36,15 @@ or CDN is needed at runtime. Rebuild after frontend changes and before packaging
 Browser workspaces use `/UUID/`; API requests use `?engagement_id=UUID`.
 Separate tabs can use different engagements.
 
+Scans history and Scan diff results use URL-backed `page` and `per` parameters
+(25 rows by default; `per=10`, `25`, `50`, or `all`). API responses include
+`total`, `page`, `pages`, and normalized `per`; out-of-range pages clamp to the
+available range. History is newest-import-first, breaking ties by descending
+scan ID. Diff pages preserve the selected `a`/`b` pair and order added, removed,
+then changed entries, each by IP, port, and protocol. Diff scan selectors still
+include all imports in the engagement. Counts and paging run in SQLite before
+loading displayed rows; `per=all` explicitly requests the complete result.
+
 ## Data and backups
 
 `PENRECON_DATA=/path` overrides the default `./data`. It contains `penrecon.db`

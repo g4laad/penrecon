@@ -969,3 +969,80 @@ def test_patch_credential_associations_add_without_replacing_existing_links(
         "keep-secret",
         "keep-notes",
     )
+
+
+def test_scan_history_pages_preserve_order_and_engagement_scope(
+    client: TestClient,
+) -> None:
+    for number in range(26):
+        _upload(client, "<nmaprun/>", f"scan-{number}.xml")
+    other = (
+        client.post("/api/engagements", data={"name": "Other"})
+        .json()["redirect_to"]
+        .strip("/")
+    )
+    response = client.post(
+        api_url("/scans", other),
+        files={"file": ("foreign.xml", "<nmaprun/>", "text/xml")},
+        data={"tool": "nmap"},
+    )
+    assert response.status_code == 200
+    first = client.get(api_url("/scans")).json()
+    last = client.get(api_url("/scans?page=99")).json()
+    assert (first["total"], first["page"], first["pages"], first["per"]) == (
+        26,
+        1,
+        2,
+        "25",
+    )
+    assert [scan["filename"] for scan in first["scans"]] == [
+        f"scan-{number}.xml" for number in range(25, 0, -1)
+    ]
+    assert (last["total"], last["page"], last["pages"]) == (26, 2, 2)
+    assert [scan["filename"] for scan in last["scans"]] == ["scan-0.xml"]
+    all_rows = client.get(api_url("/scans?per=all&page=99")).json()
+    assert (all_rows["page"], all_rows["pages"]) == (1, 1)
+    assert [scan["filename"] for scan in all_rows["scans"]] == [
+        f"scan-{number}.xml" for number in range(25, -1, -1)
+    ]
+
+
+def test_diff_api_pages_keep_pair_and_total(client: TestClient) -> None:
+    def scan(version: str) -> str:
+        ports = "".join(
+            f'<port protocol="tcp" portid="{port}"><state state="open"/>'
+            f'<service name="http" version="{version}"/></port>'
+            for port in range(1, 32)
+        )
+        return f'<nmaprun><host><address addr="192.0.2.1" addrtype="ipv4"/><ports>{ports}</ports></host></nmaprun>'
+
+    _upload(client, scan("1"), "before.xml")
+    _upload(client, scan("2"), "after.xml")
+    scans = client.get(api_url("/scans")).json()["scans"]
+    ids = {row["filename"]: row["id"] for row in scans}
+    query = urlencode({"a": ids["before.xml"], "b": ids["after.xml"], "per": "10"})
+    pages = [
+        client.get(api_url(f"/diff?{query}&page={page}")).json() for page in range(1, 5)
+    ]
+    assert [
+        (page["total"], page["page"], page["pages"], page["per"]) for page in pages
+    ] == [(31, page, 4, "10") for page in range(1, 5)]
+    assert [
+        entry["port"] for page in pages for entry in page["result"]["entries"]
+    ] == list(range(1, 32))
+    assert all(
+        page["a"] == ids["before.xml"] and page["b"] == ids["after.xml"]
+        for page in pages
+    )
+    clamped = client.get(api_url(f"/diff?{query}&page=99")).json()
+    assert clamped["page"] == 4
+    assert clamped["result"]["entries"] == pages[-1]["result"]["entries"]
+    empty = client.get(
+        api_url(f"/diff?a={ids['before.xml']}&b={ids['before.xml']}&page=99")
+    ).json()
+    assert (
+        empty["total"],
+        empty["page"],
+        empty["pages"],
+        empty["result"]["entries"],
+    ) == (0, 1, 1, [])

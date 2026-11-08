@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sqlmodel import Session, select
+from sqlalchemy import String, case, cast, func, literal, select, union_all
+from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import CTE
+from sqlmodel import Session, col
 
-from penrecon.models import Host, Observation, Scan
+from penrecon.models import Host, Observation, ObsState, Scan
 from penrecon.queries.ownership import get_owned
+from penrecon.queries.pagination import _page_bounds
 
 
 @dataclass
@@ -23,61 +27,160 @@ class DiffResult:
     scan_a: Scan
     scan_b: Scan
     entries: list[DiffEntry] = field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    pages: int = 1
 
 
-def _obs_by_key(
-    session: Session, scan_id: int, *, engagement_id: str
-) -> dict[tuple[str, int, str], Observation]:
-    stmt = (
-        select(Observation, Host.ip)
-        .join(Host, Host.id == Observation.host_id)  # type: ignore[arg-type]
+def _summary() -> ColumnElement[str]:
+    # Enum storage uses member names, while the existing formatted summaries
+    # use values such as "open|filtered". Only null/empty fields are omitted:
+    # whitespace and equivalent distributions across fields stay significant.
+    summary: ColumnElement[str] = case(
+        {state.name: state.value for state in ObsState},
+        value=cast(col(Observation.state), String),
+    )
+    for value in (
+        col(Observation.service_name),
+        col(Observation.product),
+        col(Observation.version),
+    ):
+        summary = summary + case((value != "", literal(" ") + value), else_="")
+    return summary
+
+
+def _snapshot(scan_id: int, *, engagement_id: str) -> CTE:
+    # Keep the last observation per snapshot key, as the previous dictionary
+    # comparison did, without loading observations or their extra JSON.
+    latest = (
+        select(func.max(col(Observation.id)).label("id"))
         .where(
-            Observation.engagement_id == engagement_id,
-            Host.engagement_id == engagement_id,
-            Observation.scan_id == scan_id,
+            col(Observation.engagement_id) == engagement_id,
+            col(Observation.scan_id) == scan_id,
+        )
+        .group_by(
+            col(Observation.host_id),
+            col(Observation.port),
+            col(Observation.proto),
         )
     )
-    out: dict[tuple[str, int, str], Observation] = {}
-    for obs, ip in session.exec(stmt).all():
-        out[(ip, obs.port, obs.proto)] = obs
-    return out
-
-
-def _summary(o: Observation) -> str:
-    parts: list[str] = [o.state]
-    if o.service_name:
-        parts.append(o.service_name)
-    if o.product or o.version:
-        parts.append(" ".join(p for p in (o.product, o.version) if p))
-    return " ".join(parts)
+    return (
+        select(
+            col(Host.ip).label("ip"),
+            col(Observation.port).label("port"),
+            col(Observation.proto).label("proto"),
+            _summary().label("summary"),
+        )
+        .select_from(Observation)
+        .join(Host, col(Host.id) == col(Observation.host_id))
+        .where(
+            col(Observation.id).in_(latest),
+            col(Observation.engagement_id) == engagement_id,
+            col(Host.engagement_id) == engagement_id,
+            col(Observation.scan_id) == scan_id,
+        )
+        .cte()
+    )
 
 
 def diff_scans(
-    session: Session, scan_a_id: int, scan_b_id: int, *, engagement_id: str
+    session: Session,
+    scan_a_id: int,
+    scan_b_id: int,
+    *,
+    engagement_id: str,
+    page: int = 1,
+    per_page: int | None = 25,
 ) -> DiffResult:
     a = get_owned(session, Scan, scan_a_id, engagement_id=engagement_id)
     b = get_owned(session, Scan, scan_b_id, engagement_id=engagement_id)
     if a is None or b is None:
         raise ValueError("scan not found")
-    result = DiffResult(scan_a=a, scan_b=b)
-    obs_a = _obs_by_key(session, scan_a_id, engagement_id=engagement_id)
-    obs_b = _obs_by_key(session, scan_b_id, engagement_id=engagement_id)
+    if scan_a_id == scan_b_id:
+        return DiffResult(scan_a=a, scan_b=b)
 
-    for key in sorted(obs_b.keys() - obs_a.keys()):
-        ip, port, proto = key
-        result.entries.append(
-            DiffEntry(ip, port, proto, "added", after=_summary(obs_b[key]))
+    before = _snapshot(scan_a_id, engagement_id=engagement_id)
+    after = _snapshot(scan_b_id, engagement_id=engagement_id)
+    # Group the two snapshots rather than joining them: SQLite can choose
+    # quadratic nested scans for outer joins against computed snapshot columns.
+    observations = union_all(
+        select(
+            before.c.ip,
+            before.c.port,
+            before.c.proto,
+            before.c.summary.label("before"),
+            cast(literal(None), String).label("after"),
+        ),
+        select(
+            after.c.ip,
+            after.c.port,
+            after.c.proto,
+            cast(literal(None), String),
+            after.c.summary,
+        ),
+    ).subquery()
+    paired = (
+        select(
+            observations.c.ip,
+            observations.c.port,
+            observations.c.proto,
+            func.max(observations.c.before).label("before"),
+            func.max(observations.c.after).label("after"),
         )
-    for key in sorted(obs_a.keys() - obs_b.keys()):
-        ip, port, proto = key
-        result.entries.append(
-            DiffEntry(ip, port, proto, "removed", before=_summary(obs_a[key]))
+        .group_by(
+            observations.c.ip,
+            observations.c.port,
+            observations.c.proto,
         )
-    for key in sorted(obs_a.keys() & obs_b.keys()):
-        sa, sb = _summary(obs_a[key]), _summary(obs_b[key])
-        if sa != sb:
-            ip, port, proto = key
-            result.entries.append(
-                DiffEntry(ip, port, proto, "changed", before=sa, after=sb)
-            )
-    return result
+        .subquery()
+    )
+    differences = (
+        select(
+            paired.c.ip,
+            paired.c.port,
+            paired.c.proto,
+            case(
+                (paired.c.before.is_(None), "added"),
+                (paired.c.after.is_(None), "removed"),
+                else_="changed",
+            ).label("kind"),
+            paired.c.before,
+            paired.c.after,
+            case(
+                (paired.c.before.is_(None), 0),
+                (paired.c.after.is_(None), 1),
+                else_=2,
+            ).label("kind_order"),
+        )
+        .where(
+            paired.c.before.is_(None)
+            | paired.c.after.is_(None)
+            | (paired.c.before != paired.c.after),
+        )
+        .subquery()
+    )
+    total = session.execute(select(func.count()).select_from(differences)).scalar_one()
+    page, pages = _page_bounds(total, page, per_page)
+    statement = select(
+        differences.c.ip,
+        differences.c.port,
+        differences.c.proto,
+        differences.c.kind,
+        differences.c.before,
+        differences.c.after,
+    ).order_by(
+        differences.c.kind_order,
+        differences.c.ip,
+        differences.c.port,
+        differences.c.proto,
+    )
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    return DiffResult(
+        scan_a=a,
+        scan_b=b,
+        entries=[DiffEntry(*row) for row in session.execute(statement)],
+        total=total,
+        page=page,
+        pages=pages,
+    )

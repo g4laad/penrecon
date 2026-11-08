@@ -13,6 +13,7 @@ from anyio import CancelScope
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.engine import Connection, Engine
 from sqlmodel import Session, col, select
 from starlette.concurrency import run_in_threadpool
@@ -26,6 +27,7 @@ from penrecon.queries import annotations as annotation_queries
 from penrecon.queries import diff as diff_queries
 from penrecon.queries import export as export_queries
 from penrecon.queries import ownership as ownership_queries
+from penrecon.queries import pagination as pagination_queries
 from penrecon.queries import search as search_queries
 from penrecon.web.common import (
     MAX_UPLOAD_BYTES,
@@ -51,6 +53,10 @@ class ScanResponse(BaseModel):
 class ScansResponse(BaseModel):
     scans: list[ScanResponse]
     tools: list[str]
+    total: int
+    page: int
+    pages: int
+    per: str
 
 
 class ScanReference(BaseModel):
@@ -78,6 +84,10 @@ class DiffResponse(BaseModel):
     result: DiffResultResponse | None
     a: int | None
     b: int | None
+    total: int
+    page: int
+    pages: int
+    per: str
 
 
 class NoteHitResponse(BaseModel):
@@ -190,17 +200,51 @@ def export_hosts_csv(
     return _CSVResponse(stream_csv(), f"penrecon-hosts-{stamp}.csv")
 
 
+def _per_page(raw: str) -> int | None:
+    if raw == "all" or (
+        len(raw) <= 10
+        and raw.isascii()
+        and raw.isdecimal()
+        and int(raw) in pagination_queries.PER_PAGE_OPTIONS
+    ):
+        return pagination_queries.resolve_per_page(raw)
+    return 25
+
+
 @router.get("/scans", response_model=ScansResponse)
 def scans(
+    page: int = 1,
+    per: str = "25",
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
-    rows = session.exec(
+    per_page = _per_page(per)
+    total = session.exec(
+        select(func.count())
+        .select_from(Scan)
+        .where(Scan.engagement_id == engagement_id)
+    ).one()
+    page, pages = pagination_queries._page_bounds(total, page, per_page)
+    statement = (
         select(Scan)
         .where(Scan.engagement_id == engagement_id)
-        .order_by(col(Scan.imported_at).desc())
-    ).all()
-    return JSONResponse(encode_page({"scans": rows, "tools": sorted(PARSERS)}))
+        .order_by(col(Scan.imported_at).desc(), col(Scan.id).desc())
+    )
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    rows = session.exec(statement).all()
+    return JSONResponse(
+        encode_page(
+            {
+                "scans": rows,
+                "tools": sorted(PARSERS),
+                "total": total,
+                "page": page,
+                "pages": pages,
+                "per": str(per_page) if per_page is not None else "all",
+            }
+        )
+    )
 
 
 def _import_scan(
@@ -276,13 +320,15 @@ async def upload_scan(
 def diff(
     a: int | None = None,
     b: int | None = None,
+    page: int = 1,
+    per: str = "25",
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> JSONResponse:
     rows = session.exec(
         select(Scan)
         .where(Scan.engagement_id == engagement_id)
-        .order_by(col(Scan.imported_at).desc())
+        .order_by(col(Scan.imported_at).desc(), col(Scan.id).desc())
     ).all()
     for scan_id in (a, b):
         if (
@@ -293,12 +339,28 @@ def diff(
             is None
         ):
             raise HTTPException(404, detail="scan not found")
+    per_page = _per_page(per)
     result = (
-        diff_queries.diff_scans(session, a, b, engagement_id=engagement_id)
+        diff_queries.diff_scans(
+            session, a, b, engagement_id=engagement_id, page=page, per_page=per_page
+        )
         if a and b
         else None
     )
-    return JSONResponse(encode_page({"scans": rows, "result": result, "a": a, "b": b}))
+    return JSONResponse(
+        encode_page(
+            {
+                "scans": rows,
+                "result": result,
+                "a": a,
+                "b": b,
+                "total": result.total if result else 0,
+                "page": result.page if result else 1,
+                "pages": result.pages if result else 1,
+                "per": str(per_page) if per_page is not None else "all",
+            }
+        )
+    )
 
 
 @router.get("/annotation", response_model=AnnotationContextResponse)

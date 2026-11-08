@@ -254,6 +254,11 @@ Geist Variable fonts are bundled locally; technical data uses system monospace.
   horizontal scrolling without text painting over adjacent values. Invalid nmap/
   Amass content returns HTTP 400 with format-specific correction guidance; retain
   the selected file for correction/replacement and retry.
+- History and comparison results use the shared URL-backed Rows/Page and
+  Previous/Next controls, defaulting to 25 rows. History keeps pagination outside
+  the internally scrolling table. Counts describe the entire result, not the
+  current page. Comparing a new pair resets to page one and retains Rows;
+  paging retains the selected pair. Both scan selectors include all imports.
 
 ## Runtime boundary
 
