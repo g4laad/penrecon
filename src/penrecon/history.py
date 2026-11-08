@@ -11,11 +11,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from sqlalchemy import Integer, case, cast, func, literal, or_, select as sql_select, union_all
+from sqlalchemy.orm import Mapped
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
 
 from penrecon.db import DATA_DIR
 from penrecon.inventory import same_ip
-from penrecon.models import Host, HostScanEvidence, ManualServiceEvent, Observation, ObsState, Scan
+from penrecon.models import Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, ObsState, Scan
 from penrecon.parsers import HostResult, get_parser
 
 
@@ -282,38 +285,111 @@ def _snapshot_state(snapshot: dict[str, str | None] | None) -> State | None:
     return State(state, snapshot.get("service_name"), snapshot.get("product"), snapshot.get("version"))
 
 
+def _timestamp_order(
+    value: ColumnElement[Any] | Mapped[Any],
+) -> tuple[ColumnElement[Any], ColumnElement[Any]]:
+    """Compare UTC seconds and exact microseconds without SQLite date rounding."""
+    offset = case(
+        (func.substr(value, -6, 1).in_(("+", "-")), func.substr(value, -6)),
+        else_="",
+    )
+    without_zone = case(
+        (offset != "", func.substr(value, 1, func.length(value) - 6)),
+        (func.substr(value, -1) == "Z", func.substr(value, 1, func.length(value) - 1)),
+        else_=value,
+    )
+    seconds = cast(func.strftime("%s", func.substr(value, 1, 19).concat(offset)), Integer)
+    micros = case(
+        (func.substr(value, 20, 1) == ".",
+         cast(func.substr(func.substr(without_zone, 21, 6).concat("000000"), 1, 6), Integer)),
+        else_=0,
+    )
+    return seconds, micros
+
+
 def timeline(
     session: Session, host_id: int, *, engagement_id: str,
     page: int = 1, show_unchanged: bool = False,
 ) -> HostTimeline:
-    """Merge manual actions with persisted scan deltas, before pagination."""
-    entries, _ = host_history(session, host_id, engagement_id=engagement_id)
-    for event in session.exec(select(ManualServiceEvent).where(
-        ManualServiceEvent.engagement_id == engagement_id,
-        ManualServiceEvent.host_id == host_id,
-    )).all():
-        assert event.id is not None
-        occurred_at = _utc(event.occurred_at).isoformat()
-        entries.append(TimelineEntry(
-            id=f"manual:{event.id}", source="manual", scan_id=None,
-            filename="", tool="", occurred_at=occurred_at, imported_at=occurred_at,
-            time_source="manual", first_seen=False, coverage_known=False,
-            changes=[Change(
-                port=event.port, proto=event.proto, kind=event.kind,
-                before=_snapshot_state(event.before),
-                after=_snapshot_state(event.after),
-                before_overrides=Overrides(**event.before_overrides) if event.before_overrides is not None else None,
-                after_overrides=Overrides(**event.after_overrides) if event.after_overrides is not None else None,
-            )],
-        ))
-    entries.sort(key=lambda entry: (
-        _utc(datetime.fromisoformat(entry.occurred_at)),
-        _utc(datetime.fromisoformat(entry.imported_at)),
-        entry.source, int(entry.id.partition(":")[2]),
-    ), reverse=True)
-    latest_change = next((entry for entry in entries if entry.first_seen or entry.changes), None)
-    visible = [entry for entry in entries if show_unchanged or entry.first_seen or entry.changes]
-    total = len(visible)
+    """Page persisted scan deltas and immutable manual snapshots in SQL."""
+    from penrecon.projections import _timeline_adapter, prepare_read
+
+    prepare_read(session)
+    scan_occurred = _timestamp_order(func.json_extract(HostScanDelta.entry, "$.occurred_at"))
+    scan_imported = _timestamp_order(func.json_extract(HostScanDelta.entry, "$.imported_at"))
+    manual_time = _timestamp_order(col(ManualServiceEvent.occurred_at))
+    changed = or_(
+        func.json_extract(HostScanDelta.entry, "$.first_seen") == 1,
+        func.json_array_length(HostScanDelta.entry, "$.changes") > 0,
+    )
+    candidates = union_all(
+        sql_select(
+            literal("scan").label("source"), col(HostScanDelta.scan_id).label("id"),
+            scan_occurred[0].label("occurred_seconds"), scan_occurred[1].label("occurred_micros"),
+            scan_imported[0].label("imported_seconds"), scan_imported[1].label("imported_micros"),
+            changed.label("changed"),
+        ).where(
+            col(HostScanDelta.engagement_id) == engagement_id, col(HostScanDelta.host_id) == host_id,
+        ),
+        sql_select(
+            literal("manual"), col(ManualServiceEvent.id),
+            manual_time[0], manual_time[1], manual_time[0], manual_time[1], literal(True),
+        ).where(
+            col(ManualServiceEvent.engagement_id) == engagement_id,
+            col(ManualServiceEvent.host_id) == host_id,
+        ),
+    ).subquery()
+    visible = select(candidates.c.source, candidates.c.id)
+    if not show_unchanged:
+        visible = visible.where(candidates.c.changed)
+    total = session.execute(select(func.count()).select_from(visible.subquery())).scalar_one()
     pages = max(1, (total + 19) // 20)
     page = max(1, min(page, pages))
-    return HostTimeline(visible[(page - 1) * 20:page * 20], total, page, pages, show_unchanged, latest_change)
+    ordering = [
+        candidates.c.occurred_seconds.desc(), candidates.c.occurred_micros.desc(),
+        candidates.c.imported_seconds.desc(), candidates.c.imported_micros.desc(),
+        candidates.c.source.desc(), candidates.c.id.desc(),
+    ]
+    selected = session.execute(visible.order_by(*ordering).limit(20).offset((page - 1) * 20)).all()
+    latest = session.execute(
+        select(candidates.c.source, candidates.c.id).where(candidates.c.changed)
+        .order_by(*ordering).limit(1),
+    ).first()
+    wanted = set(selected)
+    if latest is not None:
+        wanted.add(latest)
+    entries: dict[tuple[str, int], TimelineEntry] = {}
+    scan_ids = [row_id for source, row_id in wanted if source == "scan"]
+    if scan_ids:
+        adapter = _timeline_adapter()
+        for scan_id, payload in session.exec(select(HostScanDelta.scan_id, HostScanDelta.entry).where(
+            HostScanDelta.engagement_id == engagement_id, HostScanDelta.host_id == host_id,
+            col(HostScanDelta.scan_id).in_(scan_ids),
+        )).all():
+            entries[("scan", scan_id)] = adapter.validate_python(payload)
+    manual_ids = [row_id for source, row_id in wanted if source == "manual"]
+    if manual_ids:
+        for event in session.exec(select(ManualServiceEvent).where(
+            ManualServiceEvent.engagement_id == engagement_id,
+            ManualServiceEvent.host_id == host_id,
+            col(ManualServiceEvent.id).in_(manual_ids),
+        )).all():
+            assert event.id is not None
+            occurred_at = _utc(event.occurred_at).isoformat()
+            entries[("manual", event.id)] = TimelineEntry(
+                id=f"manual:{event.id}", source="manual", scan_id=None,
+                filename="", tool="", occurred_at=occurred_at, imported_at=occurred_at,
+                time_source="manual", first_seen=False, coverage_known=False,
+                changes=[Change(
+                    port=event.port, proto=event.proto, kind=event.kind,
+                    before=_snapshot_state(event.before),
+                    after=_snapshot_state(event.after),
+                    before_overrides=Overrides(**event.before_overrides) if event.before_overrides is not None else None,
+                    after_overrides=Overrides(**event.after_overrides) if event.after_overrides is not None else None,
+                )],
+            )
+    return HostTimeline(
+        [entries[(source, row_id)] for source, row_id in selected],
+        total, page, pages, show_unchanged,
+        entries[(latest[0], latest[1])] if latest is not None else None,
+    )

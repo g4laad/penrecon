@@ -306,16 +306,16 @@ def _operations_ctx(
         if per == "all" or (len(per) <= 10 and per.isascii() and per.isdecimal() and int(per) in queries.PER_PAGE_OPTIONS)
         else "25"
     )
-    matches = queries.operation_logs(session, q, engagement_id=engagement_id)
-    page_rows, page, pages = queries.paginate(
-        matches, page, queries.resolve_per_page(normalized_per)
+    result = queries.operation_logs(
+        session, q, engagement_id=engagement_id,
+        page=page, per_page=queries.resolve_per_page(normalized_per),
     )
     return {
-        "operations": page_rows,
-        "total": len(matches),
+        "operations": result.operations,
+        "total": result.total,
         "q": q,
-        "page": page,
-        "pages": pages,
+        "page": result.page,
+        "pages": result.pages,
         "per": normalized_per,
     }
 

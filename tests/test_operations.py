@@ -13,7 +13,7 @@ from sqlmodel import Session
 from starlette.testclient import TestClient
 
 from penrecon.db import engagement_attachments_dir
-from penrecon.models import OperationLog
+from penrecon.models import Engagement, OperationLog
 from penrecon.queries import operation_logs
 
 def _assert_outcome(response) -> None:
@@ -64,7 +64,7 @@ def test_operation_logs_orders_dated_then_undated_newest_first(session: Session)
     session.add_all([undated_new, dated_old, undated_old, dated_new])
     session.commit()
 
-    assert [row.command for row in operation_logs(session, engagement_id=TEST_ENGAGEMENT_ID)] == [
+    assert [row.command for row in operation_logs(session, engagement_id=TEST_ENGAGEMENT_ID).operations] == [
         "dated new",
         "dated old",
         "undated new",
@@ -83,17 +83,106 @@ def test_operation_logs_searches_command_endpoint_tag_and_attachment(session: Se
     session.add_all(rows)
     session.commit()
 
-    assert [row.command for row in operation_logs(session, "nmap", engagement_id=TEST_ENGAGEMENT_ID)] == ["NMAP -SV 10.0.0.1"]
-    assert [row.command for row in operation_logs(session, "DATABASE", engagement_id=TEST_ENGAGEMENT_ID)] == ["connect"]
-    assert [row.command for row in operation_logs(session, "credential-audit", engagement_id=TEST_ENGAGEMENT_ID)] == ["review"]
-    assert [row.command for row in operation_logs(session, "evidence.txt", engagement_id=TEST_ENGAGEMENT_ID)] == ["inspect"]
+    assert [row.command for row in operation_logs(session, "nmap", engagement_id=TEST_ENGAGEMENT_ID).operations] == ["NMAP -SV 10.0.0.1"]
+    assert [row.command for row in operation_logs(session, "DATABASE", engagement_id=TEST_ENGAGEMENT_ID).operations] == ["connect"]
+    assert [row.command for row in operation_logs(session, "credential-audit", engagement_id=TEST_ENGAGEMENT_ID).operations] == ["review"]
+    assert [row.command for row in operation_logs(session, "evidence.txt", engagement_id=TEST_ENGAGEMENT_ID).operations] == ["inspect"]
 
 
 def test_operation_logs_blank_query_returns_every_entry(session: Session) -> None:
     session.add_all([OperationLog(command="one", engagement_id=TEST_ENGAGEMENT_ID), OperationLog(command="two", engagement_id=TEST_ENGAGEMENT_ID)])
     session.commit()
 
-    assert {row.command for row in operation_logs(session, "  ", engagement_id=TEST_ENGAGEMENT_ID)} == {"one", "two"}
+    assert {row.command for row in operation_logs(session, "  ", engagement_id=TEST_ENGAGEMENT_ID).operations} == {"one", "two"}
+
+def test_operation_logs_paginates_only_owned_matches(session: Session) -> None:
+    other_id = "b9ec54a7-99a7-4ecf-b489-07ee3ca012a2"
+    session.add(Engagement(id=other_id, name="Other engagement"))
+    session.commit()
+    session.add_all([
+        OperationLog(command=f"needle {i:02}", engagement_id=TEST_ENGAGEMENT_ID)
+        for i in range(30)
+    ])
+    session.add_all([
+        OperationLog(
+            command=f"needle other {i}", engagement_id=other_id,
+            started_at=datetime(2026, 9, 22, 9, 0, i),
+        )
+        for i in range(3)
+    ])
+    session.commit()
+
+    result = operation_logs(session, "needle", engagement_id=other_id, page=999, per_page=2)
+    assert result.total == 3
+    assert result.page == result.pages == 2
+    assert [row.command for row in result.operations] == ["needle other 0"]
+
+    all_rows = operation_logs(session, "needle", engagement_id=other_id, page=999, per_page=None)
+    assert all_rows.total == 3
+    assert all_rows.page == all_rows.pages == 1
+    assert [row.command for row in all_rows.operations] == [
+        "needle other 2", "needle other 1", "needle other 0",
+    ]
+
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_page", "expected_pages", "expected_commands", "expected_per"),
+    [
+        ("", 1, 2, [f"command {i:02}" for i in range(29, 4, -1)], "25"),
+        ("page=2", 2, 2, [f"command {i:02}" for i in range(4, -1, -1)], "25"),
+        ("page=999", 2, 2, [f"command {i:02}" for i in range(4, -1, -1)], "25"),
+        ("page=0", 1, 2, [f"command {i:02}" for i in range(29, 4, -1)], "25"),
+        ("per=all&page=999", 1, 1, [f"command {i:02}" for i in range(29, -1, -1)], "all"),
+        ("per=invalid", 1, 2, [f"command {i:02}" for i in range(29, 4, -1)], "25"),
+    ],
+)
+def test_operations_page_boundaries(
+    client: TestClient, query: str, expected_page: int, expected_pages: int,
+    expected_commands: list[str], expected_per: str,
+) -> None:
+    for i in range(30):
+        _assert_outcome(_create_operation(
+            client, command=f"command {i:02}",
+            data={"started_at": f"2026-09-22T09:00:{i:02}"},
+        ))
+
+    response = client.get(api_url(f"/operations?{query}"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 30
+    assert payload["page"] == expected_page
+    assert payload["pages"] == expected_pages
+    assert payload["per"] == expected_per
+    assert payload["q"] == ""
+    assert [row["command"] for row in payload["operations"]] == expected_commands
+
+
+def test_operations_search_filters_before_pagination(client: TestClient) -> None:
+    for i in range(30):
+        _assert_outcome(_create_operation(
+            client, command=f"command {i:02}",
+            data={
+                "started_at": f"2026-09-22T09:00:{i:02}",
+                "output": "needle" if i < 3 else "unrelated",
+            },
+        ))
+
+    response = client.get(api_url("/operations?q=NEEDLE&page=999"))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 3
+    assert payload["page"] == payload["pages"] == 1
+    assert payload["q"] == "NEEDLE"
+    assert [row["command"] for row in payload["operations"]] == [
+        "command 02", "command 01", "command 00",
+    ]
+
+    empty = client.get(api_url("/operations?q=missing&page=999")).json()
+    assert empty == {
+        "operations": [], "total": 0, "page": 1, "pages": 1,
+        "q": "missing", "per": "25",
+    }
 
 
 def test_operation_summaries_search_full_text_without_returning_details(client: TestClient) -> None:

@@ -220,8 +220,19 @@ class OperationSummary:
     command: str
 
 
-def operation_logs(session: Session, q: str = "", *, engagement_id: str) -> list[OperationSummary]:
-    """Timeline summaries; search full text in SQL without loading detail bodies."""
+@dataclass
+class OperationPage:
+    operations: list[OperationSummary]
+    total: int
+    page: int
+    pages: int
+
+
+def operation_logs(
+    session: Session, q: str = "", *, engagement_id: str,
+    page: int = 1, per_page: int | None = 25,
+) -> OperationPage:
+    """Search/count/page in SQLite without loading off-page summaries or bodies."""
     statement = sql_select(
         col(OperationLog.id), col(OperationLog.started_at), col(OperationLog.destination),
         col(OperationLog.tool), col(OperationLog.command),
@@ -243,16 +254,26 @@ def operation_logs(session: Session, q: str = "", *, engagement_id: str) -> list
             ),
             tag_match,
         ))
+    total = session.execute(
+        sql_select(func.count()).select_from(statement.subquery()),
+    ).scalar_one()
+    page, pages = _page_bounds(total, page, per_page)
     statement = statement.order_by(
         col(OperationLog.started_at).is_(None),
         col(OperationLog.started_at).desc(),
         col(OperationLog.created_at).desc(),
+        col(OperationLog.id),
     )
-    return [
-        OperationSummary(oid, started_at, destination, tool, command)
-        for oid, started_at, destination, tool, command in session.connection().execute(statement)
-        if oid is not None
-    ]
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    return OperationPage(
+        [
+            OperationSummary(oid, started_at, destination, tool, command)
+            for oid, started_at, destination, tool, command
+            in session.connection().execute(statement)
+        ],
+        total, page, pages,
+    )
 
 
 # --- current-state merge -------------------------------------------------------
@@ -483,9 +504,6 @@ def host_page(
 PER_PAGE_OPTIONS = (10, 25, 50)  # selectable page sizes; "all" (no limit) is the 4th choice
 PER_PAGE_DEFAULT = 10
 
-_Row = TypeVar("_Row")
-
-
 def resolve_per_page(raw: str) -> int | None:
     """Map a ``?per`` query value to a row limit. ``"all"`` -> ``None`` (no
     limit); an empty/unknown/non-whitelisted value falls back to the default."""
@@ -498,19 +516,6 @@ def resolve_per_page(raw: str) -> int | None:
     return PER_PAGE_DEFAULT
 
 
-def paginate(
-    rows: list[_Row], page: int, per_page: int | None = PER_PAGE_DEFAULT
-) -> tuple[list[_Row], int, int]:
-    """Slice ``rows`` to one page. Returns ``(page_rows, page, pages)`` with
-    ``page`` clamped into ``[1, pages]`` so an out-of-range or filtered-away
-    page lands on the last real page rather than an empty table. ``per_page``
-    of ``None`` means "all": one page holds every row."""
-    if per_page is None:
-        return list(rows), 1, 1
-    pages = max(1, -(-len(rows) // per_page))  # ceil division
-    page = max(1, min(page, pages))
-    start = (page - 1) * per_page
-    return rows[start : start + per_page], page, pages
 
 
 SORT_DEFAULT_DIR = {"change": "asc", "ports": "desc", "ip": "asc", "status": "asc"}

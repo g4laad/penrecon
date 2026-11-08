@@ -263,6 +263,9 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   unchanged-scans toggle retains focus and scroll position; pagination and browser
   Back/Forward keep the URL and displayed history synchronized. Failed updates
   retain existing results and offer Retry.
+  SQLite filters, counts, orders, and paginates timeline metadata before loading
+  at most 20 entry payloads plus the latest changed entry. Reads do not load the
+  host's current observation snapshots; existing databases need no schema change.
   Scan execution time orders history when available; otherwise import time is
   explicitly labeled. Current service state uses the same ordering, so importing
   an older scan does not overwrite newer scan evidence. Host first/last-seen
@@ -325,6 +328,8 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   Pages contain operation summaries; selecting an entry loads its full output,
   comments, timestamps, and attachment metadata separately. Search still matches
   full output and comments without including those bodies in list responses.
+  Filtering, counts, ordering, and pagination run in SQLite before summaries are
+  loaded. Pages clamp to the matching range; `per=all` returns all matches.
 
 ## Workflow guarantees
 
