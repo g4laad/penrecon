@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 
 from anyio import CancelScope
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.engine import Connection, Engine
@@ -24,9 +24,9 @@ from penrecon.queries import ownership as ownership_queries
 from penrecon.queries import search as search_queries
 from penrecon.db import get_session
 from penrecon.ingest import ScanParseError, ingest_scan
-from penrecon.models import Engagement, Host, Note, Scan, Status
+from penrecon.models import Engagement, Note, Scan, Status
 from penrecon.parsers import PARSERS
-from penrecon.web.common import MAX_UPLOAD_BYTES, MutationResponse, mutation_response, require_engagement
+from penrecon.web.common import MAX_UPLOAD_BYTES, MutationResponse, mutation_response, owned_host, require_engagement
 from penrecon.web.inventory_schemas import AnnotationResponse, HostRowResponse
 from penrecon.web.serialization import encode_page
 
@@ -110,13 +110,6 @@ class AnnotationContextResponse(BaseModel):
     saved: bool
 
 
-def owned_host(session: Session, host_id: int, engagement_id: str) -> Host:
-    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
-    if host is None:
-        raise HTTPException(404, detail="host not found")
-    return host
-
-
 @router.get("/search", response_model=SearchResponse)
 def search(q: str = "", engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
     return JSONResponse(encode_page({"q": q.strip(), "results": search_queries.search(session, q, engagement_id=engagement_id)}))
@@ -176,7 +169,7 @@ def _import_scan(
 
 
 @router.post("/scans", response_model=MutationResponse, response_model_exclude_unset=True)
-async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap"), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
+async def upload_scan(file: UploadFile, tool: str = Form("nmap"), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
     try:
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(data) > MAX_UPLOAD_BYTES:
@@ -208,7 +201,7 @@ async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap
     finally:
         with CancelScope(shield=True):
             await file.close()
-    return mutation_response(request, f"/{engagement_id}/scans")
+    return mutation_response(f"/{engagement_id}/scans")
 
 
 @router.get("/diff", response_model=DiffResponse)
@@ -223,20 +216,20 @@ def diff(a: int | None = None, b: int | None = None, engagement_id: str = Depend
 
 @router.get("/annotation", response_model=AnnotationContextResponse)
 def annotation_get(host_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
-    owned_host(session, host_id, engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse(encode_page({"host_id": host_id, "ann": annotation_queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id), "statuses": list(Status), "saved": False}))
 
 
 @router.put("/annotation", response_model=MutationResponse, response_model_exclude_unset=True)
 def replace_annotation(host_id: int = Form(...), status: Status = Form(Status.new), tags: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> dict[str, bool]:
-    owned_host(session, host_id, engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     annotation_queries.upsert_annotation(session, status, [tag.strip() for tag in tags.split(",") if tag.strip()], host_id=host_id, engagement_id=engagement_id)
     return {"ok": True}
 
 
 @router.post("/notes", response_model=MutationResponse, response_model_exclude_unset=True)
 def note_create(host_id: int = Form(...), title: str = Form(""), body_md: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> dict[str, bool]:
-    owned_host(session, host_id, engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     session.add(Note(host_id=host_id, title=title.strip() or "Untitled", body_md=body_md, engagement_id=engagement_id))
     session.commit()
     return {"ok": True}

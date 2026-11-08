@@ -9,7 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -290,7 +290,7 @@ def _commit_operation(
     return change.finish(engagement_id)
 
 
-def _operation_committed_response(request: Request, engagement_id: str, cleanup_pending: bool, *, deleted: bool = False) -> Response:
+def _operation_committed_response(engagement_id: str, cleanup_pending: bool, *, deleted: bool = False) -> Response:
     destination = f"/{engagement_id}/operations"
     if cleanup_pending:
         return JSONResponse({
@@ -298,7 +298,7 @@ def _operation_committed_response(request: Request, engagement_id: str, cleanup_
             "detail": f"Operation {'deleted' if deleted else 'saved'}; obsolete attachment cleanup could not finish.",
             "redirect_to": destination,
         })
-    return mutation_response(request, destination)
+    return mutation_response(destination)
 
 
 def _operations_ctx(
@@ -354,7 +354,6 @@ def operation_detail(
 
 @router.post("/operations", response_model=MutationResponse)
 def create_operation(
-    request: Request,
     form: _OperationInput = Depends(_OperationInput),
     attachment: UploadFile | None = File(None, description="Optional attachment, limited to 32 MiB."),
     engagement_id: str = Depends(require_engagement),
@@ -370,12 +369,11 @@ def create_operation(
         cleanup_pending = _commit_operation(session, operation, change, values)
     except commands.InvalidCommand as exc:
         return invalid_command(exc)
-    return _operation_committed_response(request, engagement_id, cleanup_pending)
+    return _operation_committed_response(engagement_id, cleanup_pending)
 
 
 @router.put("/operations/{operation_id}", response_model=MutationResponse)
 def edit_operation(
-    request: Request,
     operation_id: int,
     form: _OperationInput = Depends(_OperationInput),
     remove_attachment: bool = Form(False),
@@ -396,12 +394,11 @@ def edit_operation(
         cleanup_pending = _commit_operation(session, operation, change, values)
     except commands.InvalidCommand as exc:
         return invalid_command(exc)
-    return _operation_committed_response(request, engagement_id, cleanup_pending)
+    return _operation_committed_response(engagement_id, cleanup_pending)
 
 
 @router.delete("/operations/{operation_id}", response_model=MutationResponse)
 def delete_operation(
-    request: Request,
     operation_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session),
 ) -> Response:
     operation = ownership_queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
@@ -409,7 +406,7 @@ def delete_operation(
         return JSONResponse({"detail": "operation not found"}, status_code=404)
     change = _AttachmentChange.choose(operation, None, remove=True)
     cleanup_pending = _commit_operation(session, operation, change, None)
-    return _operation_committed_response(request, engagement_id, cleanup_pending, deleted=True)
+    return _operation_committed_response(engagement_id, cleanup_pending, deleted=True)
 
 
 @router.get(

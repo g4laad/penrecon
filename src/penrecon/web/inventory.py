@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 
@@ -25,7 +25,7 @@ from penrecon.inventory import (
     same_ip,
 )
 from penrecon.models import CredKind, Host, ObsState, Service, Status
-from penrecon.web.common import ErrorResponse, MutationResponse, invalid_command, mutation_response, require_engagement
+from penrecon.web.common import ErrorResponse, MutationResponse, invalid_command, mutation_response, owned_host, require_engagement
 from penrecon.web.inventory_schemas import (
     HostDetailResponse,
     HostOptionsResponse,
@@ -143,13 +143,6 @@ def _services_ctx(
     }
 
 
-def _owned_host(session: Session, host_id: int, *, engagement_id: str) -> Host:
-    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
-    if host is None:
-        raise HTTPException(status_code=404, detail="host not found")
-    return host
-
-
 @router.get("/hosts/{host_id}/services", response_model=ServicesResponse)
 def services_data(
     host_id: int,
@@ -157,7 +150,7 @@ def services_data(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    host = _owned_host(session, host_id, engagement_id=engagement_id)
+    host = owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse(encode_page(_services_ctx(session, host, table, engagement_id=engagement_id)))
 
 
@@ -169,7 +162,7 @@ def timeline_data(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    _owned_host(session, host_id, engagement_id=engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse(encode_page({
         "host_timeline": inventory_queries.host_timeline(
             session, host_id, engagement_id=engagement_id,
@@ -197,7 +190,7 @@ def service_options(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    _owned_host(session, host_id, engagement_id=engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse({"services": [
         {"service_id": service.service_id, "port": service.port,
          "proto": service.proto, "service_name": service.service_name}
@@ -214,7 +207,7 @@ def host_detail(
     timeline_page: int = 1,
     timeline_unchanged: bool = False,
 ) -> Response:
-    host = _owned_host(session, host_id, engagement_id=engagement_id)
+    host = owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse(encode_page({
         "host": host,
         "statuses": list(Status),
@@ -242,7 +235,7 @@ def add_hostname(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    _owned_host(session, host_id, engagement_id=engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     try:
         clean = normalize_hostname(name) if name.strip() else ""
     except ValueError as exc:
@@ -260,7 +253,7 @@ def delete_hostname(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    _owned_host(session, host_id, engagement_id=engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     if hide_hostname(session, host_id, hostname_id, engagement_id=engagement_id):
         session.commit()
     return JSONResponse({"ok": True})
@@ -280,7 +273,6 @@ def _duplicate_ip_response(norm: str) -> JSONResponse:
 
 @router.post("/hosts", response_model=MutationResponse)
 def create_host(
-    request: Request,
     ip: str = Form(...),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
@@ -288,35 +280,34 @@ def create_host(
     """Create or select the canonical engagement/IP identity; blank is a no-op."""
     clean = ip.strip()
     if not clean:
-        return mutation_response(request, f"/{engagement_id}/")
+        return mutation_response(f"/{engagement_id}/")
     try:
         norm = normalize_ip(clean)
     except ValueError:
         return _invalid_ip_response(clean)
     existing = find_host_by_ip(session, norm, engagement_id=engagement_id)
     if existing is not None:
-        return mutation_response(request, f"/{engagement_id}/hosts/{existing.id}")
+        return mutation_response(f"/{engagement_id}/hosts/{existing.id}")
     now = datetime.now(UTC)
     host = Host(ip=norm, first_seen=now, last_seen=now, engagement_id=engagement_id)
     session.add(host)
     session.commit()
     session.refresh(host)
-    return mutation_response(request, f"/{engagement_id}/hosts/{host.id}")
+    return mutation_response(f"/{engagement_id}/hosts/{host.id}")
 
 
 @router.patch("/hosts/{host_id}", response_model=MutationResponse)
 def edit_host(
-    request: Request,
     host_id: int,
     ip: str = Form(...),
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     """Rename an owned identity without merging hosts; blank keeps its address."""
-    host = _owned_host(session, host_id, engagement_id=engagement_id)
+    host = owned_host(session, host_id, engagement_id=engagement_id)
     clean = ip.strip()
     if not clean:
-        return mutation_response(request, f"/{engagement_id}/hosts/{host_id}")
+        return mutation_response(f"/{engagement_id}/hosts/{host_id}")
     try:
         norm = normalize_ip(clean)
     except ValueError:
@@ -327,21 +318,20 @@ def edit_host(
             return _duplicate_ip_response(norm)
         host.ip = norm
         session.commit()
-    return mutation_response(request, f"/{engagement_id}/hosts/{host_id}")
+    return mutation_response(f"/{engagement_id}/hosts/{host_id}")
 
 
 @router.delete("/hosts/{host_id}", response_model=MutationResponse)
 def delete_host(
-    request: Request,
     host_id: int,
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    host = _owned_host(session, host_id, engagement_id=engagement_id)
+    host = owned_host(session, host_id, engagement_id=engagement_id)
     # Cascades remove dependent evidence and links; credentials themselves survive.
     session.delete(host)
     session.commit()
-    return mutation_response(request, f"/{engagement_id}/")
+    return mutation_response(f"/{engagement_id}/")
 
 
 @router.post("/hosts/{host_id}/services", response_model=MutationResponse)
@@ -356,7 +346,7 @@ def add_service(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    _owned_host(session, host_id, engagement_id=engagement_id)
+    owned_host(session, host_id, engagement_id=engagement_id)
     try:
         identity = commands.ServiceIdentity.parse(port, proto)
         values = commands.ServiceOverrides.parse(state, service_name, product, version, creating=True)

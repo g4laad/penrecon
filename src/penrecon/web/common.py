@@ -10,7 +10,8 @@ from sqlmodel import Session, select, col
 
 from penrecon import commands
 from penrecon.db import get_session
-from penrecon.models import Engagement
+from penrecon.models import Engagement, Host
+from penrecon.queries import ownership as ownership_queries
 
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 
@@ -49,6 +50,14 @@ def require_engagement(
     return load_engagement(request, engagement_id, session)
 
 
+def owned_host(session: Session, host_id: int, *, engagement_id: str) -> Host:
+    """Return an engagement-owned host; missing and foreign hosts both return 404."""
+    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    if host is None:
+        raise HTTPException(status_code=404, detail="host not found")
+    return host
+
+
 def bootstrap_data(session: Session, engagement: Engagement | None = None) -> dict[str, object]:
     return {
         "engagement": {"id": engagement.id, "name": engagement.name} if engagement else None,
@@ -61,7 +70,7 @@ def bootstrap_data(session: Session, engagement: Engagement | None = None) -> di
     }
 
 
-def mutation_response(request: Request, redirect_to: str) -> JSONResponse:
+def mutation_response(redirect_to: str) -> JSONResponse:
     """Return a document navigation hint, never an HTTP redirect from the API."""
     return JSONResponse({"ok": True, "redirect_to": redirect_to})
 

@@ -625,6 +625,7 @@ submodule directly; `queries/__init__.py` intentionally exports nothing.
 | `ingest.py`, `parsers/` | Scan ingestion and tool-specific parsing |
 | `inventory.py`, `commands.py` | Identity/link transitions and validated operator mutations |
 | `web/` | HTTP routing, request/response contracts, and local security |
+| `web/common.py` | Shared HTTP contracts, engagement/host ownership guards, and mutation navigation hints |
 
 Projection rebuilding remains part of the source-write transaction. These module
 changes do not alter database tables, endpoint contracts, or stored data.

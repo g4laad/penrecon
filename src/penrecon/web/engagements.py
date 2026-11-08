@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
@@ -40,7 +40,7 @@ def catalog(sort: str = "created_at", dir: str = "", session: Session = Depends(
 
 
 @router.post("/engagements", response_model=MutationResponse, response_model_exclude_unset=True)
-def create_engagement(request: Request, name: str = Form(""), description: str = Form(""), session: Session = Depends(get_session)) -> JSONResponse:
+def create_engagement(name: str = Form(""), description: str = Form(""), session: Session = Depends(get_session)) -> JSONResponse:
     clean_name = name.strip()
     if not clean_name:
         raise HTTPException(400, detail="Enter an engagement name.")
@@ -48,7 +48,7 @@ def create_engagement(request: Request, name: str = Form(""), description: str =
     session.add(engagement)
     session.commit()
     session.refresh(engagement)
-    return mutation_response(request, f"/{engagement.id}/")
+    return mutation_response(f"/{engagement.id}/")
 
 
 @router.put("/engagements", response_model=MutationResponse, response_model_exclude_unset=True)

@@ -19,7 +19,6 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, create_engine, select
 from starlette.datastructures import UploadFile
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from penrecon import db, ingest
@@ -235,7 +234,7 @@ def test_worker_rechecks_ownership_and_always_closes_upload(
         with Session(engine) as request_session:
             file = UploadFile(io.BytesIO(SCAN_A.encode()), filename="scan.xml")
             with pytest.raises(HTTPException) as error:
-                await evidence.upload_scan(Request({"type": "http"}), file, "nmap", "missing", request_session)
+                await evidence.upload_scan(file, "nmap", "missing", request_session)
             assert error.value.status_code == 404
             assert file.file.closed
         monkeypatch.setattr(evidence, "MAX_UPLOAD_BYTES", 8)
@@ -279,7 +278,7 @@ def test_request_cancellation_waits_for_worker_commit_or_compensation(
                 upload_tasks.append(task)
                 try:
                     with scope:
-                        await evidence.upload_scan(Request({"type": "http"}), file, "nmap", TEST_ENGAGEMENT_ID, request_session)
+                        await evidence.upload_scan(file, "nmap", TEST_ENGAGEMENT_ID, request_session)
                 except (OSError, asyncio.CancelledError) as exc:
                     errors.append(exc)
                 finally:
