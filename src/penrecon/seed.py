@@ -236,7 +236,7 @@ def seed_database(
             number = index + 1
             ip = str(IPv4Address(int(IPv4Address("198.18.0.0")) + number))
             name = f"host-{number:05d}.mock.test"
-            port, proto, service_name, product, version = _PROFILES[
+            port, proto, _service_name, product, version = _PROFILES[
                 index % len(_PROFILES)
             ]
             state = states[index % len(states)]
