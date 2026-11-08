@@ -5,15 +5,14 @@ from sqlmodel import Session, select
 
 from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
-from penrecon.models import Host, Scan, Service
+from penrecon.models import Host, Service
 from penrecon.queries import host_change, host_rows, resolved_services
 
 
 def _change(session: Session, ip: str) -> str:
-    """Call host_change with the same scan baseline host_rows computes."""
-    scan_ids = session.exec(select(Scan.id).order_by(Scan.imported_at.desc())).all()  # type: ignore[attr-defined]
-    return host_change(session, _host_id(session, ip),
-        scan_count=len(scan_ids), latest_scan_id=(scan_ids[0] if scan_ids else None), engagement_id=TEST_ENGAGEMENT_ID)
+    return host_change(
+        session, _host_id(session, ip), engagement_id=TEST_ENGAGEMENT_ID,
+    )
 
 
 def _scan(ip: str, port: int, version: str) -> bytes:
@@ -161,3 +160,45 @@ def test_coverage_without_a_unique_state_keeps_last_known_port(session: Session)
     assert [(port.port, port.proto) for port in entry.not_reported] == [(80, "tcp")]
     services = resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
     assert [(service.port, service.state, service.version) for service in services] == [(80, "open", "1.0")]
+
+
+def test_deleting_scan_restores_previous_current_state_and_delta(session: Session) -> None:
+    baseline = ingest_scan(
+        session, _scan("10.0.0.30", 80, "1.0"), "baseline.xml", "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
+    )
+    changed = ingest_scan(
+        session, _scan("10.0.0.30", 80, "2.0"), "changed.xml", "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
+    )
+    host_id = _host_id(session, "10.0.0.30")
+    assert _change(session, "10.0.0.30") == "changed"
+
+    session.delete(changed)
+    session.commit()
+    entries, latest = host_history(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.scan_id for entry in entries] == [baseline.id]
+    assert latest[(80, "tcp")].version == "1.0"
+    assert resolved_services(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)[0].version == "1.0"
+    assert _change(session, "10.0.0.30") == ""
+
+
+def test_rolled_back_scan_deletion_restores_current_state_and_delta(session: Session) -> None:
+    ingest_scan(
+        session, _scan("10.0.0.31", 80, "1.0"), "baseline.xml", "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
+    )
+    changed = ingest_scan(
+        session, _scan("10.0.0.31", 80, "2.0"), "changed.xml", "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
+    )
+    host_id = _host_id(session, "10.0.0.31")
+    with session.begin_nested() as transaction:
+        session.delete(changed)
+        assert resolved_services(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)[0].version == "1.0"
+        transaction.rollback()
+
+    entries, latest = host_history(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.filename for entry in entries] == ["baseline.xml", "changed.xml"]
+    assert latest[(80, "tcp")].version == "2.0"
+    assert _change(session, "10.0.0.31") == "changed"

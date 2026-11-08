@@ -1,8 +1,9 @@
 """SQLModel tables for penrecon.
 
-Scans are immutable snapshots of Observations. Current state is derived by
-latest-observation-wins per (host, port, proto). Annotations hang off stable
-entity identities (host / service / hostname) and are never touched by ingest.
+Scans are immutable snapshots of Observations. Current scan state and per-host
+scan differences are projected transactionally from chronological evidence.
+Annotations hang off stable entity identities (host / service / hostname) and
+are never touched by ingest. Manual service overrides remain separate.
 """
 
 from __future__ import annotations
@@ -154,6 +155,31 @@ class HostScanEvidence(EngagementOwned, table=True):
     ports: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
 
 
+class HostScanState(EngagementOwned, table=True):
+    """Persisted scan-only current state; manual overrides remain on Service."""
+
+    __tablename__ = "host_scan_state"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+    )
+    host_id: int = Field(primary_key=True)
+    latest: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    change: str = ""
+
+
+class HostScanDelta(EngagementOwned, table=True):
+    """One persisted oldest-first comparison per host and scan."""
+
+    __tablename__ = "host_scan_delta"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+    )
+    host_id: int = Field(primary_key=True)
+    scan_id: int = Field(primary_key=True)
+    entry: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
 class ManualServiceEvent(EngagementOwned, table=True):
     """Append-only service value snapshots, independent of service lifetime.
 
@@ -281,3 +307,11 @@ class CredentialService(EngagementOwned, table=True):
     )
     credential_id: int = Field(primary_key=True)
     service_id: int = Field(primary_key=True)
+
+
+# Register on SQLModel Session so every application session, including isolated
+# test sessions, maintains projections. Replay imports remain lazy to avoid the
+# models/history/db import cycle.
+from penrecon.projections import register_session_hooks
+
+register_session_hooks()

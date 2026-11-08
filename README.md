@@ -47,11 +47,19 @@ manually reset its database. Re-ingesting scans does **not** restore notes,
 credentials, manual edits, or operation logs. Startup never deletes or migrates
 your data automatically.
 
-Host timelines add separate scan-evidence and manual-service-event tables on
-startup; existing engagement-aware databases do not need a reset. Retained legacy
-scans are recovered read-only when history is viewed; no existing records are
-rewritten. Manual service actions are recorded going forward, not reconstructed
-from existing inventory.
+Host timelines and scan projections add tables on startup; existing
+engagement-aware databases do not need a reset. Startup backfills missing
+current-state and per-host scan-difference projections from retained evidence,
+including legacy raw scans, without rewriting original records. The first
+startup after upgrading may take longer; complete projections are not replayed
+on later startups.
+
+Evidence writes rebuild the affected engagement's projections in the same
+transaction, including when older scans arrive or scans are deleted. Inventory
+reads batch-load persisted current state instead of replaying scan history.
+Manual service overrides remain separate and take precedence over scan state;
+notes, triage, and credentials are untouched. Manual service actions are
+recorded going forward, not reconstructed from existing inventory.
 
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node

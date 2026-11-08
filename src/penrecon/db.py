@@ -49,16 +49,21 @@ enable_sqlite_fks(engine)
 def init_db() -> None:
     """Ensure local storage is ready before opening CLI or web sessions.
 
-    This idempotent command creates missing tables, not engagement contents.
-    It never alters existing tables: incompatible schemas require an explicit
-    manual database reset, never an automatic migration or deletion. Readiness
-    is derived from storage, not recorded as another persisted lifecycle flag.
+    This idempotent command creates missing tables and transactionally backfills
+    missing scan projections. It never alters existing tables: incompatible
+    schemas require an explicit manual database reset, never an automatic
+    migration or deletion. Complete projections are not replayed on startup.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
     from penrecon import models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
+    from penrecon.projections import backfill_missing
+
+    with Session(engine) as session:
+        with session.begin():
+            backfill_missing(session)
 
 
 def get_session() -> Iterator[Session]:

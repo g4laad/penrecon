@@ -1,7 +1,7 @@
-"""Scan-only replay and a unified host timeline of scans and manual actions.
+"""Scan-only history and a unified host timeline of scans and manual actions.
 
-Neither recovery nor reads write to the database. Aggregate evidence is applied
-only to ports already known at that point in history, never to every covered port.
+Reads use persisted projections. The write-side reducer applies aggregate
+evidence only to ports already known at that point in history.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from sqlmodel import Session, col, select
 
 from penrecon.db import DATA_DIR
 from penrecon.inventory import same_ip
-from penrecon.models import Host, HostScanEvidence, ManualServiceEvent, Observation, Scan
+from penrecon.models import Host, HostScanEvidence, ManualServiceEvent, Observation, ObsState, Scan
 from penrecon.parsers import HostResult, get_parser
 
 
@@ -216,14 +216,14 @@ def _reduce_port_evidence(
     return _PortTransition("missing", before)
 
 
-def host_history(
+def rebuild_history(
     session: Session, host_id: int, *, engagement_id: str,
 ) -> tuple[list[TimelineEntry], dict[tuple[int, str], Observation]]:
-    """Full oldest-first comparisons and latest scan-only state per port.
+    """Write-side replay: oldest-first comparisons and latest scan-only state.
 
-    All comparisons precede any visibility filtering or pagination. A partial
-    scan leaves the last known state intact, and never resets a port baseline.
-    Returned observations can be virtual aggregate evidence, not stored rows.
+    Only projection maintenance calls this reducer. A partial scan leaves the
+    last known state intact, and never resets a port baseline. Observations can
+    represent virtual aggregate evidence rather than stored rows.
     """
     entries: list[TimelineEntry] = []
     known: dict[tuple[int, str], State] = {}
@@ -257,12 +257,21 @@ def host_history(
             known[(port, proto)] = after
             latest[(port, proto)] = Observation(
                 engagement_id=engagement_id, scan_id=scan.id, host_id=host_id,
-                port=port, proto=proto, state=after.state,
+                port=port, proto=proto, state=ObsState(after.state),
                 service_name=after.service_name, product=after.product, version=after.version,
                 extra=transition.extra, observed_at=evidence.occurred_at,
             )
         entries.append(entry)
     return entries, latest
+
+
+def host_history(
+    session: Session, host_id: int, *, engagement_id: str,
+) -> tuple[list[TimelineEntry], dict[tuple[int, str], Observation]]:
+    """Read persisted oldest-first scan comparisons and scan-only current state."""
+    from penrecon.projections import scan_history
+
+    return scan_history(session, host_id, engagement_id=engagement_id)
 
 
 def _snapshot_state(snapshot: dict[str, str | None] | None) -> State | None:
@@ -277,7 +286,7 @@ def timeline(
     session: Session, host_id: int, *, engagement_id: str,
     page: int = 1, show_unchanged: bool = False,
 ) -> HostTimeline:
-    """Merge immutable manual actions after scan replay, before pagination."""
+    """Merge manual actions with persisted scan deltas, before pagination."""
     entries, _ = host_history(session, host_id, engagement_id=engagement_id)
     for event in session.exec(select(ManualServiceEvent).where(
         ManualServiceEvent.engagement_id == engagement_id,

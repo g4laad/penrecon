@@ -1,9 +1,5 @@
 """Read-side helpers: current-state merge, host listing/detail, scan diff,
 and annotation access.
-
-Scale note: current-state is computed in Python (latest-observation-wins).
-# ponytail: naive per-host dedupe, fine for single-user local; push into SQL
-# window functions if a project ever holds huge scan history.
 """
 
 from __future__ import annotations
@@ -16,7 +12,8 @@ from typing import TypeVar
 from sqlalchemy import func, inspect, or_, select as sql_select
 from sqlmodel import Session, col, select
 
-from penrecon.history import HostTimeline, Overrides, State, host_history, timeline
+from penrecon.history import HostTimeline, Overrides, State, timeline
+from penrecon import projections
 from penrecon.models import (
     Annotation,
     Credential,
@@ -26,6 +23,7 @@ from penrecon.models import (
     Host,
     Hostname,
     HostHostname,
+    HostScanState,
     Note,
     Observation,
     OperationLog,
@@ -239,14 +237,8 @@ def operation_logs(session: Session, q: str = "", *, engagement_id: str) -> list
 def latest_observations(
     session: Session, host_id: int, *, engagement_id: str
 ) -> dict[tuple[int, str], Observation]:
-    """Latest trustworthy scan evidence per (port, proto), ordered by scan time.
-
-    Aggregate closure/filtering only updates previously known ports; omitted
-    ports retain their last known state. Manual events never enter this replay;
-    current manual overrides are applied later.
-    """
-    _, latest = host_history(session, host_id, engagement_id=engagement_id)
-    return latest
+    """Persisted latest trustworthy scan evidence; manual overrides stay separate."""
+    return projections.latest_for_host(session, host_id, engagement_id=engagement_id)
 
 
 def _hostnames_for(session: Session, host_id: int, *, engagement_id: str) -> list[str]:
@@ -302,11 +294,24 @@ def resolved_services(
     observation; manual-only services are included."""
     latest = latest_observations(session, host_id, engagement_id=engagement_id)
     views: list[ServiceView] = []
-    for svc in session.exec(
+    services = session.exec(
         select(Service)
         .where(Service.engagement_id == engagement_id, Service.host_id == host_id)
         .order_by(Service.port)  # type: ignore[arg-type]
-    ).all():
+    ).all()
+    annotations = {
+        ann.service_id: ann
+        for ann in session.exec(
+            select(Annotation)
+            .join(Service, col(Annotation.service_id) == col(Service.id))
+            .where(
+                Annotation.engagement_id == engagement_id,
+                Service.engagement_id == engagement_id,
+                Service.host_id == host_id,
+            )
+        ).all()
+    }
+    for svc in services:
         assert svc.id is not None
         o = latest.get((svc.port, svc.proto))
         effective = service_state(svc, o)
@@ -320,7 +325,7 @@ def resolved_services(
                 product=effective.product,
                 version=effective.version,
                 last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
-                annotation=get_annotation(session, service_id=svc.id, engagement_id=engagement_id),
+                annotation=annotations.get(svc.id),
                 overrides=service_overrides(svc),
                 manual=o is None
                 or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
@@ -345,7 +350,6 @@ def host_timeline(
 
 def host_change(
     session: Session, host_id: int, *, engagement_id: str,
-    scan_count: int, latest_scan_id: int | None
 ) -> str:
     """Scan-only marker, unaffected by manual actions in the unified timeline.
 
@@ -355,48 +359,81 @@ def host_change(
     unrelated later scans and manual actions do not clear it. Missing evidence
     never expires an open service.
     """
-    entries, _ = host_history(session, host_id, engagement_id=engagement_id)
-    if not entries:
-        return ""
-    if len(entries) == 1:
-        return "new" if scan_count > 1 and entries[0].scan_id == latest_scan_id else ""
-    return "changed" if entries[-1].changes else ""
+    projections.prepare_read(session)
+    change = session.exec(
+        select(HostScanState.change).where(
+            HostScanState.engagement_id == engagement_id,
+            HostScanState.host_id == host_id,
+        )
+    ).first()
+    return change or ""
 
 
 def host_rows(session: Session, *, engagement_id: str) -> list[HostRow]:
-    # scan baseline for the "new" marker: how many scans exist, and which is latest
-    scan_ids = session.exec(
-        select(Scan.id)
-        .where(Scan.engagement_id == engagement_id)
-        .order_by(Scan.imported_at.desc())  # type: ignore[attr-defined]
+    projections.prepare_read(session)
+    hosts = session.exec(
+        select(Host, HostScanState.latest, HostScanState.change)
+        .outerjoin(
+            HostScanState,
+            (col(HostScanState.host_id) == col(Host.id))
+            & (col(HostScanState.engagement_id) == col(Host.engagement_id)),
+        )
+        .where(Host.engagement_id == engagement_id)
+        .order_by(Host.ip)
     ).all()
-    scan_count = len(scan_ids)
-    latest_scan_id = scan_ids[0] if scan_ids else None
-    rows: list[HostRow] = []
-    for host in session.exec(
-        select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
+    services_by_host: dict[int, list[Service]] = defaultdict(list)
+    for svc in session.exec(
+        select(Service)
+        .where(Service.engagement_id == engagement_id)
+        .order_by(col(Service.port))
     ).all():
+        services_by_host[svc.host_id].append(svc)
+    annotations = {
+        ann.host_id: ann
+        for ann in session.exec(
+            select(Annotation).where(
+                Annotation.engagement_id == engagement_id,
+                col(Annotation.host_id).is_not(None),
+            )
+        ).all()
+    }
+    names_by_host: dict[int, list[str]] = defaultdict(list)
+    for host_id, name in session.exec(
+        select(HostHostname.host_id, Hostname.name)
+        .join(Hostname, col(HostHostname.hostname_id) == col(Hostname.id))
+        .where(
+            HostHostname.engagement_id == engagement_id,
+            Hostname.engagement_id == engagement_id,
+            HostHostname.hidden == False,  # noqa: E712
+        )
+        .order_by(Hostname.name)
+    ).all():
+        names_by_host[host_id].append(name)
+    rows: list[HostRow] = []
+    for host, records, change in hosts:
         assert host.id is not None
-        open_s = [
-            s for s in resolved_services(session, host.id, engagement_id=engagement_id)
-            if s.state == "open"
-        ]
-        ann = get_annotation(session, host_id=host.id, engagement_id=engagement_id)
+        latest: dict[tuple[int, str], Observation] = {}
+        for record in records or []:
+            observation = Observation.model_validate(record)
+            latest[(observation.port, observation.proto)] = observation
+        open_services: list[tuple[int, str | None]] = []
+        for svc in services_by_host.get(host.id, []):
+            effective = service_state(svc, latest.get((svc.port, svc.proto)))
+            if effective.state == "open":
+                open_services.append((svc.port, effective.service_name))
+        ann = annotations.get(host.id)
         rows.append(
             HostRow(
                 id=host.id,
                 ip=host.ip,
-                hostnames=_hostnames_for(session, host.id, engagement_id=engagement_id),
-                open_count=len(open_s),
+                hostnames=names_by_host.get(host.id, []),
+                open_count=len(open_services),
                 status=(ann.status if ann else Status.new),
                 tags=(ann.tags if ann else []),
-                open_ports=sorted(s.port for s in open_s),
-                service_names=sorted({s.service_name for s in open_s if s.service_name}),
-                open_services=sorted((s.port, s.service_name) for s in open_s),
-                change=host_change(
-                    session, host.id, engagement_id=engagement_id,
-                    scan_count=scan_count, latest_scan_id=latest_scan_id
-                ),
+                open_ports=sorted(port for port, _name in open_services),
+                service_names=sorted({name for _port, name in open_services if name}),
+                open_services=sorted(open_services),
+                change=change or "",
                 triaged=ann is not None,
             )
         )
