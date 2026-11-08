@@ -59,6 +59,20 @@ class Scan(EngagementOwned, table=True):
     raw_path: str | None = None
 
 
+class ScanEvidenceComplete(EngagementOwned, table=True):
+    """All host evidence was staged by modern ingestion, even for empty scans.
+
+    Additive completeness metadata: unmarked legacy scans may recover evidence
+    from immutable raw bytes. This marker is not itself a scan evidence source.
+    """
+
+    __tablename__ = "scan_evidence_complete"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+    )
+    scan_id: int = Field(primary_key=True)
+
+
 class Host(EngagementOwned, table=True):
     __table_args__ = (
         UniqueConstraint("engagement_id", "id"),

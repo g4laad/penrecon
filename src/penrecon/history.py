@@ -17,8 +17,11 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
 
 from penrecon.db import DATA_DIR
-from penrecon.inventory import same_ip
-from penrecon.models import Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, ObsState, Scan
+from penrecon.inventory import normalize_ip
+from penrecon.models import (
+    Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, ObsState,
+    Scan, ScanEvidenceComplete,
+)
 from penrecon.parsers import HostResult, get_parser
 
 
@@ -113,66 +116,128 @@ def _raw_hosts(session: Session, scan: Scan) -> list[HostResult] | None:
     return cache[key]
 
 
-def _evidence(session: Session, host_id: int, engagement_id: str) -> list[_Evidence]:
-    host = session.exec(select(Host).where(Host.id == host_id, Host.engagement_id == engagement_id)).first()
-    if host is None:
-        return []
-    scans = session.exec(select(Scan).where(Scan.engagement_id == engagement_id)).all()
-    durable = {
-        row.scan_id: row for row in session.exec(select(HostScanEvidence).where(
-            HostScanEvidence.engagement_id == engagement_id, HostScanEvidence.host_id == host_id,
-        )).all()
-    }
-    # Canonical collisions are separate user records. Do not replay a modern
-    # scan onto a sibling when its durable evidence already names the owner.
-    attributed_elsewhere = {
-        scan_id for scan_id, ip in session.exec(
-            select(HostScanEvidence.scan_id, Host.ip)
-            .join(Host, Host.id == HostScanEvidence.host_id)  # type: ignore[arg-type]
-            .where(
-                HostScanEvidence.engagement_id == engagement_id,
-                Host.engagement_id == engagement_id, col(Host.id) != host_id,
-            )
-        ).all()
-        if same_ip(ip, host.ip)
-    }
-    observations: dict[int, list[Observation]] = {}
-    for row in session.exec(select(Observation).where(
-        Observation.engagement_id == engagement_id, Observation.host_id == host_id,
-    )).all():
-        observations.setdefault(row.scan_id, []).append(row)
-    result: list[_Evidence] = []
-    for scan in scans:
-        assert scan.id is not None
-        stored = durable.get(scan.id)
-        scanned_at: datetime | None = None
-        coverage: dict[str, Any] = {}
-        ports: list[dict[str, Any]]
-        if stored is not None:
-            scanned_at, coverage, ports = stored.scanned_at, stored.coverage, stored.ports
-        else:
-            raw = None if scan.id in attributed_elsewhere else _raw_hosts(session, scan)
-            recovered = next((row for row in raw or [] if same_ip(row.ip, host.ip)), None)
-            if recovered is not None:
-                scanned_at, coverage = recovered.scanned_at, recovered.coverage
-                ports = [vars(port).copy() for port in recovered.ports]
-            elif scan.id in observations:
-                ports = [{
-                    "port": row.port, "proto": row.proto, "state": str(row.state),
-                    "service_name": row.service_name, "product": row.product,
-                    "version": row.version, "extra": row.extra,
-                } for row in observations[scan.id]]
-            else:
+@dataclass
+class ReplayInputs:
+    """One engagement's write-side replay sources, indexed once per rebuild.
+
+    Selected hosts limit evidence payloads, not durable attribution: equivalent
+    sibling identities must still retain ownership of their historical scans.
+    Instances are snapshots and must not be reused after source mutations.
+    """
+
+    engagement_id: str
+    _evidence_by_host: dict[int, list[_Evidence]]
+
+    @classmethod
+    def load(
+        cls, session: Session, *, engagement_id: str, host_ids: set[int] | None = None,
+    ) -> ReplayInputs:
+        canonical_by_host: dict[int, str] = {}
+        selected_hosts: set[int] = set()
+        selected_by_ip: dict[str, list[int]] = {}
+        for host_id, ip in session.exec(
+            select(Host.id, Host.ip).where(Host.engagement_id == engagement_id)
+        ).all():
+            assert host_id is not None
+            selected = host_ids is None or host_id in host_ids
+            if selected:
+                selected_hosts.add(host_id)
+            try:
+                canonical = normalize_ip(ip)
+            except ValueError:
+                # Malformed legacy identities still retain durable evidence and
+                # observations, but never matched raw recovery via same_ip.
                 continue
-        result.append(_Evidence(
-            scan=scan,
-            occurred_at=_utc(scanned_at or scan.imported_at),
-            time_source="scan" if scanned_at is not None else "import",
-            coverage=coverage,
-            ports=ports,
-        ))
-    result.sort(key=lambda row: (row.occurred_at, _utc(row.scan.imported_at), row.scan.id or 0))
-    return result
+            canonical_by_host[host_id] = canonical
+            if selected:
+                selected_by_ip.setdefault(canonical, []).append(host_id)
+        if not selected_hosts:
+            return cls(engagement_id, {})
+
+        scans: dict[int, Scan] = {}
+        for scan in session.exec(
+            select(Scan).where(Scan.engagement_id == engagement_id)
+        ).all():
+            assert scan.id is not None
+            scans[scan.id] = scan
+        complete = set(session.exec(select(ScanEvidenceComplete.scan_id).where(
+            ScanEvidenceComplete.engagement_id == engagement_id,
+        )).all())
+        attributed: set[tuple[int, str]] = set()
+        for scan_id, host_id in session.exec(
+            select(HostScanEvidence.scan_id, HostScanEvidence.host_id).where(
+                HostScanEvidence.engagement_id == engagement_id,
+            )
+        ).all():
+            attributed_ip = canonical_by_host.get(host_id)
+            if attributed_ip is not None:
+                attributed.add((scan_id, attributed_ip))
+
+        durable_query = select(HostScanEvidence).where(
+            HostScanEvidence.engagement_id == engagement_id,
+        )
+        observations_query = select(Observation).where(
+            Observation.engagement_id == engagement_id,
+        )
+        if host_ids is not None:
+            durable_query = durable_query.where(col(HostScanEvidence.host_id).in_(selected_hosts))
+            observations_query = observations_query.where(col(Observation.host_id).in_(selected_hosts))
+        by_host: dict[int, dict[int, _Evidence]] = {}
+
+        def store(
+            host_id: int, scan_id: int, scanned_at: datetime | None,
+            coverage: dict[str, Any], ports: list[dict[str, Any]],
+        ) -> None:
+            scan = scans.get(scan_id)
+            if scan is not None and host_id in selected_hosts:
+                by_host.setdefault(host_id, {})[scan_id] = _Evidence(
+                    scan=scan, occurred_at=_utc(scanned_at or scan.imported_at),
+                    time_source="scan" if scanned_at is not None else "import",
+                    coverage=coverage, ports=ports,
+                )
+
+        durable: set[tuple[int, int]] = set()
+        for row in session.exec(durable_query).all():
+            durable.add((row.host_id, row.scan_id))
+            store(row.host_id, row.scan_id, row.scanned_at, row.coverage, row.ports)
+        observations: dict[tuple[int, int], list[dict[str, Any]]] = {}
+        for observation in session.exec(observations_query).all():
+            if (observation.host_id, observation.scan_id) not in durable:
+                observations.setdefault((observation.host_id, observation.scan_id), []).append({
+                    "port": observation.port, "proto": observation.proto, "state": str(observation.state),
+                    "service_name": observation.service_name, "product": observation.product,
+                    "version": observation.version, "extra": observation.extra,
+                })
+        for (host_id, scan_id), ports in observations.items():
+            # Observations remain usable even on complete scans without a
+            # durable host row. Only raw recovery is ruled out by completeness.
+            store(host_id, scan_id, None, {}, ports)
+        for scan_id, scan in scans.items():
+            assert scan_id is not None
+            if scan_id in complete:
+                continue
+            recovered_ips: set[str] = set()
+            for recovered in _raw_hosts(session, scan) or []:
+                try:
+                    canonical = normalize_ip(recovered.ip)
+                except ValueError:
+                    continue
+                if canonical in recovered_ips:
+                    continue
+                recovered_ips.add(canonical)
+                if (scan_id, canonical) in attributed:
+                    continue
+                matching = selected_by_ip.get(canonical, [])
+                if matching:
+                    ports = [vars(port).copy() for port in recovered.ports]
+                    for host_id in matching:
+                        store(host_id, scan_id, recovered.scanned_at, recovered.coverage, ports)
+        return cls(engagement_id, {
+            host_id: sorted(evidence.values(), key=lambda row: (
+                row.occurred_at, _utc(row.scan.imported_at), row.scan.id or 0,
+            ))
+            for host_id, evidence in by_host.items()
+        })
 
 
 def _aggregate_state(coverage: dict[str, Any], port: int, proto: str) -> str | None:
@@ -220,7 +285,7 @@ def _reduce_port_evidence(
 
 
 def rebuild_history(
-    session: Session, host_id: int, *, engagement_id: str,
+    session: Session, host_id: int, *, engagement_id: str, inputs: ReplayInputs | None = None,
 ) -> tuple[list[TimelineEntry], dict[tuple[int, str], Observation]]:
     """Write-side replay: oldest-first comparisons and latest scan-only state.
 
@@ -228,10 +293,14 @@ def rebuild_history(
     last known state intact, and never resets a port baseline. Observations can
     represent virtual aggregate evidence rather than stored rows.
     """
+    if inputs is None:
+        inputs = ReplayInputs.load(session, engagement_id=engagement_id, host_ids={host_id})
+    elif inputs.engagement_id != engagement_id:
+        raise ValueError("Replay inputs belong to a different engagement")
     entries: list[TimelineEntry] = []
     known: dict[tuple[int, str], State] = {}
     latest: dict[tuple[int, str], Observation] = {}
-    for evidence in _evidence(session, host_id, engagement_id):
+    for evidence in inputs._evidence_by_host.get(host_id, []):
         scan = evidence.scan
         assert scan.id is not None
         explicit = {(int(row["port"]), str(row["proto"])): row for row in evidence.ports}

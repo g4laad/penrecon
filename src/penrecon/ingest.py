@@ -23,6 +23,7 @@ from penrecon.models import (
     Observation,
     ObsState,
     Scan,
+    ScanEvidenceComplete,
     Service,
 )
 from penrecon.parsers import HostResult, ScanResult, get_parser
@@ -129,6 +130,7 @@ def _stage_scan(
     discovery = DiscoveryIndex.load(session, engagement_id=engagement_id)
     for host in result:
         _store_host(session, scan.id, host, now, discovery, engagement_id=engagement_id)
+    session.add(ScanEvidenceComplete(engagement_id=engagement_id, scan_id=scan.id))
     session.flush()
     return scan
 

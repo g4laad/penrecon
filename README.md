@@ -27,6 +27,16 @@ work on different engagements independently.
 Upload files from the selected engagement's Scans page. Use the sidebar's
 Scans and Scan diff entries to switch between import history and comparisons.
 
+Scan parsing, database writes, retained-file I/O, and projection maintenance run
+in a worker-owned session, not on the HTTP event loop. Request cancellation waits
+for commit or rollback/cleanup rather than abandoning an import in progress.
+Uploads remain bounded; disk-backed request spooling also runs off the event loop.
+SQLite uses WAL mode, FULL synchronous durability, and a 30-second lock timeout.
+Readers can retain their snapshots during imports; writes are still serialized.
+WAL is enabled during initialization, not on each request connection. Use local
+storage compatible with SQLite WAL and back up the entire data directory with
+the app stopped, including any `-wal` and `-shm` files.
+
 Hosts pagination updates the inventory in place without reloading the page.
 The URL tracks the current page, including browser Back and Forward navigation.
 
@@ -56,11 +66,18 @@ that state. Adding inventory tables does not replay already-complete scan
 history. The first startup after upgrading may take longer; complete projections
 are not rebuilt on later startups.
 
-Evidence writes rebuild the affected engagement's scan and inventory projections
-in the same transaction, including when older scans arrive or scans are deleted.
-Manual service edits, triage, and hostname changes rebuild only its inventory
-projections. This deliberately spends more work on writes: host and service
-tables filter, sort, count, and paginate in SQLite before loading page payloads.
+Evidence writes replay affected hosts' scan histories in the same transaction,
+including when older scans arrive or scans are deleted. Replay batches source
+reads once per engagement; unrelated hosts keep their persisted deltas. The
+engagement-relative "new" marker is refreshed separately. Legacy scan changes
+and host identity changes can still require an engagement-wide replay.
+Completed imports record an additive evidence-completeness marker: absent hosts
+are not recovered from their retained raw bytes, including after a host is
+deleted and recreated. Unmarked legacy scans retain raw recovery.
+Inventory projections are rebuilt in the same transaction; manual service edits,
+triage, and hostname changes rebuild only inventory, not scan history.
+This deliberately spends more work on writes: host and service tables filter,
+sort, count, and paginate in SQLite before loading page payloads.
 Steady host/service table reads do not decode observation snapshots or replay history.
 Manual service overrides remain separate and take precedence over scan state;
 notes, triage, and credentials are never rewritten by projection maintenance.

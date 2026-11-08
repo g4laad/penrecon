@@ -8,11 +8,12 @@ writes reuse persisted scan state without recovering raw scans.
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
-from sqlalchemy import delete, event, func, inspect, insert, true
+from sqlalchemy import case, delete, event, false, func, inspect, insert, true, update
 from sqlalchemy.orm import SessionTransaction
 from sqlmodel import Session, col, select
 
@@ -25,6 +26,7 @@ _PENDING = "scan_projection_pending"
 _INVENTORY_PENDING = "inventory_projection_pending"
 _REBUILDING = "scan_projection_rebuilding"
 _SAVEPOINTS = "scan_projection_savepoints"
+_REPLAY_TARGETS = "scan_projection_targets"
 
 
 @cache
@@ -48,6 +50,32 @@ def _timeline_adapter() -> TypeAdapter[TimelineEntry]:
     return TypeAdapter(TimelineEntry)
 
 
+@dataclass
+class _ReplayScope:
+    hosts: set[int] = field(default_factory=set)
+    new_hosts: dict[int, Host] = field(default_factory=dict)
+    scans: dict[int, Scan] = field(default_factory=dict)
+    deleted_scans: set[int] = field(default_factory=set)
+    full: bool = False
+
+    def merge(self, other: _ReplayScope) -> None:
+        self.hosts.update(other.hosts)
+        self.new_hosts.update(other.new_hosts)
+        self.scans.update(other.scans)
+        self.deleted_scans.update(other.deleted_scans)
+        self.full |= other.full
+
+    def copy(self) -> _ReplayScope:
+        return _ReplayScope(
+            set(self.hosts), dict(self.new_hosts), dict(self.scans),
+            set(self.deleted_scans), self.full,
+        )
+
+
+def _replay_targets(session: Session) -> dict[str, _ReplayScope]:
+    return session.info.setdefault(_REPLAY_TARGETS, {})  # type: ignore[no-any-return]
+
+
 def _pending(session: Session) -> set[str]:
     return session.info.setdefault(_PENDING, set())  # type: ignore[no-any-return]
 
@@ -56,7 +84,9 @@ def _inventory_pending(session: Session) -> set[str]:
     return session.info.setdefault(_INVENTORY_PENDING, set())  # type: ignore[no-any-return]
 
 
-def _savepoints(session: Session) -> dict[SessionTransaction, tuple[set[str], set[str]]]:
+def _savepoints(
+    session: Session,
+) -> dict[SessionTransaction, tuple[set[str], set[str], dict[str, _ReplayScope]]]:
     return session.info.setdefault(_SAVEPOINTS, {})  # type: ignore[no-any-return]
 
 
@@ -74,31 +104,87 @@ def _collect(session: Session, _flush_context: Any, _instances: Any) -> None:
     _collect_changes(session)
 
 
-def _rebuild_engagement(session: Session, engagement_id: str) -> None:
-    from penrecon.history import rebuild_history
-    from penrecon.models import Host, HostScanDelta, HostScanState, Scan
+def _rebuild_engagement(
+    session: Session, engagement_id: str, scope: _ReplayScope | None = None,
+) -> None:
+    from penrecon.history import ReplayInputs, rebuild_history
+    from penrecon.inventory import normalize_ip
+    from penrecon.models import (
+        Host, HostScanDelta, HostScanState, Scan, ScanEvidenceComplete,
+    )
 
-    scan_ids = list(session.execute(
+    host_ids: set[int] | None = None
+    if scope is not None and not scope.full:
+        scan_ids = {
+            scan.id for scan in scope.scans.values()
+            if scan.id is not None and scan.id not in scope.deleted_scans
+        }
+        complete = set(session.execute(
+            select(ScanEvidenceComplete.scan_id).where(
+                ScanEvidenceComplete.engagement_id == engagement_id,
+                col(ScanEvidenceComplete.scan_id).in_(scan_ids),
+            )
+        ).scalars()) if scan_ids else set()
+        if scan_ids <= complete:
+            host_ids = set(scope.hosts)
+            host_ids.update(
+                host.id for host in scope.new_hosts.values() if host.id is not None
+            )
+            if scan_ids:
+                # Scan metadata edits affect its existing histories even when
+                # evidence itself was not changed in this transaction.
+                host_ids.update(session.execute(
+                    select(HostScanDelta.host_id).where(
+                        HostScanDelta.engagement_id == engagement_id,
+                        col(HostScanDelta.scan_id).in_(scan_ids),
+                    )
+                ).scalars())
+            # Legacy aliases are separate identities, but evidence attribution
+            # can affect the raw fallback of a canonical sibling.
+            identities = list(session.execute(
+                select(Host.id, Host.ip).where(Host.engagement_id == engagement_id)
+            ))
+            canonical: dict[int, str] = {}
+            for identity, ip in identities:
+                if identity is not None:
+                    try:
+                        canonical[identity] = normalize_ip(ip)
+                    except ValueError:
+                        continue
+            affected_ips = {canonical[identity] for identity in host_ids if identity in canonical}
+            host_ids.update(
+                identity for identity, ip in canonical.items() if ip in affected_ips
+            )
+
+    scan_ids_ordered = list(session.execute(
         select(Scan.id).where(Scan.engagement_id == engagement_id)
         .order_by(col(Scan.imported_at).desc())
     ).scalars())
-    latest_scan_id = scan_ids[0] if scan_ids else None
+    latest_scan_id = scan_ids_ordered[0] if scan_ids_ordered else None
+    host_filter = [col(Host.engagement_id) == engagement_id]
+    state_filter = [col(HostScanState.engagement_id) == engagement_id]
+    delta_filter = [col(HostScanDelta.engagement_id) == engagement_id]
+    if host_ids is not None:
+        host_filter.append(col(Host.id).in_(host_ids))
+        state_filter.append(col(HostScanState.host_id).in_(host_ids))
+        delta_filter.append(col(HostScanDelta.host_id).in_(host_ids))
     states = {
         row.host_id: row for row in session.execute(
-            select(HostScanState).where(HostScanState.engagement_id == engagement_id)
+            select(HostScanState).where(*state_filter)
         ).scalars()
     }
-    session.execute(delete(HostScanDelta).where(
-        col(HostScanDelta.engagement_id) == engagement_id,
-    ))
-    hosts = session.execute(select(Host).where(Host.engagement_id == engagement_id)).scalars().all()
+    session.execute(delete(HostScanDelta).where(*delta_filter))
+    hosts = session.execute(select(Host).where(*host_filter)).scalars().all()
+    inputs = ReplayInputs.load(session, engagement_id=engagement_id, host_ids=host_ids)
     adapter = _timeline_adapter()
     for host in hosts:
         assert host.id is not None
-        entries, latest = rebuild_history(session, host.id, engagement_id=engagement_id)
+        entries, latest = rebuild_history(
+            session, host.id, engagement_id=engagement_id, inputs=inputs,
+        )
         change = ""
         if len(entries) == 1:
-            if len(scan_ids) > 1 and entries[0].scan_id == latest_scan_id:
+            if len(scan_ids_ordered) > 1 and entries[0].scan_id == latest_scan_id:
                 change = "new"
         elif entries and entries[-1].changes:
             change = "changed"
@@ -118,6 +204,27 @@ def _rebuild_engagement(session: Session, engagement_id: str) -> None:
                 }
                 for entry in entries
             ])
+    session.flush()
+    # "New" is engagement-relative, unlike historical deltas. Refresh its
+    # scalar marker without replaying hosts absent from the changed scan.
+    new_hosts = select(HostScanDelta.host_id).where(
+        HostScanDelta.engagement_id == engagement_id,
+    ).group_by(col(HostScanDelta.host_id)).having(
+        func.count() == 1, func.min(HostScanDelta.scan_id) == latest_scan_id,
+    )
+    new_marker = (
+        col(HostScanState.host_id).in_(new_hosts)
+        if len(scan_ids_ordered) > 1 else false()
+    )
+    marker = case(
+        (new_marker, "new"),
+        (col(HostScanState.change) == "new", ""),
+        else_=col(HostScanState.change),
+    )
+    session.execute(update(HostScanState).where(
+        col(HostScanState.engagement_id) == engagement_id,
+        col(HostScanState.change) != marker,
+    ).values(change=marker).execution_options(synchronize_session="fetch"))
 
 
 def _rebuild_inventory(session: Session, engagement_id: str) -> None:
@@ -257,15 +364,17 @@ def prepare_read(session: Session) -> None:
     session.info[_REBUILDING] = True
     evidence_scopes: set[str] = set()
     inventory_scopes: set[str] = set()
+    replay_targets: dict[str, _ReplayScope] = {}
     try:
         # Collect before cascading deletion and before flush forgets old scopes.
         _collect_changes(session)
         session.flush()
         evidence_scopes = session.info.pop(_PENDING, set())
         inventory_scopes = session.info.pop(_INVENTORY_PENDING, set()) | evidence_scopes
+        replay_targets = session.info.pop(_REPLAY_TARGETS, {})
         session.info.pop("timeline_raw", None)
         for engagement_id in sorted(evidence_scopes):
-            _rebuild_engagement(session, engagement_id)
+            _rebuild_engagement(session, engagement_id, replay_targets.get(engagement_id))
         session.flush()
         for engagement_id in sorted(inventory_scopes):
             _rebuild_inventory(session, engagement_id)
@@ -276,9 +385,12 @@ def prepare_read(session: Session) -> None:
             # retain both invalidations so a retry cannot commit stale rows.
             _pending(session).update(evidence_scopes)
             _inventory_pending(session).update(inventory_scopes)
+            for engagement_id, scope in replay_targets.items():
+                _replay_targets(session).setdefault(engagement_id, _ReplayScope()).merge(scope)
         else:
             session.info.pop(_PENDING, None)
             session.info.pop(_INVENTORY_PENDING, None)
+            session.info.pop(_REPLAY_TARGETS, None)
         raise
     finally:
         session.info.pop(_REBUILDING, None)
@@ -286,6 +398,8 @@ def prepare_read(session: Session) -> None:
 
 
 def _collect_changes(session: Session) -> None:
+    from penrecon.models import Host, HostScanDelta, HostScanEvidence, Observation, Scan, ScanEvidenceComplete
+
     # Source scopes survive FK cascades even when dependent rows never load.
     # This collector also runs explicitly while projection hooks are guarded.
     evidence_scopes = _pending(session)
@@ -315,8 +429,55 @@ def _collect_changes(session: Session) -> None:
                     if previous is not None:
                         scopes.add(previous)
                 inventory_scopes.update(scopes)
-                if isinstance(row, _evidence_types()):
-                    evidence_scopes.update(scopes)
+                if not isinstance(row, _evidence_types()):
+                    continue
+                if (
+                    isinstance(row, Host)
+                    and row not in session.new and row not in session.deleted
+                    and not state.attrs.ip.history.has_changes()
+                    and not history.has_changes()
+                ):
+                    # Rediscovery touches last_seen, not historical evidence.
+                    continue
+                evidence_scopes.update(scopes)
+                for engagement_id in scopes:
+                    target = _replay_targets(session).setdefault(engagement_id, _ReplayScope())
+                    if len(scopes) > 1 or (history.has_changes() and state.identity):
+                        target.full = True
+                    if isinstance(row, Host):
+                        if row in session.deleted or (state.attrs.ip.history.has_changes() and state.identity):
+                            # Renaming/deleting a legacy identity can reattribute
+                            # raw evidence on another canonical sibling.
+                            target.full = True
+                        elif row.id is None:
+                            target.new_hosts[id(row)] = row
+                        else:
+                            target.hosts.add(row.id)
+                    elif isinstance(row, Scan):
+                        target.scans[id(row)] = row
+                        if row in session.deleted and row.id is not None and row.id not in target.deleted_scans:
+                            # Capture dependencies before FK cascades remove
+                            # evidence and persisted deltas, even on explicit flush.
+                            target.deleted_scans.add(row.id)
+                            complete = session.exec(select(ScanEvidenceComplete.scan_id).where(
+                                ScanEvidenceComplete.engagement_id == engagement_id,
+                                ScanEvidenceComplete.scan_id == row.id,
+                            )).first()
+                            if complete is None:
+                                target.full = True
+                            for model in (HostScanDelta, HostScanEvidence, Observation):
+                                target.hosts.update(session.execute(
+                                    select(model.host_id).where(
+                                        model.engagement_id == engagement_id,
+                                        model.scan_id == row.id,
+                                    )
+                                ).scalars())
+                    elif isinstance(row, (HostScanEvidence, Observation)):
+                        target.hosts.add(row.host_id)
+                        host_history = state.attrs.host_id.history
+                        target.hosts.update(host_history.deleted)
+                        if host_history.has_changes() and state.identity and not host_history.deleted:
+                            target.full = True
 
 
 def latest_for_host(
@@ -415,6 +576,7 @@ def _after_transaction_create(session: Session, transaction: SessionTransaction)
         # restore both because the projection writes have also rolled back.
         _savepoints(session)[transaction] = (
             set(_pending(session)), set(_inventory_pending(session)),
+            {key: value.copy() for key, value in _replay_targets(session).items()},
         )
 
 
@@ -422,6 +584,7 @@ def _clear(session: Session) -> None:
     session.info.pop(_PENDING, None)
     session.info.pop(_INVENTORY_PENDING, None)
     session.info.pop(_SAVEPOINTS, None)
+    session.info.pop(_REPLAY_TARGETS, None)
     session.info.pop("timeline_raw", None)
 
 
@@ -440,9 +603,12 @@ def _after_rollback(session: Session) -> None:
 
 def _after_soft_rollback(session: Session, transaction: SessionTransaction) -> None:
     if transaction.nested:
-        evidence_scopes, inventory_scopes = _savepoints(session).pop(transaction, (set(), set()))
+        evidence_scopes, inventory_scopes, targets = _savepoints(session).pop(
+            transaction, (set(), set(), {}),
+        )
         session.info[_PENDING] = evidence_scopes
         session.info[_INVENTORY_PENDING] = inventory_scopes
+        session.info[_REPLAY_TARGETS] = targets
         session.info.pop("timeline_raw", None)
     elif transaction.parent is None:
         _clear(session)

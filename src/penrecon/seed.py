@@ -27,6 +27,7 @@ from penrecon.models import (
     ObsState,
     OperationLog,
     Scan,
+    ScanEvidenceComplete,
     Service,
     Status,
 )
@@ -78,6 +79,9 @@ def _retain_mock_scan(
         engagement_id=scan.engagement_id, scan_id=scan.id, host_id=host.id,
         scanned_at=evidence.scanned_at, coverage=evidence.coverage,
         ports=[asdict(port) for port in evidence.ports],
+    ))
+    session.add(ScanEvidenceComplete(
+        engagement_id=scan.engagement_id, scan_id=scan.id,
     ))
 
 

@@ -15,6 +15,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 DATA_DIR: Path = Path(os.environ.get("PENRECON_DATA", "data")).resolve()
 DB_PATH: Path = DATA_DIR / "penrecon.db"
+SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
 def engagement_scans_dir(engagement_id: str) -> Path:
@@ -34,6 +35,9 @@ def enable_sqlite_fks(engine: object) -> None:
     def _on(dbapi_conn: object, _record: object) -> None:
         cur = dbapi_conn.cursor()  # type: ignore[attr-defined]
         cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+        # WAL still requires durable commits; do not trade evidence for speed.
+        cur.execute("PRAGMA synchronous=FULL")
         cur.close()
         # SQLite's built-in lower() is ASCII-only; list searches preserve the
         # operation log's Unicode case-insensitive substring matching in SQL.
@@ -62,6 +66,11 @@ def init_db() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
     from penrecon import models  # noqa: F401
+
+    # Journal mode is persistent and negotiated only at initialization, not
+    # while opening request connections. In-memory databases keep their mode.
+    with engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA journal_mode=WAL")
 
     SQLModel.metadata.create_all(engine)
     from penrecon.projections import backfill_missing

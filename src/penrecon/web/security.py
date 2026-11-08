@@ -1,9 +1,9 @@
 """Local-only HTTP protections, applied before parsing or domain handlers."""
 from __future__ import annotations
 
-from tempfile import SpooledTemporaryFile
 from urllib.parse import urlsplit
 
+from anyio import CancelScope, SpooledTemporaryFile
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -88,7 +88,8 @@ class LocalSecurityMiddleware:
                     return
             # Spool before multipart parsing, bounding chunked requests as well as
             # Content-Length uploads without retaining the entire body in RAM.
-            with SpooledTemporaryFile(max_size=1024 * 1024) as body:
+            body = SpooledTemporaryFile[bytes](max_size=1024 * 1024)
+            try:
                 total = 0
                 while True:
                     message = await receive()
@@ -99,10 +100,10 @@ class LocalSecurityMiddleware:
                     if total > MAX_REQUEST_BYTES:
                         await reject(413, "Request body exceeds the 33 MiB limit.")
                         return
-                    body.write(chunk)
+                    await body.write(chunk)
                     if not message.get("more_body", False):
                         break
-                body.seek(0)
+                await body.seek(0)
                 remaining = total
                 replay_complete = False
 
@@ -113,11 +114,14 @@ class LocalSecurityMiddleware:
                     if remaining == 0:
                         replay_complete = True
                         return {"type": "http.request", "body": b"", "more_body": False}
-                    chunk = body.read(min(65536, remaining))
+                    chunk = await body.read(min(65536, remaining))
                     remaining -= len(chunk)
                     replay_complete = remaining == 0
                     return {"type": "http.request", "body": chunk, "more_body": remaining > 0}
 
                 await self.app(scope, replay, secure_send)
                 return
+            finally:
+                with CancelScope(shield=True):
+                    await body.aclose()
         await self.app(scope, receive, secure_send)

@@ -1,6 +1,7 @@
 """Scan imports/comparisons, search/export, and operator notes/triage."""
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 from collections.abc import Generator
@@ -11,6 +12,7 @@ from anyio import CancelScope
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.engine import Connection, Engine
 from sqlmodel import Session, col, select
 from starlette.concurrency import run_in_threadpool
 from starlette.types import Receive, Scope, Send
@@ -18,7 +20,7 @@ from starlette.types import Receive, Scope, Send
 from penrecon import queries
 from penrecon.db import get_session
 from penrecon.ingest import ScanParseError, ingest_scan
-from penrecon.models import Host, Note, Scan, Status
+from penrecon.models import Engagement, Host, Note, Scan, Status
 from penrecon.parsers import PARSERS
 from penrecon.web.common import MAX_UPLOAD_BYTES, MutationResponse, mutation_response, require_engagement
 from penrecon.web.inventory_schemas import AnnotationResponse, HostRowResponse
@@ -159,6 +161,16 @@ def scans(engagement_id: str = Depends(require_engagement), session: Session = D
     return JSONResponse(encode_page({"scans": rows, "tools": sorted(PARSERS)}))
 
 
+def _import_scan(
+    bind: Engine | Connection, data: bytes, filename: str, tool: str, engagement_id: str,
+) -> None:
+    """Own the entire import session in the worker, including compensation."""
+    with Session(bind) as session:
+        if session.get(Engagement, engagement_id) is None:
+            raise HTTPException(404, detail="engagement not found")
+        ingest_scan(session, data, filename, tool, engagement_id=engagement_id)
+
+
 @router.post("/scans", response_model=MutationResponse, response_model_exclude_unset=True)
 async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap"), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
     try:
@@ -166,11 +178,32 @@ async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, detail="Scan exceeds the 32 MiB upload limit.")
         try:
-            ingest_scan(session, data, file.filename or "upload", tool, engagement_id=engagement_id)
+            # Only transfer the bind, never the dependency's live Session. The
+            # worker must finish commit/rollback before request teardown.
+            with CancelScope(shield=True):
+                worker = asyncio.create_task(run_in_threadpool(
+                    _import_scan, session.get_bind(), data, file.filename or "upload", tool, engagement_id,
+                ))
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError as cancellation:
+                    # ASGI servers may cancel the asyncio task directly, outside
+                    # AnyIO scopes. Never abandon an in-flight file/DB mutation.
+                    while not worker.done():
+                        try:
+                            await asyncio.shield(worker)
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            break
+                    if not worker.cancelled() and (error := worker.exception()) is not None:
+                        cancellation.add_note(f"Scan worker failed during cancellation: {error}")
+                    raise
         except ScanParseError as exc:
             raise HTTPException(400, detail=str(exc)) from exc
     finally:
-        await file.close()
+        with CancelScope(shield=True):
+            await file.close()
     return mutation_response(request, f"/e/{engagement_id}/scans")
 
 
