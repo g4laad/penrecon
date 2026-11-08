@@ -453,7 +453,7 @@ export function OperationsPage({ data }: { data: PageData }) {
   return (
     <div className="operation-workbench-page">
       <div className="operation-toolbar">
-        <Filters>
+        <Filters key={data.q ?? ""}>
           <Field
             label="Search operations"
             name="q"

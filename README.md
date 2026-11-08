@@ -355,6 +355,7 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   full output and comments without including those bodies in list responses.
   Filtering, counts, ordering, and pagination run in SQLite before summaries are
   loaded. Pages clamp to the matching range; `per=all` returns all matches.
+  The search field follows the applied query after Reset and browser Back/Forward.
 
 ## Workflow guarantees
 
