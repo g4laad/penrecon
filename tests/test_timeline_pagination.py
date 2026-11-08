@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import delete
 from sqlmodel import Session
 
+from penrecon import projections
 from penrecon.history import timeline
-from penrecon.models import Engagement, Host, HostScanEvidence, ManualServiceEvent, Scan
+from penrecon.models import Engagement, Host, HostScanEvidence, HostTimelineEntry, ManualServiceEvent, Scan
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 
@@ -141,3 +143,105 @@ def test_timeline_keeps_host_and_engagement_scope_and_empty_page(session: Sessio
     for queried_host, engagement_id in [(host_id, TEST_ENGAGEMENT_ID), (other_host_id, TEST_ENGAGEMENT_ID)]:
         result = timeline(session, queried_host, engagement_id=engagement_id, page=10**100)
         assert (result.entries, result.total, result.page, result.pages, result.latest_change) == ([], 0, 1, 1, None)
+
+
+@pytest.mark.parametrize("flushed", [False, True], ids=["pending", "flushed"])
+def test_manual_only_timeline_tracks_edits_deletes_and_rollback(
+    session: Session, flushed: bool,
+) -> None:
+    host_id = _host(session)
+    _manual(session, host_id, 1, _START)
+    session.commit()
+    _manual(session, host_id, 2, _START + timedelta(seconds=1))
+    if flushed:
+        session.flush()
+    result = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.id for entry in result.entries] == ["manual:2", "manual:1"]
+    session.rollback()
+    assert [entry.id for entry in timeline(
+        session, host_id, engagement_id=TEST_ENGAGEMENT_ID,
+    ).entries] == ["manual:1"]
+
+    _manual(session, host_id, 2, _START + timedelta(seconds=1))
+    session.commit()
+    event = session.get(ManualServiceEvent, 1)
+    assert event is not None
+    event.occurred_at = _START + timedelta(seconds=2)
+    if flushed:
+        session.flush()
+    result = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.id for entry in result.entries] == ["manual:1", "manual:2"]
+    assert result.latest_change is not None and result.latest_change.id == "manual:1"
+    session.delete(event)
+    if flushed:
+        session.flush()
+    result = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.id for entry in result.entries] == ["manual:2"]
+    assert result.total == 1
+    session.rollback()
+    assert [entry.id for entry in timeline(
+        session, host_id, engagement_id=TEST_ENGAGEMENT_ID,
+    ).entries] == ["manual:2", "manual:1"]
+
+
+@pytest.mark.parametrize("inner_write", [False, True])
+def test_timeline_savepoint_rollback_keeps_outer_manual_action(
+    session: Session, inner_write: bool,
+) -> None:
+    host_id = _host(session)
+    _manual(session, host_id, 1, _START)
+    session.commit()
+    _manual(session, host_id, 2, _START + timedelta(seconds=1))
+    with session.begin_nested() as savepoint:
+        assert [entry.id for entry in timeline(
+            session, host_id, engagement_id=TEST_ENGAGEMENT_ID,
+        ).entries] == ["manual:2", "manual:1"]
+        if inner_write:
+            _manual(session, host_id, 3, _START + timedelta(seconds=2))
+            assert [entry.id for entry in timeline(
+                session, host_id, engagement_id=TEST_ENGAGEMENT_ID,
+            ).entries] == ["manual:3", "manual:2", "manual:1"]
+        savepoint.rollback()
+    result = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.id for entry in result.entries] == ["manual:2", "manual:1"]
+    session.commit()
+    assert timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID) == result
+
+
+def test_deleting_first_scan_refreshes_timeline_visibility(session: Session) -> None:
+    host_id = _host(session)
+    _scan(session, host_id, 1, _START)
+    _scan(session, host_id, 2, _START + timedelta(seconds=1))
+    session.commit()
+    assert [entry.id for entry in timeline(
+        session, host_id, engagement_id=TEST_ENGAGEMENT_ID,
+    ).entries] == ["scan:1"]
+    scan = session.get(Scan, 1)
+    assert scan is not None
+    session.delete(scan)
+    session.flush()
+    result = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    assert [entry.id for entry in result.entries] == ["scan:2"]
+    assert result.entries[0].first_seen and not result.entries[0].changes
+    assert result.latest_change == result.entries[0]
+    session.commit()
+    assert timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID) == result
+
+
+def test_backfill_restores_manual_only_timeline_without_changing_snapshots(session: Session) -> None:
+    host_id = _host(session)
+    _manual(session, host_id, 1, _START)
+    _manual(session, host_id, 2, _START + timedelta(seconds=1))
+    session.commit()
+    expected = timeline(session, host_id, engagement_id=TEST_ENGAGEMENT_ID)
+    engine = session.get_bind()
+    session.commit()
+    with engine.begin() as connection:
+        connection.execute(delete(HostTimelineEntry))
+    with Session(engine) as restored:
+        projections.backfill_missing(restored)
+        restored.commit()
+        assert timeline(restored, host_id, engagement_id=TEST_ENGAGEMENT_ID) == expected
+        projections.backfill_missing(restored)
+        restored.commit()
+        assert timeline(restored, host_id, engagement_id=TEST_ENGAGEMENT_ID) == expected

@@ -1,8 +1,8 @@
-"""Transactional scan and inventory projections, maintained only on writes.
+"""Transactional scan, inventory, and timeline projections maintained on writes.
 
 The history reducer owns scan merge semantics; service_state owns effective
-manual overrides. Evidence invalidates both projections, while inventory-only
-writes reuse persisted scan state without recovering raw scans.
+manual overrides. Evidence invalidates all projections, while inventory and
+timeline writes reuse persisted scan state without recovering raw scans.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from sqlalchemy import event, func, inspect, true
 from sqlalchemy.orm import SessionTransaction
 from sqlmodel import Session, col, select
 
-from penrecon import inventory_projection, scan_projection
+from penrecon import inventory_projection, scan_projection, timeline_projection
 
 
 if TYPE_CHECKING:
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 _PENDING = "scan_projection_pending"
 _INVENTORY_PENDING = "inventory_projection_pending"
+_TIMELINE_PENDING = "timeline_projection_pending"
 _REBUILDING = "scan_projection_rebuilding"
 _SAVEPOINTS = "scan_projection_savepoints"
 _REPLAY_TARGETS = "scan_projection_targets"
@@ -47,6 +48,13 @@ def _inventory_types() -> tuple[
     return _evidence_types() + (Annotation, Hostname, HostHostname, Service)
 
 
+@cache
+def _source_types() -> tuple[type[Any], ...]:
+    from penrecon.models import ManualServiceEvent
+
+    return _inventory_types() + (ManualServiceEvent,)
+
+
 def _replay_targets(session: Session) -> dict[str, scan_projection.ReplayScope]:
     return session.info.setdefault(_REPLAY_TARGETS, {})  # type: ignore[no-any-return]
 
@@ -59,15 +67,22 @@ def _inventory_pending(session: Session) -> set[str]:
     return session.info.setdefault(_INVENTORY_PENDING, set())  # type: ignore[no-any-return]
 
 
+def _timeline_pending(session: Session) -> set[str]:
+    return session.info.setdefault(_TIMELINE_PENDING, set())  # type: ignore[no-any-return]
+
+
 def _savepoints(
     session: Session,
-) -> dict[SessionTransaction, tuple[set[str], set[str], dict[str, scan_projection.ReplayScope]]]:
+) -> dict[
+    SessionTransaction,
+    tuple[set[str], set[str], set[str], dict[str, scan_projection.ReplayScope]],
+]:
     return session.info.setdefault(_SAVEPOINTS, {})  # type: ignore[no-any-return]
 
 
 def _has_source_changes(session: Session) -> bool:
     return any(
-        isinstance(row, _inventory_types())
+        isinstance(row, _source_types())
         for rows in (session.new, session.dirty, session.deleted)
         for row in rows
     )
@@ -80,7 +95,7 @@ def _collect(session: Session, _flush_context: Any, _instances: Any) -> None:
 
 
 def prepare_read(session: Session) -> None:
-    """Flush source writes, then finish pending scan and inventory projections.
+    """Flush source writes, then finish pending read-model projections.
 
     Explicit flushes only collect scopes. Steady reads do no validation or
     rebuilding; manual-only writes never replay scan history.
@@ -90,12 +105,14 @@ def prepare_read(session: Session) -> None:
     if not (
         session.info.get(_PENDING)
         or session.info.get(_INVENTORY_PENDING)
+        or session.info.get(_TIMELINE_PENDING)
         or _has_source_changes(session)
     ):
         return
     session.info[_REBUILDING] = True
     evidence_scopes: set[str] = set()
     inventory_scopes: set[str] = set()
+    timeline_scopes: set[str] = set()
     replay_targets: dict[str, scan_projection.ReplayScope] = {}
     try:
         # Collect before cascading deletion and before flush forgets old scopes.
@@ -103,6 +120,7 @@ def prepare_read(session: Session) -> None:
         session.flush()
         evidence_scopes = session.info.pop(_PENDING, set())
         inventory_scopes = session.info.pop(_INVENTORY_PENDING, set()) | evidence_scopes
+        timeline_scopes = session.info.pop(_TIMELINE_PENDING, set()) | evidence_scopes
         replay_targets = session.info.pop(_REPLAY_TARGETS, {})
         session.info.pop("timeline_raw", None)
         for engagement_id in sorted(evidence_scopes):
@@ -110,13 +128,16 @@ def prepare_read(session: Session) -> None:
         session.flush()
         for engagement_id in sorted(inventory_scopes):
             inventory_projection.rebuild_inventory(session, engagement_id)
+        for engagement_id in sorted(timeline_scopes):
+            timeline_projection.rebuild_timeline(session, engagement_id)
         session.flush()
     except BaseException:
         if session.is_active:
             # Reducer/serialization errors can leave the transaction usable;
-            # retain both invalidations so a retry cannot commit stale rows.
+            # retain invalidations so a retry cannot commit stale rows.
             _pending(session).update(evidence_scopes)
             _inventory_pending(session).update(inventory_scopes)
+            _timeline_pending(session).update(timeline_scopes)
             for engagement_id, scope in replay_targets.items():
                 _replay_targets(session).setdefault(
                     engagement_id, scan_projection.ReplayScope(),
@@ -124,6 +145,7 @@ def prepare_read(session: Session) -> None:
         else:
             session.info.pop(_PENDING, None)
             session.info.pop(_INVENTORY_PENDING, None)
+            session.info.pop(_TIMELINE_PENDING, None)
             session.info.pop(_REPLAY_TARGETS, None)
         raise
     finally:
@@ -132,18 +154,22 @@ def prepare_read(session: Session) -> None:
 
 
 def _collect_changes(session: Session) -> None:
-    from penrecon.models import Host, HostScanDelta, HostScanEvidence, Observation, Scan, ScanEvidenceComplete
+    from penrecon.models import (
+        Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, Scan,
+        ScanEvidenceComplete,
+    )
 
     # Source scopes survive FK cascades even when dependent rows never load.
     # This collector also runs explicitly while projection hooks are guarded.
     evidence_scopes = _pending(session)
     inventory_scopes = _inventory_pending(session)
+    timeline_scopes = _timeline_pending(session)
     # Reading an expired source attribute must not flush (and delete) that
     # source before its ownership scope has been collected.
     with session.no_autoflush:
         for rows in (session.new, session.dirty, session.deleted):
             for row in rows:
-                if not isinstance(row, _inventory_types()):
+                if not isinstance(row, _source_types()):
                     continue
                 state = inspect(row)
                 assert state is not None
@@ -162,6 +188,9 @@ def _collect_changes(session: Session) -> None:
                     ).scalar_one_or_none()
                     if previous is not None:
                         scopes.add(previous)
+                if isinstance(row, ManualServiceEvent):
+                    timeline_scopes.update(scopes)
+                    continue
                 inventory_scopes.update(scopes)
                 if not isinstance(row, _evidence_types()):
                     continue
@@ -254,11 +283,13 @@ def scan_history(
 def backfill_missing(session: Session) -> None:
     """Populate missing additive read models without changing source rows.
 
-    Only missing scan states replay evidence. Missing inventory rows reuse
-    complete scan projections, including when a new table was added on startup.
+    Only missing scan states replay evidence. Missing inventory and timeline
+    metadata reuse persisted projections and manual events, including when
+    a new table was added on startup.
     """
     from penrecon.models import (
-        CurrentService, Host, HostScanState, HostSummary, HostSummaryTag, Service,
+        CurrentService, Host, HostScanDelta, HostScanState, HostSummary, HostSummaryTag,
+        HostTimelineEntry, ManualServiceEvent, Service,
     )
 
     prepare_read(session)
@@ -294,10 +325,25 @@ def backfill_missing(session: Session) -> None:
             & (col(HostSummaryTag.tag) == tags.c.value),
         ).where(col(HostSummaryTag.host_id).is_(None)).distinct()
     ).scalars())
-    if not inventory_scopes:
+    timeline_scopes: set[str] = set()
+    for model, source, source_id in (
+        (HostScanDelta, "scan", HostScanDelta.scan_id),
+        (ManualServiceEvent, "manual", ManualServiceEvent.id),
+    ):
+        timeline_scopes.update(session.execute(
+            select(model.engagement_id).outerjoin(
+                HostTimelineEntry,
+                (col(HostTimelineEntry.engagement_id) == col(model.engagement_id))
+                & (col(HostTimelineEntry.host_id) == col(model.host_id))
+                & (col(HostTimelineEntry.source) == source)
+                & (col(HostTimelineEntry.source_id) == col(source_id)),
+            ).where(col(HostTimelineEntry.host_id).is_(None)).distinct()
+        ).scalars())
+    if not (inventory_scopes or timeline_scopes):
         return
     _pending(session).update(evidence_scopes)
     _inventory_pending(session).update(inventory_scopes)
+    _timeline_pending(session).update(timeline_scopes)
     prepare_read(session)
 
 
@@ -309,9 +355,10 @@ def _after_transaction_create(session: Session, transaction: SessionTransaction)
     if transaction.nested:
         # begin_nested flushes outer source rows before creating the savepoint.
         # A read can consume their invalidations inside it; rollback must then
-        # restore both because the projection writes have also rolled back.
+        # restore all invalidations because projection writes also rolled back.
         _savepoints(session)[transaction] = (
             set(_pending(session)), set(_inventory_pending(session)),
+            set(_timeline_pending(session)),
             {key: value.copy() for key, value in _replay_targets(session).items()},
         )
 
@@ -319,6 +366,7 @@ def _after_transaction_create(session: Session, transaction: SessionTransaction)
 def _clear(session: Session) -> None:
     session.info.pop(_PENDING, None)
     session.info.pop(_INVENTORY_PENDING, None)
+    session.info.pop(_TIMELINE_PENDING, None)
     session.info.pop(_SAVEPOINTS, None)
     session.info.pop(_REPLAY_TARGETS, None)
     session.info.pop("timeline_raw", None)
@@ -339,11 +387,12 @@ def _after_rollback(session: Session) -> None:
 
 def _after_soft_rollback(session: Session, transaction: SessionTransaction) -> None:
     if transaction.nested:
-        evidence_scopes, inventory_scopes, targets = _savepoints(session).pop(
-            transaction, (set(), set(), {}),
+        evidence_scopes, inventory_scopes, timeline_scopes, targets = _savepoints(session).pop(
+            transaction, (set(), set(), set(), {}),
         )
         session.info[_PENDING] = evidence_scopes
         session.info[_INVENTORY_PENDING] = inventory_scopes
+        session.info[_TIMELINE_PENDING] = timeline_scopes
         session.info[_REPLAY_TARGETS] = targets
         session.info.pop("timeline_raw", None)
     elif transaction.parent is None:

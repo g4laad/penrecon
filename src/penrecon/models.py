@@ -1,7 +1,7 @@
 """SQLModel tables for penrecon.
 
 Scans are immutable snapshots of Observations. Scan state, per-host scan
-differences, and inventory read models are projected transactionally.
+differences, inventory, and indexed timeline metadata are projected transactionally.
 Annotations hang off stable entity identities (host / service / hostname) and
 are never touched by ingest. Manual service overrides remain separate.
 """
@@ -192,6 +192,30 @@ class HostScanDelta(EngagementOwned, table=True):
     host_id: int = Field(primary_key=True)
     scan_id: int = Field(primary_key=True)
     entry: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class HostTimelineEntry(EngagementOwned, table=True):
+    """Indexed timeline metadata; immutable payloads stay in their source tables."""
+
+    __tablename__ = "host_timeline_entry"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        CheckConstraint("source IN ('scan', 'manual')", name="host_timeline_entry_source"),
+        Index(
+            "ix_host_timeline_scope_order", "engagement_id", "host_id",
+            desc("occurred_at"), desc("imported_at"), desc("source"), desc("source_id"),
+        ),
+        Index(
+            "ix_host_timeline_scope_changed_order", "engagement_id", "host_id", "changed",
+            desc("occurred_at"), desc("imported_at"), desc("source"), desc("source_id"),
+        ),
+    )
+    host_id: int = Field(primary_key=True)
+    source: str = Field(primary_key=True)
+    source_id: int = Field(primary_key=True)
+    occurred_at: datetime
+    imported_at: datetime
+    changed: bool
 
 
 class CurrentService(EngagementOwned, table=True):

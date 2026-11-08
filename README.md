@@ -62,9 +62,10 @@ engagement-aware databases do not need a reset. Startup backfills missing
 scan-state and per-host scan-difference projections from retained evidence,
 including legacy raw scans, without rewriting original records. Effective
 services, host summaries, and exact tag membership are then materialized from
-that state. Adding inventory tables does not replay already-complete scan
-history. The first startup after upgrading may take longer; complete projections
-are not rebuilt on later startups.
+that state. Indexed timeline metadata is backfilled from existing scan deltas
+and immutable manual events without replaying complete scan history. Adding these
+read-model tables never alters existing tables or source records. The first startup
+after upgrading may take longer; complete projections are not rebuilt on later startups.
 
 Evidence writes replay affected hosts' scan histories in the same transaction,
 including when older scans arrive or scans are deleted. Replay batches source
@@ -83,6 +84,10 @@ Manual service overrides remain separate and take precedence over scan state;
 notes, triage, and credentials are never rewritten by projection maintenance.
 Manual service actions are recorded going forward, not reconstructed from
 existing inventory.
+Timeline ordering timestamps and change visibility are maintained transactionally
+in `host_timeline_entry`, with separate indexes for all events and changes only.
+Manual actions refresh timeline metadata without rebuilding inventory or replaying
+scan history. Scan differences and manual snapshots remain the authoritative payloads.
 
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node
@@ -280,9 +285,10 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   unchanged-scans toggle retains focus and scroll position; pagination and browser
   Back/Forward keep the URL and displayed history synchronized. Failed updates
   retain existing results and offer Retry.
-  SQLite filters, counts, orders, and paginates timeline metadata before loading
-  at most 20 entry payloads plus the latest changed entry. Reads do not load the
-  host's current observation snapshots; existing databases need no schema change.
+  SQLite filters, counts, orders, and paginates indexed timeline metadata before
+  loading at most 20 entry payloads plus the latest changed entry. Reads do not
+  decode JSON timestamps, sort the entire history, or load current observation
+  snapshots. Existing databases receive an additive table and automatic backfill.
   Scan execution time orders history when available; otherwise import time is
   explicitly labeled. Current service state uses the same ordering, so importing
   an older scan does not overwrite newer scan evidence. Host first/last-seen
@@ -598,6 +604,7 @@ submodule directly; `queries/__init__.py` intentionally exports nothing.
 | `projections.py` | Transaction hooks, invalidation, read preparation, and startup backfill |
 | `scan_projection.py` | Affected-host scan-state and delta rebuilding |
 | `inventory_projection.py` | Effective service, host-summary, and tag rebuilding |
+| `timeline_projection.py` | Indexed timeline ordering and visibility metadata |
 | `history.py` | Scan-evidence replay and unified scan/manual timelines |
 | `models.py`, `db.py` | SQLModel tables, engine configuration, and initialization |
 | `ingest.py`, `parsers/` | Scan ingestion and tool-specific parsing |

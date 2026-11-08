@@ -11,16 +11,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from sqlalchemy import Integer, case, cast, func, literal, or_, select as sql_select, union_all
-from sqlalchemy.orm import Mapped
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy import func
 from sqlmodel import Session, col, select
 
 from penrecon.db import DATA_DIR
 from penrecon.inventory import normalize_ip
 from penrecon.models import (
-    Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, ObsState,
-    Scan, ScanEvidenceComplete,
+    Host, HostScanDelta, HostScanEvidence, HostTimelineEntry, ManualServiceEvent,
+    Observation, ObsState, Scan, ScanEvidenceComplete,
 )
 from penrecon.parsers import HostResult, get_parser
 
@@ -354,76 +352,36 @@ def _snapshot_state(snapshot: dict[str, str | None] | None) -> State | None:
     return State(state, snapshot.get("service_name"), snapshot.get("product"), snapshot.get("version"))
 
 
-def _timestamp_order(
-    value: ColumnElement[Any] | Mapped[Any],
-) -> tuple[ColumnElement[Any], ColumnElement[Any]]:
-    """Compare UTC seconds and exact microseconds without SQLite date rounding."""
-    offset = case(
-        (func.substr(value, -6, 1).in_(("+", "-")), func.substr(value, -6)),
-        else_="",
-    )
-    without_zone = case(
-        (offset != "", func.substr(value, 1, func.length(value) - 6)),
-        (func.substr(value, -1) == "Z", func.substr(value, 1, func.length(value) - 1)),
-        else_=value,
-    )
-    seconds = cast(func.strftime("%s", func.substr(value, 1, 19).concat(offset)), Integer)
-    micros = case(
-        (func.substr(value, 20, 1) == ".",
-         cast(func.substr(func.substr(without_zone, 21, 6).concat("000000"), 1, 6), Integer)),
-        else_=0,
-    )
-    return seconds, micros
-
-
 def timeline(
     session: Session, host_id: int, *, engagement_id: str,
     page: int = 1, show_unchanged: bool = False,
 ) -> HostTimeline:
-    """Page persisted scan deltas and immutable manual snapshots in SQL."""
+    """Page indexed timeline metadata, then load only the selected payloads."""
     from penrecon.projections import prepare_read
     from penrecon.scan_projection import timeline_adapter
 
     prepare_read(session)
-    scan_occurred = _timestamp_order(func.json_extract(HostScanDelta.entry, "$.occurred_at"))
-    scan_imported = _timestamp_order(func.json_extract(HostScanDelta.entry, "$.imported_at"))
-    manual_time = _timestamp_order(col(ManualServiceEvent.occurred_at))
-    changed = or_(
-        func.json_extract(HostScanDelta.entry, "$.first_seen") == 1,
-        func.json_array_length(HostScanDelta.entry, "$.changes") > 0,
+    scope = (
+        col(HostTimelineEntry.engagement_id) == engagement_id,
+        col(HostTimelineEntry.host_id) == host_id,
     )
-    candidates = union_all(
-        sql_select(
-            literal("scan").label("source"), col(HostScanDelta.scan_id).label("id"),
-            scan_occurred[0].label("occurred_seconds"), scan_occurred[1].label("occurred_micros"),
-            scan_imported[0].label("imported_seconds"), scan_imported[1].label("imported_micros"),
-            changed.label("changed"),
-        ).where(
-            col(HostScanDelta.engagement_id) == engagement_id, col(HostScanDelta.host_id) == host_id,
-        ),
-        sql_select(
-            literal("manual"), col(ManualServiceEvent.id),
-            manual_time[0], manual_time[1], manual_time[0], manual_time[1], literal(True),
-        ).where(
-            col(ManualServiceEvent.engagement_id) == engagement_id,
-            col(ManualServiceEvent.host_id) == host_id,
-        ),
-    ).subquery()
-    visible = select(candidates.c.source, candidates.c.id)
-    if not show_unchanged:
-        visible = visible.where(candidates.c.changed)
-    total = session.execute(select(func.count()).select_from(visible.subquery())).scalar_one()
+    changed_scope = (*scope, col(HostTimelineEntry.changed) == True)
+    visible_scope = scope if show_unchanged else changed_scope
+    total = session.execute(
+        select(func.count()).select_from(HostTimelineEntry).where(*visible_scope),
+    ).scalar_one()
     pages = max(1, (total + 19) // 20)
     page = max(1, min(page, pages))
-    ordering = [
-        candidates.c.occurred_seconds.desc(), candidates.c.occurred_micros.desc(),
-        candidates.c.imported_seconds.desc(), candidates.c.imported_micros.desc(),
-        candidates.c.source.desc(), candidates.c.id.desc(),
-    ]
-    selected = session.execute(visible.order_by(*ordering).limit(20).offset((page - 1) * 20)).all()
+    ordering = (
+        col(HostTimelineEntry.occurred_at).desc(), col(HostTimelineEntry.imported_at).desc(),
+        col(HostTimelineEntry.source).desc(), col(HostTimelineEntry.source_id).desc(),
+    )
+    candidates = select(HostTimelineEntry.source, HostTimelineEntry.source_id)
+    selected = session.execute(
+        candidates.where(*visible_scope).order_by(*ordering).limit(20).offset((page - 1) * 20),
+    ).all()
     latest = session.execute(
-        select(candidates.c.source, candidates.c.id).where(candidates.c.changed)
-        .order_by(*ordering).limit(1),
+        candidates.where(*changed_scope).order_by(*ordering).limit(1),
     ).first()
     wanted = set(selected)
     if latest is not None:

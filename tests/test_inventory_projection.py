@@ -20,6 +20,7 @@ from penrecon.models import (
     HostScanState,
     HostSummary,
     HostSummaryTag,
+    HostTimelineEntry,
     ManualServiceEvent,
     Note,
     Observation,
@@ -444,7 +445,7 @@ def test_additive_backfill_uses_existing_scan_state_without_changing_user_data(s
     # Simulate the pre-additive schema's missing read-model contents, leaving
     # already-complete scan projections and all source/user rows intact.
     with engine.begin() as connection:
-        for model in (HostSummaryTag, HostSummary, CurrentService):
+        for model in (HostSummaryTag, HostSummary, CurrentService, HostTimelineEntry):
             connection.execute(delete(model))
 
     with Session(engine) as restored:
