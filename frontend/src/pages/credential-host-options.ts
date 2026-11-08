@@ -11,16 +11,13 @@ export interface HostOptions {
   load: () => void;
 }
 
-export function useHostOptions(active: boolean): HostOptions {
+export function useHostOptions(): HostOptions {
   const [state, setState] = useState<Omit<HostOptions, "load">>({ status: "idle", hosts: [] });
   const load = useCallback(() => {
     setState((current) => current.status === "idle" || current.status === "error"
       ? { ...current, status: "loading" }
       : current);
   }, []);
-  useEffect(() => {
-    if (active) load();
-  }, [active, load]);
   useEffect(() => {
     if (state.status !== "loading") return;
     const controller = new AbortController();

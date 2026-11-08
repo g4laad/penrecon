@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from penrecon import commands, queries
 from penrecon.db import get_session
@@ -46,12 +46,15 @@ class CredentialResponse(BaseModel):
     created_at: str
     hosts: list[CredentialHostResponse]
     services: list[CredentialServiceResponse]
-    pickable_services: list[CredentialServiceResponse]
 
 
 class CredentialsPageResponse(BaseModel):
     credentials: list[CredentialSummaryResponse]
     total: int
+    matched: int
+    page: int
+    pages: int
+    per: str
     kinds: list[CredKind]
     q: str
     kind: str
@@ -60,6 +63,14 @@ class CredentialsPageResponse(BaseModel):
 
 class CredentialDetailResponse(BaseModel):
     credential: CredentialResponse
+
+
+class CredentialServiceOptionsResponse(BaseModel):
+    services: list[CredentialServiceResponse]
+    total: int
+    page: int
+    pages: int
+    per: str
 
 
 router = APIRouter(
@@ -71,6 +82,15 @@ router = APIRouter(
     },
 )
 _NO_STORE = {"Cache-Control": "no-store"}
+
+
+def _per_page(raw: str) -> int | None:
+    if raw == "all" or (
+        len(raw) <= 10 and raw.isascii() and raw.isdecimal()
+        and int(raw) in queries.PER_PAGE_OPTIONS
+    ):
+        return queries.resolve_per_page(raw)
+    return 25
 
 
 @router.put("/credentials/{cred_id}", response_model=MutationResponse)
@@ -104,16 +124,22 @@ def credentials_page(
     filter: str = "",
     kind: str = "",
     scope: str = "",
+    page: int = 1,
+    per: str = "25",
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
     """List identities and association counts without fetching credential secrets."""
-    credentials, total = queries.credential_summaries(
+    per_page = _per_page(per)
+    result = queries.credential_summaries(
         session, filter, kind, scope, engagement_id=engagement_id,
+        page=page, per_page=per_page,
     )
     return JSONResponse(encode_page({
-        "credentials": credentials, "total": total, "kinds": list(CredKind),
-        "q": filter, "kind": kind, "scope": scope,
+        "credentials": result.credentials, "total": result.total, "matched": result.matched,
+        "page": result.page, "pages": result.pages,
+        "per": "all" if per_page is None else str(per_page),
+        "kinds": list(CredKind), "q": filter, "kind": kind, "scope": scope,
     }), headers=_NO_STORE)
 
 
@@ -123,13 +149,39 @@ def credential_detail(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    """Reveal one owned credential and its linked and available associations."""
+    """Reveal one owned credential and its linked associations."""
     credential = queries.credential_view(session, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(
             status_code=404, detail="credential not found", headers=_NO_STORE,
         )
     return JSONResponse(encode_page({"credential": credential}), headers=_NO_STORE)
+
+
+@router.get(
+    "/credentials/{cred_id}/options/services", response_model=CredentialServiceOptionsResponse,
+)
+def credential_service_options(
+    cred_id: int,
+    q: str = "",
+    page: int = 1,
+    per: str = "25",
+    engagement_id: str = Depends(require_engagement),
+    session: Session = Depends(get_session),
+) -> Response:
+    if session.exec(select(Credential.id).where(
+        Credential.id == cred_id, Credential.engagement_id == engagement_id,
+    )).first() is None:
+        raise HTTPException(status_code=404, detail="credential not found", headers=_NO_STORE)
+    per_page = _per_page(per)
+    result = queries.credential_service_options(
+        session, cred_id, engagement_id=engagement_id, q=q, page=page, per_page=per_page,
+    )
+    return JSONResponse(encode_page({
+        "services": result.services, "total": result.total,
+        "page": result.page, "pages": result.pages,
+        "per": "all" if per_page is None else str(per_page),
+    }), headers=_NO_STORE)
 
 
 @router.post("/credentials", response_model=MutationResponse)

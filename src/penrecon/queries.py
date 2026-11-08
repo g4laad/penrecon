@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, TypeVar
 
-from sqlalchemy import Select, String, func, inspect, or_, select as sql_select
+from sqlalchemy import Select, String, cast as sql_cast, func, inspect, or_, select as sql_select
 from sqlalchemy.orm import Mapped
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
@@ -610,7 +610,6 @@ class CredentialView:
     created_at: str
     hosts: list[LinkedHost]
     services: list[LinkedService]
-    pickable_services: list[LinkedService]  # services of linked hosts, not yet linked
 
 
 @dataclass
@@ -623,154 +622,181 @@ class CredentialSummary:
     service_count: int
 
 
+@dataclass
+class CredentialsPage:
+    credentials: list[CredentialSummary]
+    total: int
+    matched: int
+    page: int
+    pages: int
+
+
+@dataclass
+class CredentialServicePage:
+    services: list[LinkedService]
+    total: int
+    page: int
+    pages: int
+
+
+@dataclass
+class HostCredentialView:
+    """Editable credential values and associations for exactly one host."""
+
+    id: int
+    kind: str
+    username: str
+    secret: str
+    notes: str
+    hosts: list[LinkedHost]
+    services: list[LinkedService]
+
+
+def _credential_conditions(
+    engagement_id: str, q: str, kind: str, scope: str,
+) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = [col(Credential.engagement_id) == engagement_id]
+    if kind:
+        conditions.append(col(Credential.kind) == kind)
+    host_link = select(CredentialHost.credential_id).where(
+        CredentialHost.engagement_id == engagement_id,
+        CredentialHost.credential_id == Credential.id,
+    ).exists()
+    service_link = select(CredentialService.credential_id).where(
+        CredentialService.engagement_id == engagement_id,
+        CredentialService.credential_id == Credential.id,
+    ).exists()
+    if scope == "linked":
+        conditions.append(or_(host_link, service_link))
+    elif scope == "unlinked":
+        conditions.append(~or_(host_link, service_link))
+    elif scope:
+        conditions.append(col(Credential.id).is_(None))
+    if q:
+        # Ordered scalar aggregates preserve the old joined-text substring
+        # behavior, including matches spanning adjacent fields or associations.
+        host_text = (
+            sql_select(col(Host.ip).label("text"))
+            .select_from(CredentialHost)
+            .join(Host, col(Host.id) == col(CredentialHost.host_id))
+            .where(
+                col(CredentialHost.engagement_id) == engagement_id,
+                col(CredentialHost.credential_id) == col(Credential.id),
+                col(Host.engagement_id) == engagement_id,
+            )
+            .order_by(Host.ip, col(Host.id))
+            .correlate(Credential).subquery()
+        )
+        service_text = (
+            sql_select((
+                col(Host.ip) + ":" + sql_cast(col(CurrentService.port), String)
+                + "/" + col(CurrentService.proto) + " "
+                + func.coalesce(col(CurrentService.service_name), "")
+            ).label("text"))
+            .select_from(CredentialService)
+            .join(CurrentService, col(CurrentService.service_id) == col(CredentialService.service_id))
+            .join(Host, col(Host.id) == col(CurrentService.host_id))
+            .where(
+                col(CredentialService.engagement_id) == engagement_id,
+                col(CredentialService.credential_id) == col(Credential.id),
+                col(CurrentService.engagement_id) == engagement_id,
+                col(Host.engagement_id) == engagement_id,
+            )
+            .order_by(Host.ip, col(CurrentService.port), CurrentService.proto, col(CurrentService.service_id))
+            .correlate(Credential).subquery()
+        )
+        host_suffix = sql_select(func.group_concat(host_text.c.text, " ").cast(String)).scalar_subquery()
+        service_suffix = sql_select(func.group_concat(service_text.c.text, " ").cast(String)).scalar_subquery()
+        text = (
+            col(Credential.username) + " " + sql_cast(col(Credential.kind), String)
+            + " " + col(Credential.notes)
+            + func.coalesce(" " + host_suffix, "")
+            + func.coalesce(" " + service_suffix, "")
+        )
+        conditions.append(func.instr(func.unicode_lower(text), q.lower()) > 0)
+    return conditions
+
+
 def credential_summaries(
-    session: Session, q: str = "", kind: str = "", scope: str = "", *, engagement_id: str,
-) -> tuple[list[CredentialSummary], int]:
-    """List identities without secrets or picker pools; search full notes and links."""
+    session: Session, q: str = "", kind: str = "", scope: str = "", *,
+    engagement_id: str, page: int = 1, per_page: int | None = 25,
+) -> CredentialsPage:
+    """Filter/count/page identities in SQL; count links only for the selected page."""
+    if q:
+        projections.prepare_read(session)
+    conditions = _credential_conditions(engagement_id, q, kind, scope)
     total = session.exec(select(func.count()).select_from(Credential).where(
         Credential.engagement_id == engagement_id,
     )).one()
-    if scope not in ("", "linked", "unlinked"):
-        return [], total
-    host_count = select(func.count()).select_from(CredentialHost).where(
-        CredentialHost.engagement_id == engagement_id,
-        CredentialHost.credential_id == Credential.id,
-    ).scalar_subquery()
-    service_count = select(func.count()).select_from(CredentialService).where(
-        CredentialService.engagement_id == engagement_id,
-        CredentialService.credential_id == Credential.id,
-    ).scalar_subquery()
+    matched = session.exec(
+        select(func.count()).select_from(Credential).where(*conditions),
+    ).one() if q or kind or scope else total
+    page, pages = _page_bounds(matched, page, per_page)
     statement = sql_select(
         col(Credential.id), col(Credential.kind), col(Credential.username),
-        col(Credential.notes) if q else func.substr(col(Credential.notes), 1, 160),
-        host_count, service_count,
-    ).where(col(Credential.engagement_id) == engagement_id)
-    if kind:
-        statement = statement.where(col(Credential.kind) == kind)
-    if scope == "linked":
-        statement = statement.where(host_count + service_count > 0)
-    elif scope == "unlinked":
-        statement = statement.where(host_count + service_count == 0)
-    rows = session.connection().execute(statement.order_by(col(Credential.created_at).desc())).all()
-    hosts: dict[int, list[LinkedHost]] = {}
-    services: dict[int, list[LinkedService]] = {}
-    if q and rows:
-        hosts, services, _ = _credential_links(
-            session, {row[0] for row in rows}, engagement_id=engagement_id, pickers=False,
-        )
-    needle = q.lower()
-    summaries = []
-    for cid, credential_kind, username, notes, host_total, service_total in rows:
-        if needle:
-            text = " ".join((
-                username, credential_kind, notes,
-                *(host.ip for host in hosts.get(cid, [])),
-                *(
-                    f"{service.ip}:{service.port}/{service.proto} {service.name or ''}"
-                    for service in services.get(cid, [])
-                ),
-            ))
-            if needle not in text.lower():
-                continue
-        summaries.append(CredentialSummary(
-            cid, credential_kind, username, notes[:160], host_total, service_total,
-        ))
-    return summaries, total
+        func.substr(col(Credential.notes), 1, 160),
+    ).where(*conditions).order_by(
+        col(Credential.created_at).desc(), col(Credential.id).desc(),
+    )
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    rows = session.connection().execute(statement).all()
+    ids = [row[0] for row in rows]
+    counts: list[dict[int, int]] = []
+    for link in (CredentialHost, CredentialService):
+        counts.append(dict(session.exec(
+            select(link.credential_id, func.count()).where(
+                link.engagement_id == engagement_id, col(link.credential_id).in_(ids),
+            ).group_by(col(link.credential_id)),
+        ).all()) if ids else {})
+    return CredentialsPage([
+        CredentialSummary(cid, credential_kind, username, notes, counts[0].get(cid, 0), counts[1].get(cid, 0))
+        for cid, credential_kind, username, notes in rows
+    ], total, matched, page, pages)
 
 
 def _credential_links(
-    session: Session, credential_ids: set[int], *, engagement_id: str, pickers: bool,
-) -> tuple[
-    dict[int, list[LinkedHost]], dict[int, list[LinkedService]], dict[int, list[LinkedService]],
-]:
-    """Resolve only requested credentials' links, optionally including picker pools."""
+    session: Session, credential_ids: set[int], *, engagement_id: str,
+    host_id: int | None = None,
+) -> tuple[dict[int, list[LinkedHost]], dict[int, list[LinkedService]]]:
+    """Fetch narrow association columns, optionally scoped to one displayed host."""
+    if not credential_ids:
+        return {}, {}
     projections.prepare_read(session)
-
-    hosts_by_cred: dict[int, list[LinkedHost]] = defaultdict(list)
-    for cid, hid, ip in session.exec(
+    host_statement = (
         select(CredentialHost.credential_id, Host.id, Host.ip)
-        .join(Host, Host.id == CredentialHost.host_id)  # type: ignore[arg-type]
+        .join(Host, col(Host.id) == col(CredentialHost.host_id))
         .where(
             CredentialHost.engagement_id == engagement_id, Host.engagement_id == engagement_id,
             col(CredentialHost.credential_id).in_(credential_ids),
         )
-        .order_by(Host.ip)
-    ).all():
-        if hid is not None:
-            hosts_by_cred[cid].append(LinkedHost(hid, ip))
-
-    def linked_service(svc: CurrentService, ip: str) -> LinkedService:
-        return LinkedService(
-            svc.service_id, svc.host_id, ip, svc.port, svc.proto, svc.service_name,
+    )
+    service_statement = (
+        sql_select(
+            col(CredentialService.credential_id), col(CurrentService.service_id), col(CurrentService.host_id),
+            col(Host.ip), col(CurrentService.port), col(CurrentService.proto), col(CurrentService.service_name),
         )
-
-    services_by_cred: dict[int, list[LinkedService]] = defaultdict(list)
-    for cid, svc, ip in session.exec(
-        select(CredentialService.credential_id, CurrentService, Host.ip)
         .join(CurrentService, col(CurrentService.service_id) == col(CredentialService.service_id))
         .join(Host, col(Host.id) == col(CurrentService.host_id))
         .where(
-            CredentialService.engagement_id == engagement_id,
+            col(CredentialService.engagement_id) == engagement_id,
             col(CredentialService.credential_id).in_(credential_ids),
-            CurrentService.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+            col(CurrentService.engagement_id) == engagement_id, col(Host.engagement_id) == engagement_id,
         )
-        .order_by(Host.ip, col(CurrentService.port), CurrentService.proto)
-    ).all():
-        services_by_cred[cid].append(linked_service(svc, ip))
-
-    # Services grouped by host, but only for hosts that some credential links —
-    # this is the pool the per-credential picker draws from (services of linked
-    # hosts), so we never ship the whole service table to the page.
-    linked_host_ids = {h.host_id for hs in hosts_by_cred.values() for h in hs}
-    services_by_host: dict[int, list[LinkedService]] = defaultdict(list)
-    if pickers and linked_host_ids:
-        for svc, ip in session.exec(
-            select(CurrentService, Host.ip)
-            .join(Host, col(Host.id) == col(CurrentService.host_id))
-            .where(
-                CurrentService.engagement_id == engagement_id, Host.engagement_id == engagement_id,
-                col(CurrentService.host_id).in_(linked_host_ids),
-            )
-            .order_by(Host.ip, col(CurrentService.port), CurrentService.proto)
-        ).all():
-            services_by_host[svc.host_id].append(linked_service(svc, ip))
-
-    return hosts_by_cred, services_by_cred, services_by_host
-
-
-def _credential_views(
-    session: Session, creds: list[Credential], *, engagement_id: str,
-) -> list[CredentialView]:
-    if not creds:
-        return []
-    hosts_by_cred, services_by_cred, services_by_host = _credential_links(
-        session, {c.id for c in creds if c.id is not None},
-        engagement_id=engagement_id, pickers=True,
     )
-
-    def _pickable(cid: int) -> list[LinkedService]:
-        linked = {s.service_id for s in services_by_cred.get(cid, [])}
-        return [
-            s for h in hosts_by_cred.get(cid, [])
-            for s in services_by_host.get(h.host_id, [])
-            if s.service_id not in linked
-        ]
-
-    return [
-        CredentialView(
-            id=c.id,
-            kind=c.kind,
-            username=c.username,
-            secret=c.secret,
-            notes=c.notes,
-            created_at=c.created_at.strftime("%Y-%m-%d %H:%M"),
-            hosts=hosts_by_cred.get(c.id, []),
-            services=services_by_cred.get(c.id, []),
-            pickable_services=_pickable(c.id),
-        )
-        for c in creds
-        if c.id is not None
-    ]
+    if host_id is not None:
+        host_statement = host_statement.where(Host.id == host_id)
+        service_statement = service_statement.where(col(CurrentService.host_id) == host_id)
+    hosts_by_cred: dict[int, list[LinkedHost]] = defaultdict(list)
+    for cid, hid, ip in session.exec(host_statement.order_by(Host.ip, col(Host.id))):
+        if hid is not None:
+            hosts_by_cred[cid].append(LinkedHost(hid, ip))
+    services_by_cred: dict[int, list[LinkedService]] = defaultdict(list)
+    for cid, sid, hid, ip, port, proto, name in session.execute(service_statement.order_by(
+        Host.ip, col(CurrentService.port), CurrentService.proto, col(CurrentService.service_id),
+    )):
+        services_by_cred[cid].append(LinkedService(sid, hid, ip, port, proto, name))
+    return hosts_by_cred, services_by_cred
 
 
 def credential_view(
@@ -780,31 +806,87 @@ def credential_view(
     credential = get_owned(session, Credential, credential_id, engagement_id=engagement_id)
     if credential is None:
         return None
-    return _credential_views(session, [credential], engagement_id=engagement_id)[0]
+    hosts, services = _credential_links(session, {credential_id}, engagement_id=engagement_id)
+    return CredentialView(
+        credential_id, credential.kind, credential.username, credential.secret, credential.notes,
+        credential.created_at.strftime("%Y-%m-%d %H:%M"),
+        hosts.get(credential_id, []), services.get(credential_id, []),
+    )
+
+
+def credential_service_options(
+    session: Session, credential_id: int, *, engagement_id: str,
+    q: str = "", page: int = 1, per_page: int | None = 25,
+) -> CredentialServicePage:
+    """Page unlinked current services of explicitly linked hosts on demand."""
+    projections.prepare_read(session)
+    linked_hosts = select(CredentialHost.host_id).where(
+        CredentialHost.engagement_id == engagement_id,
+        CredentialHost.credential_id == credential_id,
+    )
+    linked_service = select(CredentialService.service_id).where(
+        CredentialService.engagement_id == engagement_id,
+        CredentialService.credential_id == credential_id,
+        CredentialService.service_id == CurrentService.service_id,
+    ).exists()
+    conditions: list[ColumnElement[bool]] = [
+        col(CurrentService.engagement_id) == engagement_id,
+        col(Host.engagement_id) == engagement_id,
+        col(CurrentService.host_id).in_(linked_hosts), ~linked_service,
+    ]
+    if q:
+        text = (
+            col(Host.ip) + ":" + sql_cast(col(CurrentService.port), String) + "/"
+            + col(CurrentService.proto) + " " + func.coalesce(col(CurrentService.service_name), "")
+        )
+        conditions.append(func.instr(func.unicode_lower(text), q.lower()) > 0)
+    base = sql_select().select_from(CurrentService).join(
+        Host, col(Host.id) == col(CurrentService.host_id),
+    ).where(*conditions)
+    total = session.connection().execute(base.with_only_columns(func.count())).scalar_one()
+    page, pages = _page_bounds(total, page, per_page)
+    statement = base.with_only_columns(
+        col(CurrentService.service_id), col(CurrentService.host_id), col(Host.ip),
+        col(CurrentService.port), col(CurrentService.proto), col(CurrentService.service_name),
+    ).order_by(Host.ip, col(CurrentService.port), CurrentService.proto, col(CurrentService.service_id))
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    return CredentialServicePage(
+        [LinkedService(*row) for row in session.connection().execute(statement)],
+        total, page, pages,
+    )
 
 
 def credentials_for_host(
-    session: Session, host_id: int, *, engagement_id: str
-) -> list[CredentialView]:
-    """Credentials tied to this host directly *or* via one of its services."""
-    host_links = select(CredentialHost.credential_id).where(
-        CredentialHost.engagement_id == engagement_id, CredentialHost.host_id == host_id,
-    )
-    service_links = (
+    session: Session, host_id: int, *, engagement_id: str,
+) -> list[HostCredentialView]:
+    """Editable credentials and links for this host, never other hosts or picker pools."""
+    host_link = select(CredentialHost.credential_id).where(
+        CredentialHost.engagement_id == engagement_id,
+        CredentialHost.credential_id == Credential.id, CredentialHost.host_id == host_id,
+    ).exists()
+    service_link = (
         select(CredentialService.credential_id)
-        .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
+        .join(Service, col(Service.id) == col(CredentialService.service_id))
         .where(
             CredentialService.engagement_id == engagement_id,
+            CredentialService.credential_id == Credential.id,
             Service.engagement_id == engagement_id, Service.host_id == host_id,
-        )
+        ).exists()
     )
-    credentials = list(session.exec(
-        select(Credential).where(
-            Credential.engagement_id == engagement_id,
-            or_(col(Credential.id).in_(host_links), col(Credential.id).in_(service_links)),
-        ).order_by(col(Credential.created_at).desc())
-    ).all())
-    return _credential_views(session, credentials, engagement_id=engagement_id)
+    rows = session.connection().execute(sql_select(
+        col(Credential.id), col(Credential.kind), col(Credential.username),
+        col(Credential.secret), col(Credential.notes),
+    ).where(
+        col(Credential.engagement_id) == engagement_id, or_(host_link, service_link),
+    ).order_by(col(Credential.created_at).desc(), col(Credential.id).desc())).all()
+    hosts, services = _credential_links(
+        session, {row[0] for row in rows}, engagement_id=engagement_id, host_id=host_id,
+    )
+    return [
+        HostCredentialView(cid, kind, username, secret, notes, hosts.get(cid, []), services.get(cid, []))
+        for cid, kind, username, secret, notes in rows
+    ]
 
 
 # --- diff ----------------------------------------------------------------------

@@ -123,7 +123,9 @@ def test_selector_options_are_minimal_and_credentials_page_has_no_host_catalog(c
     assert client.get(api_url(f"/options/hosts/{host_id}/services")).json() == {
         "services": [{"service_id": service_id, "port": 443, "proto": "tcp", "service_name": "https"}],
     }
-    assert set(client.get(api_url("/credentials")).json()) == {"credentials", "total", "kinds", "q", "kind", "scope"}
+    assert set(client.get(api_url("/credentials")).json()) == {
+        "credentials", "total", "matched", "page", "pages", "per", "kinds", "q", "kind", "scope",
+    }
     empty_path, empty_id = _host(client, "10.0.0.3")
     assert client.get(empty_path).status_code == 200
     assert client.get(api_url(f"/options/hosts/{empty_id}/services")).json() == {"services": []}
@@ -178,7 +180,11 @@ def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(cl
     detail = response.json()["credential"]
     assert detail["secret"] == "private-secret-marker"
     assert detail["notes"] == notes
-    assert [service["service_id"] for service in detail["pickable_services"]] == [service_id]
+    options_endpoint = api_url(f'/credentials/{summary["id"]}/options/services')
+    options = client.get(options_endpoint)
+    assert options.headers["cache-control"] == "no-store"
+    assert [service["service_id"] for service in options.json()["services"]] == [service_id]
+    assert "pickable_services" not in detail
     assert {"engagement_id", "attachment_path"}.isdisjoint(detail)
     assert client.put(api_url(f'/credentials/{summary["id"]}'), data={
         "username": "updated", "secret": "changed-secret", "notes": "changed notes",
@@ -187,11 +193,12 @@ def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(cl
     refreshed = client.get(endpoint).json()["credential"]
     assert (refreshed["username"], refreshed["secret"], refreshed["notes"]) == ("updated", "changed-secret", "changed notes")
     assert [service["service_id"] for service in refreshed["services"]] == [service_id]
-    assert refreshed["pickable_services"] == []
+    assert client.get(options_endpoint).json()["services"] == []
     assert client.get(api_url("/credentials")).json()["credentials"][0]["service_count"] == 1
     assert client.delete(api_url(f'/credentials/{summary["id"]}/hosts/{host_id}')).status_code == 200
     refreshed = client.get(endpoint).json()["credential"]
-    assert refreshed["hosts"] == refreshed["services"] == refreshed["pickable_services"] == []
+    assert refreshed["hosts"] == refreshed["services"] == []
+    assert client.get(options_endpoint).json()["services"] == []
 
 
 @pytest.mark.parametrize("field", ["output", "comments", "description", "source", "user_context"])

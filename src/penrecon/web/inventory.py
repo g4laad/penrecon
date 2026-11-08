@@ -218,7 +218,7 @@ def host_detail(
         "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
         "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
         "host_credentials": [
-            host_credential(credential, host_id)
+            host_credential(credential)
             for credential in queries.credentials_for_host(session, host_id, engagement_id=engagement_id)
         ],
         "host_timeline": queries.host_timeline(

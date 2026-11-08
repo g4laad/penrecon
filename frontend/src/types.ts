@@ -53,7 +53,6 @@ export interface Credential {
   created_at: string;
   hosts: LinkedHost[];
   services: LinkedService[];
-  pickable_services: LinkedService[];
 }
 export interface CredentialSummary {
   id: number;

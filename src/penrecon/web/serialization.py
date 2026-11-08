@@ -16,17 +16,17 @@ def _fields(value: object, *names: str) -> dict[str, object]:
     return {name: encode_page(getattr(value, name)) for name in names}
 
 
-def host_credential(credential: queries.CredentialView, host_id: int) -> dict[str, object]:
-    """Keep editable values and associations belonging to the displayed host."""
+def host_credential(credential: queries.HostCredentialView) -> dict[str, object]:
+    """Encode the purpose-specific credential projection for one displayed host."""
     return {
         **_fields(credential, "id", "kind", "username", "secret", "notes"),
         "hosts": [
             {"host_id": host.host_id}
-            for host in credential.hosts if host.host_id == host_id
+            for host in credential.hosts
         ],
         "services": [
             _fields(service, "service_id", "host_id", "port", "proto", "name")
-            for service in credential.services if service.host_id == host_id
+            for service in credential.services
         ],
     }
 
@@ -54,7 +54,7 @@ _ENCODERS: dict[type[object], Callable[[Any], object]] = {
     ),
     queries.CredentialView: lambda credential: _fields(
         credential, "id", "kind", "username", "secret", "notes", "created_at",
-        "hosts", "services", "pickable_services",
+        "hosts", "services",
     ),
     queries.HostRow: lambda row: _fields(
         row, "id", "ip", "hostnames", "open_count", "status", "tags",

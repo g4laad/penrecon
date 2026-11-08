@@ -365,7 +365,8 @@ def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> 
     _assert_outcome(linked)
     credential = _credential_details(client)[0]
     assert credential["hosts"][0]["ip"] == "10.0.0.5"
-    assert credential["pickable_services"][0]["service_id"] == service_id
+    options = client.get(api_url(f"/credentials/{credential_id}/options/services")).json()
+    assert options["services"][0]["service_id"] == service_id
     linked_service = client.patch(api_url(f"/credentials/{credential_id}/services"), data={"service_id": str(service_id)})
     _assert_outcome(linked_service)
     assert _credential_details(client)[0]["services"][0]["name"] == "ssh"

@@ -1,4 +1,4 @@
-import type { CredentialSummary, ServiceOption } from "../types";
+import type { CredentialSummary, PageData, ServiceOption } from "../types";
 
 export type DraftValidity = "empty" | "valid";
 export function credentialDraftValidity(username: string, secret: string): DraftValidity {
@@ -85,13 +85,28 @@ export function resolveCredentialScope(value: string): CredentialScope {
 
 export type CredentialSelection =
   | { status: "selected"; credential: CredentialSummary }
+  | { status: "outside-page"; id: number }
   | { status: "empty" }
-  | { status: "unavailable"; reason: "invalid" | "missing" | "filtered-or-missing" };
-export function resolveCredentialSelection(hash: string, visible: CredentialSummary[], filtered: boolean): CredentialSelection {
+  | { status: "unavailable"; reason: "invalid" };
+export function resolveCredentialSelection(hash: string, visible: CredentialSummary[]): CredentialSelection {
   if (!hash) return visible[0] ? { status: "selected", credential: visible[0] } : { status: "empty" };
-  if (!/^#credential-\d+$/.test(hash)) return { status: "unavailable", reason: "invalid" };
-  const credential = visible.find((item) => hash === `#credential-${item.id}`);
-  return credential
-    ? { status: "selected", credential }
-    : { status: "unavailable", reason: filtered ? "filtered-or-missing" : "missing" };
+  if (!/^#credential-[1-9]\d*$/.test(hash)) return { status: "unavailable", reason: "invalid" };
+  const id = Number(hash.slice("#credential-".length));
+  if (!Number.isSafeInteger(id)) return { status: "unavailable", reason: "invalid" };
+  const credential = visible.find((item) => item.id === id);
+  return credential ? { status: "selected", credential } : { status: "outside-page", id };
+}
+
+/** Only show summaries belonging to the current filters and pagination. */
+export function credentialListMatches(data: PageData, params: URLSearchParams): boolean {
+  const rawPer = params.get("per") ?? "25";
+  const numericPer = /^\d{1,10}$/.test(rawPer) ? Number(rawPer) : 0;
+  const per = rawPer === "all" ? "all" : [10, 25, 50].includes(numericPer) ? String(numericPer) : "25";
+  const rawPage = Number(params.get("page") ?? "1");
+  const requestedPage = Number.isSafeInteger(rawPage) ? rawPage : 1;
+  const page = per === "all" ? 1 : Math.max(1, Math.min(requestedPage, data.pages ?? 1));
+  return (data.q ?? "") === (params.get("filter") ?? "") &&
+    (data.kind ?? "") === (params.get("kind") ?? "") &&
+    (data.scope ?? "") === (params.get("scope") ?? "") &&
+    (data.per ?? "25") === per && (data.page ?? 1) === page;
 }

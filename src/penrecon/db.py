@@ -40,6 +40,10 @@ def enable_sqlite_fks(engine: object) -> None:
         dbapi_conn.create_function(  # type: ignore[attr-defined]
             "casefold", 1, lambda value: (value or "").casefold(), deterministic=True,
         )
+        # Credential substring search retains Python lower(), not casefold().
+        dbapi_conn.create_function(  # type: ignore[attr-defined]
+            "unicode_lower", 1, lambda value: (value or "").lower(), deterministic=True,
+        )
 
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})

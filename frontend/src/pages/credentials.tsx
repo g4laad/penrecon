@@ -1,5 +1,5 @@
 import { ScopedLink } from "../common";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Search, Unlink } from "lucide-react";
 import { Secret } from "@/components/secret";
 import { Badge } from "@/components/ui/badge";
@@ -13,13 +13,16 @@ import {
   Modal,
   MutationForm,
   PageHeader,
+  Pager,
+  engagementUrl,
   usePage,
 } from "../common";
-import type { Credential, PageData } from "../types";
+import type { Credential, LinkedService, PageData } from "../types";
 import { CredentialCreateForm } from "./credential-create";
-import { credentialDraftValidity, resolveCredentialScope, resolveCredentialSelection } from "./credential-workflow";
+import { credentialDraftValidity, credentialListMatches, resolveCredentialScope, resolveCredentialSelection } from "./credential-workflow";
 import { useHostOptions, type HostOptions } from "./credential-host-options";
 import { SelectedDetail } from "./use-selected-detail";
+import { apiUrl } from "../lib/api";
 
 type AssociationPicker =
   | { status: "available"; options: { value: string; label: string }[] }
@@ -46,6 +49,92 @@ function LinkAssociationForm({ credentialId, target, picker }: {
     {resolution === "unavailable" && <p role="status" className="muted w-full text-xs">Choose another {target} before linking.</p>}
   </MutationForm>;
 }
+
+interface ServiceOptionsPage {
+  services: LinkedService[];
+  total: number;
+  page: number;
+  pages: number;
+  per: string;
+}
+
+function ServiceOptions({ credentialId }: { credentialId: number }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [per, setPer] = useState("25");
+  const [attempt, setAttempt] = useState(0);
+  const request = `${credentialId}:${new URLSearchParams({ q: query, page: String(page), per })}:${attempt}`;
+  const [state, setState] = useState<{
+    request: string;
+  } & ({ status: "ready"; value: ServiceOptionsPage } | { status: "error" }) | null>(null);
+  const current = state?.request === request ? state : null;
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const params = new URLSearchParams({ q: query, page: String(page), per });
+        const response = await fetch(apiUrl(engagementUrl(`/credentials/${credentialId}/options/services?${params}`)), {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Unable to load services.");
+        const value = await response.json() as ServiceOptionsPage;
+        if (!controller.signal.aborted) setState({ request, status: "ready", value });
+      } catch {
+        if (!controller.signal.aborted) setState({ request, status: "error" });
+      }
+    })();
+    return () => controller.abort();
+  }, [credentialId, query, page, per, attempt, request]);
+  return <div className="stack gap-2">
+    <Field label="Filter services">
+      <Input type="search" value={query} placeholder="10.0.0.1:22/tcp or ssh" onChange={(event) => {
+        setQuery(event.target.value);
+        setPage(1);
+      }} />
+    </Field>
+    <Field label="Services per page">
+      <NativeSelect value={per} onChange={(event) => {
+        setPer(event.target.value);
+        setPage(1);
+      }}>
+        {["10", "25", "50"].map((value) => <option key={value} value={value}>{value}</option>)}
+      </NativeSelect>
+    </Field>
+    <p role="status" className="muted text-xs">{!current ? "Loading services…" : current.status === "ready" ? `${current.value.total} available services · Page ${current.value.page} of ${current.value.pages}` : ""}</p>
+    {current?.status === "error" && <div className="stack gap-2">
+      <p role="alert" className="text-xs text-destructive">Unable to load services. Retry to choose a service.</p>
+      <Button type="button" variant="outline" size="sm" onClick={() => setAttempt((value) => value + 1)}>Retry services</Button>
+    </div>}
+    {current?.status === "ready" && <>
+      <LinkAssociationForm key={request} credentialId={credentialId} target="service" picker={current.value.services.length
+        ? { status: "available", options: current.value.services.map((service) => ({ value: String(service.service_id), label: `${service.ip}:${service.port}/${service.proto}${service.name ? ` ${service.name}` : ""}` })) }
+        : { status: "blocked", message: query ? "No services match this filter. Change or clear the filter." : "No additional services available on linked hosts." }} />
+      {query && !current.value.services.length && <Button type="button" variant="outline" size="sm" onClick={() => {
+        setQuery("");
+        setPage(1);
+      }}>Clear service filter</Button>}
+    </>}
+    <nav aria-label="Service options pagination" className="actions">
+      <Button type="button" variant="outline" size="sm" disabled={current?.status !== "ready" || current.value.page <= 1} onClick={() => { if (current?.status === "ready") setPage(current.value.page - 1); }}>Previous services</Button>
+      <Button type="button" variant="outline" size="sm" disabled={current?.status !== "ready" || current.value.page >= current.value.pages} onClick={() => { if (current?.status === "ready") setPage(current.value.page + 1); }}>Next services</Button>
+    </nav>
+  </div>;
+}
+
+function ServicePicker({ credential }: { credential: Credential }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  if (!credential.hosts.length) return <p className="muted text-xs">Link a host to pick its services.</p>;
+  return <>
+    <Button type="button" variant="outline" size="sm" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}>
+      {open ? "Close service picker" : "Link service"}
+    </Button>
+    <div id={id} hidden={!open}>{open && <ServiceOptions credentialId={credential.id} />}</div>
+  </>;
+}
+
 function CredentialLinks({
   credential,
   hostOptions,
@@ -53,22 +142,15 @@ function CredentialLinks({
   credential: Credential;
   hostOptions: HostOptions;
 }) {
+  const [hostPickerOpen, setHostPickerOpen] = useState(false);
+  const hostPickerId = useId();
   const hosts = hostOptions.hosts;
   const availableHosts = hosts.filter(
     (host) => !credential.hosts.some((link) => link.host_id === host.id),
   );
-  const pickableServices = credential.pickable_services.filter((service) =>
-    credential.hosts.some((host) => host.host_id === service.host_id) &&
-    !credential.services.some((linked) => linked.service_id === service.service_id),
-  );
   const hostPicker: AssociationPicker = availableHosts.length
     ? { status: "available", options: availableHosts.map((host) => ({ value: String(host.id), label: host.ip })) }
     : { status: "blocked", message: hosts.length ? "All hosts are already linked." : "Add a host before linking it to this credential." };
-  const servicePicker: AssociationPicker = !credential.hosts.length
-    ? { status: "blocked", message: "Link a host to pick its services." }
-    : pickableServices.length
-      ? { status: "available", options: pickableServices.map((service) => ({ value: String(service.service_id), label: `${service.ip}:${service.port}/${service.proto}${service.name ? ` ${service.name}` : ""}` })) }
-      : { status: "blocked", message: "No additional services available on linked hosts." };
   return (
     <div className="grid items-start gap-3 md:grid-cols-2">
       <div className="stack gap-2">
@@ -104,12 +186,20 @@ function CredentialLinks({
             <span className="muted text-xs">No linked hosts.</span>
           )}
         </div>
-        <p role="status" className="muted text-xs">{hostOptions.status === "idle" || hostOptions.status === "loading" ? "Loading hosts…" : ""}</p>
-        {hostOptions.status === "error" && <div className="grid gap-2">
-          <p role="alert" className="text-xs text-destructive">Unable to load hosts. Retry to link a host.</p>
-          <Button type="button" variant="outline" size="sm" onClick={hostOptions.load}>Retry hosts</Button>
-        </div>}
-        {hostOptions.status === "ready" && <LinkAssociationForm credentialId={credential.id} target="host" picker={hostPicker} />}
+        <Button type="button" variant="outline" size="sm" aria-expanded={hostPickerOpen} aria-controls={hostPickerId} onClick={() => {
+          if (!hostPickerOpen) hostOptions.load();
+          setHostPickerOpen((value) => !value);
+        }}>{hostPickerOpen ? "Close host picker" : "Link host"}</Button>
+        <div id={hostPickerId} hidden={!hostPickerOpen}>
+          {hostPickerOpen && <>
+            <p role="status" className="muted text-xs">{hostOptions.status === "idle" || hostOptions.status === "loading" ? "Loading hosts…" : ""}</p>
+            {hostOptions.status === "error" && <div className="grid gap-2">
+              <p role="alert" className="text-xs text-destructive">Unable to load hosts. Retry to link a host.</p>
+              <Button type="button" variant="outline" size="sm" onClick={hostOptions.load}>Retry hosts</Button>
+            </div>}
+            {hostOptions.status === "ready" && <LinkAssociationForm credentialId={credential.id} target="host" picker={hostPicker} />}
+          </>}
+        </div>
       </div>
       <div className="stack gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide">
@@ -145,7 +235,7 @@ function CredentialLinks({
             <span className="muted text-xs">No linked services.</span>
           )}
         </div>
-        <LinkAssociationForm credentialId={credential.id} target="service" picker={servicePicker} />
+        <ServicePicker key={credential.id} credential={credential} />
       </div>
     </div>
   );
@@ -252,7 +342,7 @@ function CredentialDetail({
 }
 
 export function CredentialsPage({ data }: { data: PageData }) {
-  const [url, setUrl] = useState(() => location.href);
+  const [, setUrl] = useState(() => location.href);
   useEffect(() => {
     const sync = () => setUrl(location.href);
     window.addEventListener("popstate", sync);
@@ -262,27 +352,28 @@ export function CredentialsPage({ data }: { data: PageData }) {
       window.removeEventListener("hashchange", sync);
     };
   }, []);
-  const currentUrl = new URL(url);
+  const currentUrl = new URL(location.href);
   const query = currentUrl.searchParams.get("filter") ?? "";
   const kind = currentUrl.searchParams.get("kind") ?? "";
   const scope = currentUrl.searchParams.get("scope") ?? "";
   const resolvedScope = resolveCredentialScope(scope);
   const { updateQuery, queryPending } = usePage();
-  const currentData = (data.q ?? "") === query && (data.kind ?? "") === kind && (data.scope ?? "") === scope;
+  const currentData = credentialListMatches(data, currentUrl.searchParams);
   const ready = currentData && !queryPending;
   const credentials = ready ? data.credentials ?? [] : [];
   const total = data.total ?? 0;
   const kinds = data.kinds ?? [];
   const filtered = Boolean(query || kind || scope);
-  const selection = resolveCredentialSelection(currentUrl.hash, credentials, filtered);
-  const selected = ready && selection.status === "selected" ? selection.credential : undefined;
-  const hostOptions = useHostOptions(Boolean(selected));
+  const selection = resolveCredentialSelection(currentUrl.hash, credentials);
+  const selectedId = ready ? selection.status === "selected" ? selection.credential.id : selection.status === "outside-page" ? selection.id : undefined : undefined;
+  const hostOptions = useHostOptions();
   function filter(values: Record<string, string>) {
     const next = new URL(location.href);
     for (const [key, value] of Object.entries(values)) {
       if (value) next.searchParams.set(key, value);
       else next.searchParams.delete(key);
     }
+    next.searchParams.delete("page");
     next.hash = "";
     history.replaceState(null, "", next);
     setUrl(next.href);
@@ -349,7 +440,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
           {resolvedScope === "invalid" && <option value={scope} disabled>Unknown scope: {scope}</option>}
         </NativeSelect>
         <span className="muted text-xs" role="status">
-          {queryPending ? "Loading credentials…" : ready ? `${credentials.length} of ${total} credentials` : "Credentials are not up to date."}
+          {queryPending ? "Loading credentials…" : ready ? `${data.matched ?? total} of ${total} credentials` : "Credentials are not up to date."}
         </span>
       </div>
       {resolvedScope === "invalid" && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
@@ -363,7 +454,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
             <Button type="button" variant="outline" className="mt-3" onClick={() => updateQuery(location.href, true)}>Retry credentials</Button>
           </>}
         </Empty>
-      ) : credentials.length > 0 || selection.status === "unavailable" ? (
+      ) : credentials.length > 0 || selection.status === "unavailable" || selection.status === "outside-page" ? (
         <div className="credential-workbench rounded-lg border bg-card">
           <section className="credential-list" aria-label="Credential list">
             <h2 className="credential-label border-b bg-muted/40 px-2.5 py-2 text-xs">
@@ -373,7 +464,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
               <ScopedLink key={credential.id}
               href={`?${currentUrl.searchParams}#credential-${credential.id}`}
               aria-current={
-                credential.id === selected?.id ? "true" : undefined
+                credential.id === selectedId ? "true" : undefined
               }
               className="credential-choice"
               onClick={(event) => {
@@ -415,20 +506,28 @@ export function CredentialsPage({ data }: { data: PageData }) {
               )}</ScopedLink>
             ))}
           </section>
-          {selected ? <SelectedDetail<{ credential: Credential }>
-            key={selected.id}
-            url={`/credentials/${selected.id}`}
-            revision={data}
-            label="credential"
-          >{({ credential }) => <CredentialDetail
-            credential={credential}
-            kinds={kinds}
-            hostOptions={hostOptions}
-          />}</SelectedDetail> : <Empty>
-            <p>{selection.status === "unavailable" && selection.reason === "filtered-or-missing" ? "This credential may be hidden by the current filters or no longer available." : "The requested credential is unavailable. It may have been deleted."}</p>
+          {selectedId !== undefined ? <div className="min-h-0 min-w-0 overflow-y-auto overscroll-y-contain">
+            {selection.status === "outside-page" && <div className="stack gap-2 border-b p-3 text-sm">
+              <p>This credential is not in the current page of results. Its details load separately without changing your filters.</p>
+              <div className="actions">
+                <Button type="button" variant="outline" size="sm" onClick={clearSelection}>Clear selection</Button>
+                {filtered && <Button type="button" variant="outline" size="sm" onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>}
+              </div>
+            </div>}
+            <SelectedDetail<{ credential: Credential }>
+              key={selectedId}
+              url={`/credentials/${selectedId}`}
+              revision={data}
+              label="credential"
+            >{({ credential }) => <CredentialDetail
+              credential={credential}
+              kinds={kinds}
+              hostOptions={hostOptions}
+            />}</SelectedDetail>
+          </div> : <Empty>
+            <p>The credential link is invalid. Select a credential from the list or clear the selection.</p>
             <div className="actions mt-3 justify-center">
               <Button type="button" variant="outline" onClick={clearSelection}>Clear selection</Button>
-              {selection.status === "unavailable" && selection.reason === "filtered-or-missing" && <Button type="button" variant="outline" onClick={() => filter({ filter: "", kind: "", scope: "" })}>Clear filters</Button>}
             </div>
           </Empty>}
         </div>
@@ -451,6 +550,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
           )}
         </Empty>
       )}
+      {ready && <Pager key={`${data.page}:${data.per}`} data={{ page: data.page ?? 1, pages: data.pages ?? 1, per: data.per ?? "25" }} total={data.matched ?? total} />}
     </div>
   );
 }

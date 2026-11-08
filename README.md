@@ -300,11 +300,15 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   The credentials page uses a searchable identity list with a detail pane for
   the selected secret, full notes, and link management. Filter by username,
   notes, IP/service, kind, or linked/unlinked scope; secret values are excluded.
-  Filters and selection are bookmarkable. The layout stacks on narrow screens.
-  List responses contain identity/scope summaries and at most 160 characters of
-  notes. Full notes, secrets, and association pickers load only for the selected
-  credential. Filtering still searches full notes and linked host/service data
-  on the server; secret values are never searched.
+  Filters, pagination, and selection are bookmarkable. Lists default to 25 rows;
+  choose 10, 25, 50, or all. SQL filtering and pagination precede summary loading,
+  and association counts are loaded only for the selected page. List responses
+  contain at most 160 characters of notes; search still checks full notes and
+  linked host/service data, never secrets, with Unicode substring matching.
+  Full notes, secrets, and linked associations load for the selected credential.
+  Host and service choices load only when their link controls open; service
+  choices have their own filter and pagination. Off-page credential bookmarks
+  load detail independently without changing the list filters.
   Engagement-wide search matches credential usernames and notes, but returns only
   credential IDs, kinds, usernames, and linked-host IDs/IPs. Secrets, full notes,
   timestamps, service associations, and service-picker data stay out of search
@@ -525,14 +529,19 @@ request (alongside any filter or pagination parameters):
 | `/hosts/{host_id}/services` | Service rows and service-table state |
 | `/hosts/{host_id}/timeline` | Host timeline only |
 | `/operations` | Paginated operation summaries and query state |
-| `/credentials?filter=…&kind=…&scope=…` | Credential summaries, total count, and filter state |
-| `/credentials/{cred_id}` | Selected credential, including secret, full notes, and association pickers |
+| `/credentials?filter=…&kind=…&scope=…&page=…&per=…` | Credential summaries, total/matched counts, pagination, and filter state |
+| `/credentials/{cred_id}` | Selected credential, including secret, full notes, and linked associations |
+| `/credentials/{cred_id}/options/services?q=…&page=…&per=…` | Available services on linked hosts, excluding existing links, with count and pagination |
 | `/operations/{operation_id}` | Selected operation, including output, comments, and attachment metadata |
 | `/options/hosts` | Host ID/address pairs |
 | `/options/hosts/{host_id}/services` | Service ID, port, protocol, and name |
 
-Credential and operation detail responses are engagement-scoped JSON with
-`Cache-Control: no-store`; missing or foreign-engagement IDs return 404.
+Credential detail, list, and service-option responses, and operation detail
+responses, are engagement-scoped JSON with `Cache-Control: no-store`; missing
+or foreign-engagement detail/option IDs return 404. Credential pagination
+defaults to 25 rows and accepts 10, 25, 50, or `all`; out-of-range pages clamp.
+Credential list `total` counts all engagement credentials and `matched` counts
+the filtered set. Service-option `total` counts matching available services.
 
 Query navigation keeps document URLs in browser history and merges resource
 responses into existing state, preserving unrelated host sections and navigation.
@@ -556,8 +565,9 @@ full metadata for internal queries and persistence.
 - `commands.py` owns validated service override/removal and credential association
   transitions. `history.py` owns explicit/missing/covered scan-evidence replay.
 - Inventory and CSV export share the maintained `HostSummary`/`CurrentService`
-  projections. Credential assembly uses `queries.latest_observations()` and the
-  shared service-name resolver, reusing each host's observation map.
+  projections. Credential queries join narrow `CurrentService` columns directly,
+  without decoding scan state or querying once per linked host. Host detail uses
+  a host-scoped credential projection, never other-host links or picker pools.
 - The web layer binds service-table state for reads and operation input once for
   create/edit. Operation validation remains inside the handler, after ownership
   and attachment-conflict checks.
