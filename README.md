@@ -574,6 +574,10 @@ or foreign-engagement detail/option IDs return 404. Credential pagination
 defaults to 25 rows and accepts 10, 25, 50, or `all`; out-of-range pages clamp.
 Credential list `total` counts all engagement credentials and `matched` counts
 the filtered set. Service-option `total` counts matching available services.
+Credential host/service linking accepts positive ASCII decimal IDs up to
+`9223372036854775807` (SQLite's signed 64-bit maximum), with surrounding whitespace
+ignored. Empty, malformed, non-positive, or oversized IDs return 422; valid IDs
+that do not identify an owned host/service return 404.
 
 Query navigation keeps document URLs in browser history and merges resource
 responses into existing state, preserving unrelated host sections and navigation.

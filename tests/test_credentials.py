@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session
 from sqlmodel import select
@@ -249,6 +251,38 @@ def test_credential_api_openapi_describes_forms_and_nested_projections(client: T
         mutation = success_schema(base + suffix, method)
         assert "ok" in mutation["required"]
         assert paths[base + suffix][method]["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
+
+
+@pytest.mark.parametrize(("collection", "field"), [
+    ("hosts", "host_id"),
+    ("services", "service_id"),
+])
+@pytest.mark.parametrize(("raw_id", "expected_status"), [
+    pytest.param("", 422, id="empty"),
+    pytest.param(" ", 422, id="blank"),
+    pytest.param("²", 422, id="non-decimal-digit"),
+    pytest.param("abc", 422, id="text"),
+    pytest.param("-1", 422, id="negative"),
+    pytest.param("0", 422, id="zero"),
+    pytest.param("9223372036854775808", 422, id="above-sqlite-integer"),
+    pytest.param("9" * 5000, 422, id="above-python-conversion-limit"),
+    pytest.param("9223372036854775807", 404, id="valid-missing-id"),
+])
+def test_credential_association_validates_ids_without_changing_credential(
+    client: TestClient, collection: str, field: str, raw_id: str, expected_status: int,
+) -> None:
+    assert client.post(api_url("/credentials"), data={"username": "operator"}).status_code == 200
+    credential_id = client.get(api_url("/credentials")).json()["credentials"][0]["id"]
+    detail_path = api_url(f"/credentials/{credential_id}")
+    before = client.get(detail_path).json()["credential"]
+
+    response = client.patch(
+        api_url(f"/credentials/{credential_id}/{collection}"), data={field: raw_id},
+    )
+
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/json")
+    assert client.get(detail_path).json()["credential"] == before
 
 
 def test_credential_api_json_only_association_workflow(client: TestClient) -> None:

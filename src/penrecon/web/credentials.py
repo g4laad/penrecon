@@ -96,6 +96,15 @@ def _per_page(raw: str) -> int | None:
     return 25
 
 
+def _association_id(raw: str) -> int | None:
+    """Accept positive SQLite row IDs without unsafe integer conversions."""
+    clean = raw.strip()
+    if not (len(clean) <= 19 and clean.isascii() and clean.isdecimal()):
+        return None
+    value = int(clean)
+    return value if 1 <= value <= 9223372036854775807 else None
+
+
 @router.put("/credentials/{cred_id}", response_model=MutationResponse)
 def edit_credential(
     cred_id: int,
@@ -259,7 +268,7 @@ def link_cred_host(
     session: Session = Depends(get_session),
 ) -> Response:
     """Add one host association without replacing existing associations."""
-    hid = int(host_id) if host_id.strip().isdigit() else None
+    hid = _association_id(host_id)
     credential = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
@@ -299,7 +308,7 @@ def link_cred_service(
     session: Session = Depends(get_session),
 ) -> Response:
     """Add one service association without replacing existing associations."""
-    sid = int(service_id) if service_id.strip().isdigit() else None
+    sid = _association_id(service_id)
     svc = ownership_queries.get_owned(session, Service, sid, engagement_id=engagement_id) if sid is not None else None
     credential = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if credential is None:
