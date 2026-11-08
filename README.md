@@ -295,6 +295,10 @@ watches/rebuilds assets, not a separate server; refresh the browser after change
 checks types alone. **Use a port other than 8000 for previews/tests**, and build
 the frontend before browser verification.
 
+Scans and Scan diff load their shared page-code chunk in parallel with API data,
+then display the page once both are ready. Loading failures use the existing
+view error and Retry flow.
+
 CI runs locked Python checks, frontend TypeScript/build, wheel packaging and
 installed-CLI smoke checks, plus a separate locked Nix build/CLI smoke.
 Test observable behavior, isolation, preservation, rollback, and query boundaries

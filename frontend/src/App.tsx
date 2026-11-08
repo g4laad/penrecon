@@ -45,11 +45,12 @@ import { OperationsPage } from "./pages/operations";
 const HostPage = lazy(() =>
   import("./pages/host").then((module) => ({ default: module.HostPage })),
 );
+const loadScanPages = () => import("./pages/scans");
 const ScansPage = lazy(() =>
-  import("./pages/scans").then((module) => ({ default: module.ScansPage })),
+  loadScanPages().then((module) => ({ default: module.ScansPage })),
 );
 const DiffPage = lazy(() =>
-  import("./pages/scans").then((module) => ({ default: module.DiffPage })),
+  loadScanPages().then((module) => ({ default: module.DiffPage })),
 );
 
 function HostTable({
@@ -542,13 +543,19 @@ export default function App() {
       const resources = propagateError || !initialized
         ? { urls: [target.pathname + target.search], partial: false }
         : queryResources(target, new URL(loadedQuery.current, location.origin));
-      const patches = await Promise.all(resources.urls.map(async (resource) => {
-        const response = await fetch(apiUrl(resource), {
-          headers: { Accept: "application/json" }, signal: controller.signal,
-        });
-        if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
-        return await response.json() as Partial<PageData>;
-      }));
+      const pageCode = /\/(scans|diff)$/.test(target.pathname)
+        ? loadScanPages()
+        : Promise.resolve();
+      const [, patches] = await Promise.all([
+        pageCode,
+        Promise.all(resources.urls.map(async (resource) => {
+          const response = await fetch(apiUrl(resource), {
+            headers: { Accept: "application/json" }, signal: controller.signal,
+          });
+          if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
+          return await response.json() as Partial<PageData>;
+        })),
+      ]);
       const next = Object.assign({}, ...patches) as Partial<PageData>;
       if (controller.signal.aborted) {
         if (propagateError) throw new Error("View update was superseded. Refresh the view again.");
