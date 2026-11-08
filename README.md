@@ -304,6 +304,9 @@ npm --prefix frontend run build
 npm --prefix frontend test
 ```
 
+CI uses `actions/checkout@v7` and `actions/setup-node@v7`, whose internal runtime
+is Node.js 24; the frontend build remains configured for Node.js 22.
+
 For frontend work, run `npm --prefix frontend run dev` alongside FastAPI. It
 watches/rebuilds assets, not a separate server; refresh the browser after changes.
 `build` checks TypeScript and emits assets; `npm --prefix frontend run typecheck`
