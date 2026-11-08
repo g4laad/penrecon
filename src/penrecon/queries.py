@@ -7,9 +7,11 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TypeVar
+from typing import Any, TypeVar
 
-from sqlalchemy import func, inspect, or_, select as sql_select
+from sqlalchemy import Select, String, func, inspect, or_, select as sql_select
+from sqlalchemy.orm import Mapped
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
 
 from penrecon.history import HostTimeline, Overrides, State, timeline
@@ -19,11 +21,14 @@ from penrecon.models import (
     Credential,
     CredentialHost,
     CredentialService,
+    CurrentService,
     EngagementOwned,
     Host,
     Hostname,
     HostHostname,
     HostScanState,
+    HostSummary,
+    HostSummaryTag,
     Note,
     Observation,
     OperationLog,
@@ -61,6 +66,23 @@ class HostRow:
     open_services: list[tuple[int, str | None]]  # (port, service_name), port-sorted
     change: str = ""  # "new" | "changed" | "" — scan-delta marker
     triaged: bool = False  # has an annotation; un-triaged hosts wear only the default status
+
+
+@dataclass
+class HostPage:
+    rows: list[HostRow]
+    total: int
+    matched: int
+    page: int
+    pages: int
+
+
+@dataclass
+class ServicePage:
+    services: list[ServiceView]
+    total: int
+    page: int
+    pages: int
 
 
 @dataclass
@@ -287,51 +309,43 @@ def service_overrides(svc: Service) -> Overrides:
     )
 
 
+def _service_statement(
+    host_id: int, engagement_id: str,
+) -> Select[tuple[CurrentService, Service, Annotation]]:
+    return sql_select(CurrentService, Service, Annotation).join(
+        Service,
+        (col(Service.id) == col(CurrentService.service_id))
+        & (col(Service.engagement_id) == col(CurrentService.engagement_id)),
+    ).outerjoin(
+        Annotation,
+        (col(Annotation.service_id) == col(CurrentService.service_id))
+        & (col(Annotation.engagement_id) == col(CurrentService.engagement_id)),
+    ).where(
+        col(CurrentService.engagement_id) == engagement_id,
+        col(CurrentService.host_id) == host_id,
+    )
+
+
+def _service_view(
+    current: CurrentService, service: Service, annotation: Annotation | None,
+) -> ServiceView:
+    return ServiceView(
+        service_id=current.service_id, port=current.port, proto=current.proto,
+        state=current.state, service_name=current.service_name,
+        product=current.product, version=current.version, last_seen=current.last_seen,
+        annotation=annotation, overrides=service_overrides(service), manual=current.manual,
+    )
+
+
 def resolved_services(
-    session: Session, host_id: int, *, engagement_id: str
+    session: Session, host_id: int, *, engagement_id: str,
 ) -> list[ServiceView]:
-    """Current services for display: manual overrides win over the latest
-    observation; manual-only services are included."""
-    latest = latest_observations(session, host_id, engagement_id=engagement_id)
-    views: list[ServiceView] = []
-    services = session.exec(
-        select(Service)
-        .where(Service.engagement_id == engagement_id, Service.host_id == host_id)
-        .order_by(Service.port)  # type: ignore[arg-type]
-    ).all()
-    annotations = {
-        ann.service_id: ann
-        for ann in session.exec(
-            select(Annotation)
-            .join(Service, col(Annotation.service_id) == col(Service.id))
-            .where(
-                Annotation.engagement_id == engagement_id,
-                Service.engagement_id == engagement_id,
-                Service.host_id == host_id,
-            )
-        ).all()
-    }
-    for svc in services:
-        assert svc.id is not None
-        o = latest.get((svc.port, svc.proto))
-        effective = service_state(svc, o)
-        views.append(
-            ServiceView(
-                service_id=svc.id,
-                port=svc.port,
-                proto=svc.proto,
-                state=effective.state,
-                service_name=effective.service_name,
-                product=effective.product,
-                version=effective.version,
-                last_seen=(o.observed_at.strftime("%Y-%m-%d %H:%M") if o else ""),
-                annotation=annotations.get(svc.id),
-                overrides=service_overrides(svc),
-                manual=o is None
-                or any((svc.m_state, svc.m_service_name, svc.m_product, svc.m_version)),
-            )
-        )
-    return views
+    """Read effective service values without decoding scan-state JSON."""
+    projections.prepare_read(session)
+    statement = _service_statement(host_id, engagement_id).order_by(
+        col(CurrentService.port), col(CurrentService.proto), col(CurrentService.service_id),
+    )
+    return [_service_view(*row) for row in session.execute(statement)]
 
 
 def host_timeline(
@@ -369,106 +383,106 @@ def host_change(
     return change or ""
 
 
-def host_rows(session: Session, *, engagement_id: str) -> list[HostRow]:
-    projections.prepare_read(session)
-    hosts = session.exec(
-        select(Host, HostScanState.latest, HostScanState.change)
-        .outerjoin(
-            HostScanState,
-            (col(HostScanState.host_id) == col(Host.id))
-            & (col(HostScanState.engagement_id) == col(Host.engagement_id)),
-        )
-        .where(Host.engagement_id == engagement_id)
-        .order_by(Host.ip)
-    ).all()
-    services_by_host: dict[int, list[Service]] = defaultdict(list)
-    for svc in session.exec(
-        select(Service)
-        .where(Service.engagement_id == engagement_id)
-        .order_by(col(Service.port))
-    ).all():
-        services_by_host[svc.host_id].append(svc)
-    annotations = {
-        ann.host_id: ann
-        for ann in session.exec(
-            select(Annotation).where(
-                Annotation.engagement_id == engagement_id,
-                col(Annotation.host_id).is_not(None),
-            )
-        ).all()
-    }
-    names_by_host: dict[int, list[str]] = defaultdict(list)
-    for host_id, name in session.exec(
-        select(HostHostname.host_id, Hostname.name)
-        .join(Hostname, col(HostHostname.hostname_id) == col(Hostname.id))
-        .where(
-            HostHostname.engagement_id == engagement_id,
-            Hostname.engagement_id == engagement_id,
-            HostHostname.hidden == False,  # noqa: E712
-        )
-        .order_by(Hostname.name)
-    ).all():
-        names_by_host[host_id].append(name)
-    rows: list[HostRow] = []
-    for host, records, change in hosts:
-        assert host.id is not None
-        latest: dict[tuple[int, str], Observation] = {}
-        for record in records or []:
-            observation = Observation.model_validate(record)
-            latest[(observation.port, observation.proto)] = observation
-        open_services: list[tuple[int, str | None]] = []
-        for svc in services_by_host.get(host.id, []):
-            effective = service_state(svc, latest.get((svc.port, svc.proto)))
-            if effective.state == "open":
-                open_services.append((svc.port, effective.service_name))
-        ann = annotations.get(host.id)
-        rows.append(
-            HostRow(
-                id=host.id,
-                ip=host.ip,
-                hostnames=names_by_host.get(host.id, []),
-                open_count=len(open_services),
-                status=(ann.status if ann else Status.new),
-                tags=(ann.tags if ann else []),
-                open_ports=sorted(port for port, _name in open_services),
-                service_names=sorted({name for _port, name in open_services if name}),
-                open_services=sorted(open_services),
-                change=change or "",
-                triaged=ann is not None,
-            )
-        )
-    return rows
+def _host_row(summary: HostSummary) -> HostRow:
+    open_services = [(port, name) for port, name in summary.open_services]
+    return HostRow(
+        id=summary.host_id, ip=summary.ip, hostnames=summary.hostnames,
+        open_count=summary.open_count, status=summary.status, tags=summary.tags,
+        open_ports=[port for port, _ in open_services],
+        service_names=sorted({name for _, name in open_services if name}),
+        open_services=open_services, change=summary.change, triaged=summary.triaged,
+    )
 
 
-def filter_hosts(
-    rows: list[HostRow],
-    q: str = "",
-    port: int | None = None,
-    tag: str = "",
-    status: str = "",
-    change: str = "",
-) -> list[HostRow]:
-    out = rows
+def _host_conditions(
+    engagement_id: str, *, q: str = "", port: int | None = None,
+    tag: str = "", status: str = "", change: str = "",
+) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = [
+        col(HostSummary.engagement_id) == engagement_id,
+    ]
     if q:
-        ql = q.lower()
-        out = [
-            r
-            for r in out
-            if ql in r.ip.lower()
-            or any(ql in h.lower() for h in r.hostnames)
-            or any(ql in s.lower() for s in r.service_names)
-            or any(ql in t.lower() for t in r.tags)
-        ]
+        values = func.json_each(HostSummary.search_values).table_valued("value")
+        conditions.append(sql_select(values.c.value).where(
+            func.instr(values.c.value, q.lower()) > 0,
+        ).exists())
     if port is not None:
-        out = [r for r in out if port in r.open_ports]
+        conditions.append(col(HostSummary.host_id).in_(
+            sql_select(col(CurrentService.host_id)).where(
+                col(CurrentService.engagement_id) == engagement_id,
+                col(CurrentService.port) == port,
+                col(CurrentService.state) == "open",
+            ),
+        ))
     if tag:
-        out = [r for r in out if tag in r.tags]
+        conditions.append(col(HostSummary.host_id).in_(
+            sql_select(col(HostSummaryTag.host_id)).where(
+                col(HostSummaryTag.engagement_id) == engagement_id,
+                col(HostSummaryTag.tag) == tag,
+            ),
+        ))
     if status:
-        out = [r for r in out if r.status == status]
-    if change:  # "new" | "changed" | "unchanged" — isolate by scan-delta state
-        want = "" if change == "unchanged" else change  # "" is the internal no-change marker
-        out = [r for r in out if r.change == want]
-    return out
+        conditions.append(col(HostSummary.status) == status)
+    if change:
+        conditions.append(col(HostSummary.change) == ("" if change == "unchanged" else change))
+    return conditions
+
+
+def host_rows(
+    session: Session, *, engagement_id: str, q: str = "",
+    port: int | None = None, tag: str = "", status: str = "", change: str = "",
+) -> list[HostRow]:
+    """All matching materialized hosts; paginated consumers use host_page()."""
+    projections.prepare_read(session)
+    statement = select(HostSummary).where(*_host_conditions(
+        engagement_id, q=q, port=port, tag=tag, status=status, change=change,
+    )).order_by(HostSummary.ip, col(HostSummary.host_id))
+    return [_host_row(summary) for summary in session.exec(statement)]
+
+
+def host_page(
+    session: Session, *, engagement_id: str, q: str = "",
+    port: int | None = None, tag: str = "", status: str = "", change: str = "",
+    sort: str = "change", direction: str = "asc", page: int = 1,
+    per_page: int | None = 10,
+) -> HostPage:
+    """Filter/count/order in SQLite and materialize only the selected host page."""
+    projections.prepare_read(session)
+    conditions = _host_conditions(
+        engagement_id, q=q, port=port, tag=tag, status=status, change=change,
+    )
+    total = session.exec(select(func.count()).select_from(HostSummary).where(
+        HostSummary.engagement_id == engagement_id,
+    )).one()
+    matched = session.exec(
+        select(func.count()).select_from(HostSummary).where(*conditions),
+    ).one() if q or port is not None or tag or status or change else total
+    page, pages = _page_bounds(matched, page, per_page)
+    statement = select(HostSummary).where(*conditions)
+    descending = direction == "desc"
+    if sort == "change":
+        rank = col(HostSummary.change_rank)
+        statement = statement.order_by(
+            rank.desc() if descending else rank.asc(), col(HostSummary.open_count).desc(),
+        )
+    elif sort == "ports":
+        count = col(HostSummary.open_count)
+        statement = statement.order_by(count.desc() if descending else count.asc())
+    elif sort == "status":
+        classification = col(HostSummary.status)
+        statement = statement.order_by(
+            classification.desc() if descending else classification.asc(),
+        )
+    else:
+        ip = col(HostSummary.ip_sort)
+        statement = statement.order_by(ip.desc() if descending else ip.asc())
+    statement = statement.order_by(HostSummary.ip, col(HostSummary.host_id))
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    return HostPage(
+        [_host_row(summary) for summary in session.exec(statement)],
+        total, matched, page, pages,
+    )
 
 
 PER_PAGE_OPTIONS = (10, 25, 50)  # selectable page sizes; "all" (no limit) is the 4th choice
@@ -506,69 +520,61 @@ def paginate(
 
 SORT_DEFAULT_DIR = {"change": "asc", "ports": "desc", "ip": "asc", "status": "asc"}
 
-# change is the story: new first, then changed, then unchanged
-_CHANGE_RANK = {"new": 0, "changed": 1}
-
-
-def sort_hosts(rows: list[HostRow], sort: str, direction: str = "") -> list[HostRow]:
-    reverse = direction == "desc"
-    if sort == "change":
-        # two stable passes: most-open-ports first within each change group
-        by_ports = sorted(rows, key=lambda r: r.open_count, reverse=True)
-        return sorted(by_ports, key=lambda r: _CHANGE_RANK.get(r.change, 2), reverse=reverse)
-    if sort == "ports":
-        return sorted(rows, key=lambda r: r.open_count, reverse=reverse)
-    if sort == "status":
-        return sorted(rows, key=lambda r: r.status, reverse=reverse)
-
-    def ip_key(r: HostRow) -> tuple[int, ...]:
-        parts = r.ip.split(".")
-        if len(parts) == 4 and all(p.isdigit() for p in parts):
-            return tuple(int(p) for p in parts)
-        return (999, 999, 999, 999)  # non-IPv4 sorts last
-
-    return sorted(rows, key=ip_key, reverse=reverse)
-
-
-def filter_services(
-    services: list[ServiceView], port: str = "", state: str = "",
-    service: str = "", status: str = "",
-) -> list[ServiceView]:
-    """Per-column filter: port/service match as substrings, state/status exact."""
-    port = port.strip()
-    service = service.strip().lower()
-
-    def keep(s: ServiceView) -> bool:
-        if port and port not in str(s.port):
-            return False
-        if state and s.state != state:
-            return False
-        if status and (s.annotation.status if s.annotation else "") != status:
-            return False
-        if service:
-            hay = " ".join(x for x in (s.service_name, s.product, s.version) if x).lower()
-            if service not in hay:
-                return False
-        return True
-
-    return [s for s in services if keep(s)]
+def _page_bounds(total: int, page: int, per_page: int | None) -> tuple[int, int]:
+    if per_page is None:
+        return 1, 1
+    pages = max(1, (total + per_page - 1) // per_page)
+    return max(1, min(page, pages)), pages
 
 
 SERVICE_SORT_DEFAULT_DIR = {"port": "asc", "state": "asc", "service": "asc", "status": "asc"}
 
 
-def sort_services(
-    services: list[ServiceView], sort: str, direction: str = ""
-) -> list[ServiceView]:
-    """Sort a host's services by one column; ties fall back to port order."""
-    reverse = direction == "desc"
+def service_page(
+    session: Session, host_id: int, *, engagement_id: str,
+    port: str = "", state: str = "", service: str = "", status: str = "",
+    sort: str = "port", direction: str = "asc", page: int = 1,
+    per_page: int | None = 10,
+) -> ServicePage:
+    """Filter and paginate effective services before constructing display views."""
+    projections.prepare_read(session)
+    statement = _service_statement(host_id, engagement_id)
+    if port.strip():
+        statement = statement.where(func.instr(
+            func.cast(col(CurrentService.port), String), port.strip(),
+        ) > 0)
+    if state:
+        statement = statement.where(col(CurrentService.state) == state)
+    if service.strip():
+        statement = statement.where(
+            func.instr(col(CurrentService.search_text), service.strip().lower()) > 0,
+        )
+    if status:
+        statement = statement.where(col(Annotation.status) == status)
+    total = session.execute(
+        sql_select(func.count()).select_from(statement.subquery()),
+    ).scalar_one()
+    page, pages = _page_bounds(total, page, per_page)
+    descending = direction == "desc"
+    value: Mapped[Any] | ColumnElement[Any]
     if sort == "state":
-        return sorted(services, key=lambda s: (s.state, s.port), reverse=reverse)
-    if sort == "service":
-        return sorted(services, key=lambda s: ((s.service_name or "").lower(), s.port), reverse=reverse)
-    if sort == "status":
-        return sorted(services, key=lambda s: (s.annotation.status if s.annotation else "", s.port), reverse=reverse)
-    return sorted(services, key=lambda s: s.port, reverse=reverse)
+        value = col(CurrentService.state)
+    elif sort == "service":
+        value = col(CurrentService.service_name_lower)
+    elif sort == "status":
+        value = func.coalesce(col(Annotation.status), "")
+    else:
+        value = col(CurrentService.port)
+    statement = statement.order_by(
+        value.desc() if descending else value.asc(),
+        col(CurrentService.port).desc() if descending else col(CurrentService.port).asc(),
+        col(CurrentService.proto), col(CurrentService.service_id),
+    )
+    if per_page is not None:
+        statement = statement.limit(per_page).offset((page - 1) * per_page)
+    return ServicePage(
+        [_service_view(*row) for row in session.execute(statement)], total, page, pages,
+    )
 
 
 # --- credentials ---------------------------------------------------------------
@@ -683,6 +689,7 @@ def _credential_links(
     dict[int, list[LinkedHost]], dict[int, list[LinkedService]], dict[int, list[LinkedService]],
 ]:
     """Resolve only requested credentials' links, optionally including picker pools."""
+    projections.prepare_read(session)
 
     hosts_by_cred: dict[int, list[LinkedHost]] = defaultdict(list)
     for cid, hid, ip in session.exec(
@@ -697,36 +704,24 @@ def _credential_links(
         if hid is not None:
             hosts_by_cred[cid].append(LinkedHost(hid, ip))
 
-    latest_by_host: dict[int, dict[tuple[int, str], Observation]] = {}
-
-    def linked_service(svc: Service, ip: str) -> LinkedService:
-        assert svc.id is not None
-        observation = None
-        if not svc.m_service_name:
-            if svc.host_id not in latest_by_host:
-                latest_by_host[svc.host_id] = latest_observations(
-                    session, svc.host_id, engagement_id=engagement_id
-                )
-            observation = latest_by_host[svc.host_id].get((svc.port, svc.proto))
+    def linked_service(svc: CurrentService, ip: str) -> LinkedService:
         return LinkedService(
-            svc.id, svc.host_id, ip, svc.port, svc.proto,
-            _service_name(svc, observation),
+            svc.service_id, svc.host_id, ip, svc.port, svc.proto, svc.service_name,
         )
 
     services_by_cred: dict[int, list[LinkedService]] = defaultdict(list)
     for cid, svc, ip in session.exec(
-        select(CredentialService.credential_id, Service, Host.ip)
-        .join(Service, Service.id == CredentialService.service_id)  # type: ignore[arg-type]
-        .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+        select(CredentialService.credential_id, CurrentService, Host.ip)
+        .join(CurrentService, col(CurrentService.service_id) == col(CredentialService.service_id))
+        .join(Host, col(Host.id) == col(CurrentService.host_id))
         .where(
             CredentialService.engagement_id == engagement_id,
             col(CredentialService.credential_id).in_(credential_ids),
-            Service.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+            CurrentService.engagement_id == engagement_id, Host.engagement_id == engagement_id,
         )
-        .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
+        .order_by(Host.ip, col(CurrentService.port), CurrentService.proto)
     ).all():
-        if svc.id is not None:
-            services_by_cred[cid].append(linked_service(svc, ip))
+        services_by_cred[cid].append(linked_service(svc, ip))
 
     # Services grouped by host, but only for hosts that some credential links —
     # this is the pool the per-credential picker draws from (services of linked
@@ -735,16 +730,15 @@ def _credential_links(
     services_by_host: dict[int, list[LinkedService]] = defaultdict(list)
     if pickers and linked_host_ids:
         for svc, ip in session.exec(
-            select(Service, Host.ip)
-            .join(Host, Host.id == Service.host_id)  # type: ignore[arg-type]
+            select(CurrentService, Host.ip)
+            .join(Host, col(Host.id) == col(CurrentService.host_id))
             .where(
-                Service.engagement_id == engagement_id, Host.engagement_id == engagement_id,
-                Service.host_id.in_(linked_host_ids),  # type: ignore[attr-defined]
+                CurrentService.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+                col(CurrentService.host_id).in_(linked_host_ids),
             )
-            .order_by(Host.ip, Service.port)  # type: ignore[arg-type]
+            .order_by(Host.ip, col(CurrentService.port), CurrentService.proto)
         ).all():
-            if svc.id is not None:
-                services_by_host[svc.host_id].append(linked_service(svc, ip))
+            services_by_host[svc.host_id].append(linked_service(svc, ip))
 
     return hosts_by_cred, services_by_cred, services_by_host
 
@@ -876,9 +870,6 @@ def diff_scans(
 
 
 # --- global search -------------------------------------------------------------
-# ponytail: in-Python substring match over already-loaded rows, same as
-# filter_hosts. Single-user local scale; swap to SQLite FTS5 only if a project
-# ever holds enough notes that a full-table scan is felt.
 
 def _note_preview(body: str, ql: str, width: int = 200) -> str:
     """A short excerpt of the note body, windowed around the first match of ``ql``."""
@@ -998,7 +989,7 @@ def search(session: Session, q: str, *, engagement_id: str) -> SearchResults:
                 hits_by_id[cid].hosts.append(LinkedHost(hid, ip))
     return SearchResults(
         q=q.strip(),
-        hosts=filter_hosts(host_rows(session, engagement_id=engagement_id), q=ql),
+        hosts=host_rows(session, engagement_id=engagement_id, q=ql),
         notes=search_notes(session, ql, engagement_id=engagement_id),
         credentials=creds,
     )

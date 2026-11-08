@@ -73,16 +73,16 @@ def _hosts_ctx(session: Session, table: _HostTable, *, engagement_id: str) -> di
     fit = table.fit
     if len(fit) <= 2 and fit.isascii() and fit.isdecimal() and 1 <= int(fit) <= 50:
         per_limit = int(fit)
-    all_rows = queries.host_rows(session, engagement_id=engagement_id)
-    rows = queries.filter_hosts(all_rows, q=q, port=port_val, tag=tag, status=status, change=change)
-    rows = queries.sort_hosts(rows, table.sort, direction)
-    matched = len(rows)
-    page_rows, page_no, pages = queries.paginate(rows, page_no, per_limit)
+    result = queries.host_page(
+        session, engagement_id=engagement_id, q=q, port=port_val, tag=tag,
+        status=status, change=change, sort=table.sort, direction=direction,
+        page=page_no, per_page=per_limit,
+    )
     return {
         "q": q, "port": port, "tag": tag, "status": status, "change": change,
         "sort": table.sort, "direction": direction,
-        "rows": page_rows, "total": len(all_rows), "matched": matched,
-        "page": page_no, "pages": pages,
+        "rows": result.rows, "total": result.total, "matched": result.matched,
+        "page": result.page, "pages": result.pages,
     }
 
 
@@ -117,20 +117,21 @@ def _services_ctx(
 ) -> dict[str, object]:
     """Filtered, sorted, server-paginated services; svc_total is the matched count."""
     assert host.id is not None
-    services = queries.resolved_services(session, host.id, engagement_id=engagement_id)
-    services = queries.filter_services(services, table.f_port, table.f_state, table.f_service, table.f_status)
     direction = (
         table.dir if table.dir in ("asc", "desc")
         else queries.SERVICE_SORT_DEFAULT_DIR.get(table.sort, "asc")
     )
-    services = queries.sort_services(services, table.sort, direction)
-    total = len(services)
     page_no = _query_integer(table.page) or 1
     per_limit = queries.resolve_per_page(table.per)
-    page_services, page_no, pages = queries.paginate(services, page_no, per_limit)
+    result = queries.service_page(
+        session, host.id, engagement_id=engagement_id,
+        port=table.f_port, state=table.f_state, service=table.f_service,
+        status=table.f_status, sort=table.sort, direction=direction,
+        page=page_no, per_page=per_limit,
+    )
     return {
-        "services": page_services, "svc_total": total,
-        "page": page_no, "pages": pages, "sort": table.sort, "direction": direction,
+        "services": result.services, "svc_total": result.total,
+        "page": result.page, "pages": result.pages, "sort": table.sort, "direction": direction,
         "per": "all" if per_limit is None else str(per_limit),
         "f_port": table.f_port, "f_state": table.f_state,
         "f_service": table.f_service, "f_status": table.f_status,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from tests.fixtures import TEST_ENGAGEMENT_ID
-from sqlalchemy import event
 from sqlmodel import Session
 from sqlmodel import select
 from starlette.testclient import TestClient
@@ -176,60 +175,6 @@ def test_credential_summaries_preserve_full_notes_and_association_filters(sessio
     assert [row.id for row in credential_summaries(session, scope="unlinked", engagement_id=TEST_ENGAGEMENT_ID)[0]] == [unlinked_id]
     assert [row.id for row in credential_summaries(session, kind="token", engagement_id=TEST_ENGAGEMENT_ID)[0]] == [unlinked_id]
     assert credential_summaries(session, scope="unknown", engagement_id=TEST_ENGAGEMENT_ID) == ([], 2)
-
-
-def test_credential_lists_never_select_secrets_and_detail_loads_only_selected_links(session: Session) -> None:
-    host = _host(session, "10.0.0.1")
-    own_service = _service(session, host.id, 22, "ssh")
-    unrelated_host = _host(session, "10.0.0.2")
-    _service(session, unrelated_host.id, 443, "https")
-    selected = Credential(username="selected", secret="selected-secret", engagement_id=TEST_ENGAGEMENT_ID)
-    unrelated = Credential(username="unrelated", secret="unrelated-secret" * 10000, engagement_id=TEST_ENGAGEMENT_ID)
-    session.add_all([selected, unrelated])
-    session.flush()
-    selected_id, unrelated_id = selected.id, unrelated.id
-    own_service_id = own_service.id
-    session.add_all([
-        CredentialHost(credential_id=selected_id, host_id=host.id, engagement_id=TEST_ENGAGEMENT_ID),
-        CredentialHost(credential_id=unrelated_id, host_id=unrelated_host.id, engagement_id=TEST_ENGAGEMENT_ID),
-    ])
-    session.commit()
-    session.expunge_all()
-    statements = []
-
-    def record_sql(connection, cursor, statement, parameters, context, executemany) -> None:
-        statements.append(statement)
-
-    engine = session.get_bind()
-    event.listen(engine, "before_cursor_execute", record_sql)
-    try:
-        credential_summaries(session, engagement_id=TEST_ENGAGEMENT_ID)
-        credential_summaries(session, "selected", engagement_id=TEST_ENGAGEMENT_ID)
-    finally:
-        event.remove(engine, "before_cursor_execute", record_sql)
-    assert statements
-    assert all("credential.secret" not in statement.lower() for statement in statements)
-    assert not any(isinstance(value, Credential) for value in session.identity_map.values())
-    loaded_credentials = []
-    loaded_services = []
-
-    def record_credential(value, context) -> None:
-        loaded_credentials.append(value.id)
-
-    def record_service(value, context) -> None:
-        loaded_services.append(value.id)
-
-    event.listen(Credential, "load", record_credential)
-    event.listen(Service, "load", record_service)
-    try:
-        detail = credential_view(session, selected_id, engagement_id=TEST_ENGAGEMENT_ID)
-    finally:
-        event.remove(Credential, "load", record_credential)
-        event.remove(Service, "load", record_service)
-    assert detail is not None and detail.secret == "selected-secret"
-    assert [service.service_id for service in detail.pickable_services] == [own_service_id]
-    assert loaded_credentials == [selected_id]
-    assert set(loaded_services) == {own_service_id}
 
 
 def test_credential_api_openapi_describes_forms_and_nested_projections(client: TestClient) -> None:

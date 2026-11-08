@@ -47,19 +47,25 @@ manually reset its database. Re-ingesting scans does **not** restore notes,
 credentials, manual edits, or operation logs. Startup never deletes or migrates
 your data automatically.
 
-Host timelines and scan projections add tables on startup; existing
+Host timelines and inventory projections add tables on startup; existing
 engagement-aware databases do not need a reset. Startup backfills missing
-current-state and per-host scan-difference projections from retained evidence,
-including legacy raw scans, without rewriting original records. The first
-startup after upgrading may take longer; complete projections are not replayed
-on later startups.
+scan-state and per-host scan-difference projections from retained evidence,
+including legacy raw scans, without rewriting original records. Effective
+services, host summaries, and exact tag membership are then materialized from
+that state. Adding inventory tables does not replay already-complete scan
+history. The first startup after upgrading may take longer; complete projections
+are not rebuilt on later startups.
 
-Evidence writes rebuild the affected engagement's projections in the same
-transaction, including when older scans arrive or scans are deleted. Inventory
-reads batch-load persisted current state instead of replaying scan history.
+Evidence writes rebuild the affected engagement's scan and inventory projections
+in the same transaction, including when older scans arrive or scans are deleted.
+Manual service edits, triage, and hostname changes rebuild only its inventory
+projections. This deliberately spends more work on writes: host and service
+tables filter, sort, count, and paginate in SQLite before loading page payloads.
+Steady host/service table reads do not decode observation snapshots or replay history.
 Manual service overrides remain separate and take precedence over scan state;
-notes, triage, and credentials are untouched. Manual service actions are
-recorded going forward, not reconstructed from existing inventory.
+notes, triage, and credentials are never rewritten by projection maintenance.
+Manual service actions are recorded going forward, not reconstructed from
+existing inventory.
 
 Requires Node.js 22.12+ for the frontend build. FastAPI serves the generated
 assets locally from `src/penrecon/web/static/ui`; no CDN or separate Node

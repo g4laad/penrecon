@@ -1,59 +1,117 @@
 from __future__ import annotations
 
-from penrecon.queries import HostRow, filter_hosts, paginate, sort_hosts
+from urllib.parse import urlencode
+
+import pytest
+from starlette.testclient import TestClient
+
+from tests.fixtures import api_url
 
 
-def _row(ip: str, open_count: int = 0, status: str = "new", change: str = "") -> HostRow:
-    return HostRow(
-        id=0, ip=ip, hostnames=[], open_count=open_count, status=status,
-        tags=[], open_ports=[], service_names=[], open_services=[], change=change,
+def _upload(client: TestClient, hosts: list[tuple[str, int, str]], filename: str) -> None:
+    records = []
+    for ip, open_count, version in hosts:
+        ports = "".join(
+            f'<port protocol="tcp" portid="{port}"><state state="open"/>'
+            f'<service name="http" version="{version}"/></port>'
+            for port in range(8000, 8000 + open_count)
+        )
+        records.append(
+            '<host><status state="up"/>'
+            f'<address addr="{ip}" addrtype="{"ipv6" if ":" in ip else "ipv4"}"/>'
+            f'<ports>{ports}</ports></host>'
+        )
+    response = client.post(
+        api_url("/scans"),
+        files={"file": (filename, "<nmaprun>" + "".join(records) + "</nmaprun>", "text/xml")},
+        data={"tool": "nmap"},
     )
+    assert response.status_code == 200
 
 
-def test_ip_sort_respects_direction() -> None:
-    rows = [_row("10.0.0.2"), _row("10.0.0.10"), _row("10.0.0.1")]
-    asc = [r.ip for r in sort_hosts(rows, "ip", "asc")]
-    assert asc == ["10.0.0.1", "10.0.0.2", "10.0.0.10"]  # numeric, not lexical
-    assert [r.ip for r in sort_hosts(rows, "ip", "desc")] == list(reversed(asc))
+def _hosts(client: TestClient, **params) -> dict:
+    response = client.get(api_url("/hosts?" + urlencode(params)))
+    assert response.status_code == 200
+    return response.json()
 
 
-def test_ports_sort_direction() -> None:
-    rows = [_row("a", 1), _row("b", 9), _row("c", 3)]
-    assert [r.open_count for r in sort_hosts(rows, "ports", "desc")] == [9, 3, 1]
-    assert [r.open_count for r in sort_hosts(rows, "ports", "asc")] == [1, 3, 9]
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [
+        ("asc", ["10.0.0.1", "10.0.0.2", "10.0.0.10", "2001:db8::1", "2001:db8::2"]),
+        ("desc", ["2001:db8::1", "2001:db8::2", "10.0.0.10", "10.0.0.2", "10.0.0.1"]),
+    ],
+)
+def test_ip_sort_respects_direction(client: TestClient, direction: str, expected: list[str]) -> None:
+    _upload(client, [
+        ("10.0.0.2", 0, ""), ("2001:db8::2", 0, ""), ("10.0.0.10", 0, ""),
+        ("2001:db8::1", 0, ""), ("10.0.0.1", 0, ""),
+    ], "ips.xml")
+    data = _hosts(client, sort="ip", dir=direction)
+    assert [row["ip"] for row in data["rows"]] == expected
+    assert data["direction"] == direction
 
 
-def test_change_sort_groups_new_then_changed_then_unchanged_ports_desc() -> None:
-    rows = [
-        _row("10.0.0.1", 9, change=""),        # unchanged, most open
-        _row("10.0.0.2", 2, change="new"),     # new, few open
-        _row("10.0.0.3", 5, change="changed"),
-        _row("10.0.0.4", 7, change="new"),     # new, more open -> before .2
-        _row("10.0.0.5", 1, change=""),
-    ]
-    # new (ports desc) -> changed -> unchanged (ports desc)
-    assert [r.ip for r in sort_hosts(rows, "change", "asc")] == \
-        ["10.0.0.4", "10.0.0.2", "10.0.0.3", "10.0.0.1", "10.0.0.5"]
-    # desc reverses the change groups
-    assert [r.change for r in sort_hosts(rows, "change", "desc")][:1] == [""]
+@pytest.mark.parametrize(("direction", "expected"), [("desc", [9, 3, 1]), ("asc", [1, 3, 9])])
+def test_ports_sort_direction(client: TestClient, direction: str, expected: list[int]) -> None:
+    _upload(client, [("10.0.0.1", 1, ""), ("10.0.0.2", 9, ""), ("10.0.0.3", 3, "")], "ports.xml")
+    data = _hosts(client, sort="ports", dir=direction)
+    assert [row["open_count"] for row in data["rows"]] == expected
 
 
-def test_filter_by_change() -> None:
-    rows = [_row("10.0.0.1", change="new"), _row("10.0.0.2", change="changed"),
-            _row("10.0.0.3", change="")]
-    assert [r.ip for r in filter_hosts(rows, change="new")] == ["10.0.0.1"]
-    assert [r.ip for r in filter_hosts(rows, change="changed")] == ["10.0.0.2"]
-    assert [r.ip for r in filter_hosts(rows, change="unchanged")] == ["10.0.0.3"]  # "" state
-    assert len(filter_hosts(rows, change="")) == 3  # "any" is a no-op
+def _change_inventory(client: TestClient) -> None:
+    _upload(client, [
+        ("10.0.0.1", 9, "1"), ("10.0.0.3", 5, "1"), ("10.0.0.5", 1, "1"),
+    ], "baseline.xml")
+    _upload(client, [
+        ("10.0.0.1", 9, "1"), ("10.0.0.2", 2, "1"), ("10.0.0.3", 5, "2"),
+        ("10.0.0.4", 7, "1"), ("10.0.0.5", 1, "1"),
+    ], "latest.xml")
 
 
-def test_paginate_slices_and_clamps() -> None:
-    rows = [_row(f"10.0.0.{i}") for i in range(1, 26)]  # 25 rows
-    page_rows, page, pages = paginate(rows, page=1, per_page=10)
-    assert (len(page_rows), page, pages) == (10, 1, 3)
-    assert paginate(rows, page=3, per_page=10)[0][-1].ip == "10.0.0.25"  # last page, 5 rows
-    assert len(paginate(rows, page=3, per_page=10)[0]) == 5
-    # out-of-range page clamps to the last real page, never an empty slice
-    assert paginate(rows, page=99, per_page=10)[1] == 3
-    # empty input still yields one (empty) page, not zero
-    assert paginate([], page=1, per_page=10) == ([], 1, 1)
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [
+        ("asc", ["10.0.0.4", "10.0.0.2", "10.0.0.3", "10.0.0.1", "10.0.0.5"]),
+        ("desc", ["10.0.0.1", "10.0.0.5", "10.0.0.3", "10.0.0.4", "10.0.0.2"]),
+    ],
+)
+def test_change_sort_keeps_ports_descending_within_groups(
+    client: TestClient, direction: str, expected: list[str],
+) -> None:
+    _change_inventory(client)
+    data = _hosts(client, sort="change", dir=direction)
+    assert [row["ip"] for row in data["rows"]] == expected
+
+
+def test_filter_by_change_preserves_counts_and_default_order(client: TestClient) -> None:
+    _change_inventory(client)
+    for change, expected in [
+        ("new", ["10.0.0.4", "10.0.0.2"]),
+        ("changed", ["10.0.0.3"]),
+        ("unchanged", ["10.0.0.1", "10.0.0.5"]),
+    ]:
+        data = _hosts(client, change=change)
+        assert [row["ip"] for row in data["rows"]] == expected
+        assert (data["total"], data["matched"]) == (5, len(expected))
+        assert (data["sort"], data["direction"]) == ("change", "asc")
+    assert _hosts(client, change="")["matched"] == 5
+
+
+def test_host_pagination_slices_clamps_and_handles_empty_matches(client: TestClient) -> None:
+    _upload(client, [(f"10.0.0.{index}", 0, "") for index in range(1, 26)], "pages.xml")
+    first = _hosts(client, sort="ip", per="10", page="1")
+    assert [row["ip"] for row in first["rows"]] == [f"10.0.0.{index}" for index in range(1, 11)]
+    assert (first["total"], first["matched"], first["page"], first["pages"]) == (25, 25, 1, 3)
+
+    last = _hosts(client, sort="ip", per="10", page="99")
+    assert [row["ip"] for row in last["rows"]] == [f"10.0.0.{index}" for index in range(21, 26)]
+    assert (last["page"], last["pages"]) == (3, 3)
+    assert _hosts(client, sort="ip", per="10", page="3")["rows"] == last["rows"]
+    assert _hosts(client, sort="ip", page="0")["page"] == 1
+
+    all_rows = _hosts(client, sort="ip", per="all", page="99")
+    assert (len(all_rows["rows"]), all_rows["page"], all_rows["pages"]) == (25, 1, 1)
+    empty = _hosts(client, q="not-present", page="99")
+    assert empty["rows"] == []
+    assert (empty["total"], empty["matched"], empty["page"], empty["pages"]) == (25, 0, 1, 1)

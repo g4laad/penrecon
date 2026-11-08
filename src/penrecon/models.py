@@ -1,7 +1,7 @@
 """SQLModel tables for penrecon.
 
-Scans are immutable snapshots of Observations. Current scan state and per-host
-scan differences are projected transactionally from chronological evidence.
+Scans are immutable snapshots of Observations. Scan state, per-host scan
+differences, and inventory read models are projected transactionally.
 Annotations hang off stable entity identities (host / service / hostname) and
 are never touched by ingest. Manual service overrides remain separate.
 """
@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Column, ForeignKeyConstraint, Text, UniqueConstraint
+from sqlalchemy import JSON, CheckConstraint, Column, ForeignKeyConstraint, Index, Text, UniqueConstraint, desc
 from sqlmodel import Field, SQLModel
 
 
@@ -178,6 +178,70 @@ class HostScanDelta(EngagementOwned, table=True):
     host_id: int = Field(primary_key=True)
     scan_id: int = Field(primary_key=True)
     entry: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class CurrentService(EngagementOwned, table=True):
+    """Effective service values; raw overrides and annotations stay separate."""
+
+    __tablename__ = "current_service"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        Index("ix_current_service_scope_port_state_host", "engagement_id", "port", "state", "host_id"),
+        Index("ix_current_service_scope_host_port", "engagement_id", "host_id", "port", "service_id"),
+        Index("ix_current_service_scope_host_state_port", "engagement_id", "host_id", "state", "port", "service_id"),
+        Index("ix_current_service_scope_host_name_port", "engagement_id", "host_id", "service_name_lower", "port", "service_id"),
+    )
+    service_id: int = Field(primary_key=True)
+    host_id: int
+    port: int
+    proto: str
+    state: str
+    service_name: str | None = None
+    product: str | None = None
+    version: str | None = None
+    observation_id: int | None = None
+    last_seen: str = ""
+    manual: bool = False
+    service_name_lower: str = ""
+    search_text: str = ""
+
+
+class HostSummary(EngagementOwned, table=True):
+    """Inventory payload and scalar filter/sort keys, maintained on writes."""
+
+    __tablename__ = "host_summary"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        Index("ix_host_summary_scope_change_open_ip", "engagement_id", "change_rank", desc("open_count"), "ip", "host_id"),
+        Index("ix_host_summary_scope_status_ip", "engagement_id", "status", "ip", "host_id"),
+        Index("ix_host_summary_scope_open_ip", "engagement_id", "open_count", "ip", "host_id"),
+        Index("ix_host_summary_scope_ip_sort_ip", "engagement_id", "ip_sort", "ip", "host_id"),
+    )
+    host_id: int = Field(primary_key=True)
+    ip: str
+    ip_sort: str
+    open_count: int = 0
+    status: str = Status.new
+    triaged: bool = False
+    change: str = ""
+    change_rank: int = 2
+    hostnames: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    open_services: list[tuple[int, str | None]] = Field(default_factory=list, sa_column=Column(JSON))
+    search_values: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+class HostSummaryTag(EngagementOwned, table=True):
+    """Exact tag membership, without decoding host payloads during filtering."""
+
+    __tablename__ = "host_summary_tag"
+    __table_args__ = (
+        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        Index("ix_host_summary_tag_scope_tag_host", "engagement_id", "tag", "host_id"),
+    )
+    host_id: int = Field(primary_key=True)
+    tag: str = Field(primary_key=True)
 
 
 class ManualServiceEvent(EngagementOwned, table=True):

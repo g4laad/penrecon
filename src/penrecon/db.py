@@ -50,9 +50,10 @@ def init_db() -> None:
     """Ensure local storage is ready before opening CLI or web sessions.
 
     This idempotent command creates missing tables and transactionally backfills
-    missing scan projections. It never alters existing tables: incompatible
-    schemas require an explicit manual database reset, never an automatic
-    migration or deletion. Complete projections are not replayed on startup.
+    missing scan and inventory projections. New inventory tables reuse complete
+    scan state without replaying evidence. Existing tables are never altered:
+    incompatible schemas require an explicit manual database reset, never an
+    automatic migration or deletion.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     # import registers tables on SQLModel.metadata
