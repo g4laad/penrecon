@@ -13,7 +13,7 @@ from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from penrecon.db import DATA_DIR, engagement_scans_dir
 from penrecon.inventory import DiscoveryIndex, link_hostname, normalize_ip
@@ -50,18 +50,15 @@ def _upsert_host(
 
 
 def _upsert_service(
-    session: Session, host_id: int, port: int, proto: str, *, engagement_id: str
+    session: Session, host_id: int, port: int, proto: str, discovery: DiscoveryIndex,
+    *, engagement_id: str,
 ) -> None:
-    svc = session.exec(
-        select(Service).where(
-            Service.engagement_id == engagement_id,
-            Service.host_id == host_id, Service.port == port, Service.proto == proto
-        )
-    ).first()
-    if svc is None:
+    key = (host_id, port, proto)
+    if key not in discovery.services:
         session.add(Service(engagement_id=engagement_id, host_id=host_id, port=port, proto=proto))
-    # a deleted service is gone from the DB; this recreates it fresh when a scan
-    # sees the port again
+        discovery.services.add(key)
+    # The index is loaded afresh for each import, so deleted services are
+    # recreated without restoring their old overrides or annotations.
 
 
 def _store_host(
@@ -82,7 +79,7 @@ def _store_host(
         if name:
             link_hostname(session, host.id, name, now, engagement_id=engagement_id, discovery=discovery)
     for p in hr.ports:
-        _upsert_service(session, host.id, p.port, p.proto, engagement_id=engagement_id)
+        _upsert_service(session, host.id, p.port, p.proto, discovery, engagement_id=engagement_id)
         session.add(
             Observation(
                 engagement_id=engagement_id,

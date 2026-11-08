@@ -270,6 +270,8 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
 
 - **Ingest** nmap `-oX` XML and Amass hostname/IP exports via web upload or CLI.
   Each ingest retains the original file; service observations are immutable.
+  Each import loads engagement-scoped service identity keys once and reuses them
+  while staging ports, avoiding per-port lookup queries and autoflushes.
 - **Merge, latest-wins**: current host/service state is the newest observation
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.

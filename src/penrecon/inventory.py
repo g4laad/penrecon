@@ -8,7 +8,7 @@ from ipaddress import ip_address
 
 from sqlmodel import Session, col, select
 
-from penrecon.models import Host, Hostname, HostHostname
+from penrecon.models import Host, Hostname, HostHostname, Service
 
 
 def normalize_ip(raw: str) -> str:
@@ -70,6 +70,7 @@ class DiscoveryIndex:
     hosts: dict[str, Host]
     hostnames: dict[str, list[Hostname]]
     links: dict[tuple[int, str], list[HostHostname]]
+    services: set[tuple[int, int, str]]
 
     @classmethod
     def load(cls, session: Session, *, engagement_id: str) -> DiscoveryIndex:
@@ -101,7 +102,14 @@ class DiscoveryIndex:
             name = names_by_id.get(link.hostname_id)
             if name is not None:
                 links.setdefault((link.host_id, name), []).append(link)
-        return cls(engagement_id, hosts, names, links)
+        services = {
+            (host_id, port, proto)
+            for host_id, port, proto in session.exec(
+                select(Service.host_id, Service.port, Service.proto)
+                .where(Service.engagement_id == engagement_id)
+            ).all()
+        }
+        return cls(engagement_id, hosts, names, links, services)
 
 
 def _equivalent_hostnames(session: Session, name: str, engagement_id: str) -> list[Hostname]:
