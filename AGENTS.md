@@ -1,61 +1,54 @@
-# penrecon
+# penrecon contributor guide
 
-Single-user, local pentest recon manager. FastAPI + React + shadcn/ui
-(Base UI) + SQLite via SQLModel. `uv` for Python, npm for `frontend/`.
-Full type annotations; `mypy` and TypeScript must stay clean.
+Single-user, local pentest recon manager: FastAPI + React + shadcn/ui
+(Base UI), SQLite via SQLModel. Use `uv` for Python and npm in `frontend/`.
+Keep full type annotations; mypy and TypeScript must stay clean.
 
-## Run / dev
+## Read before changing
 
-```sh
-npm --prefix frontend ci
-npm --prefix frontend run build
-uv run penrecon serve                          # http://127.0.0.1:8000
-uv run penrecon ingest scan.xml --tool nmap    # or upload on /scans
-uv run pytest
-uv run mypy src/penrecon
-```
+- **README.md:** operational source of truth for setup, commands, supported
+  importers, API/data contracts, deployment, backups, and developer checks.
+- **PRODUCT.md:** read before changing product scope or priorities.
+- **DESIGN.md:** read before layout, component, interaction, or accessibility
+  changes; it defines the committed UI contracts.
 
-Data (SQLite + attachments) lives under `./data` (override `PENRECON_DATA`).
+## Development guardrails
 
-**Testing:** port 8000 is the user's own dev server — never bind it. Spin up
-test/preview servers on another port, e.g. `uv run penrecon serve --port 8765`.
+- **Never bind port 8000 for tests or previews:** it is the user's dev server.
+  Use another port, e.g. `uv run penrecon serve --port 8765`.
+- After frontend changes, run `npm --prefix frontend run build` before browser
+  verification or packaging. FastAPI serves `src/penrecon/web/static/ui`;
+  `npm --prefix frontend run dev` watches and rebuilds those assets.
+- Use disposable test data via `PENRECON_DATA`; preserve the user's database and
+  retained files. Re-importing scans cannot restore user-authored data.
+- Imports require an engagement, for example:
+  ```sh
+  uv run penrecon engagements create "Example engagement"
+  uv run penrecon ingest scan.xml --tool nmap --engagement <uuid>
+  ```
+  Use the returned UUID. Browser workspaces are `/<uuid>/`; API requests use
+  `?engagement_id=<uuid>`. See README for complete workflows and checks.
 
-## Layout
+## Data invariants
 
-- `src/penrecon/models.py` — SQLModel tables (Host/Hostname/Service/Observation
-  snapshots; Annotation/Attachment on any entity; Credential linked M:N to hosts
-  and services via credential_host / credential_service).
-- `src/penrecon/ingest.py` — `ingest_scan()`, shared by web + CLI.
-- `src/penrecon/parsers/` — `PARSERS` registry, `fn(bytes) -> ScanResult`.
-  nmap implemented; others stubbed.
-- `src/penrecon/queries.py` — current-state merge (latest-observation-wins),
-  scan diff, annotation/attachment access.
-- `src/penrecon/web/` — FastAPI page-data/form routes + built static assets.
-- `frontend/src/` — React pages and shadcn/ui Base UI components.
-- Frontend changes require rebuilding `web/static/ui` before browser verification
-  or packaging. `npm --prefix frontend run dev` watches/rebuilds; FastAPI serves it.
+- All workspace data and relationships are engagement-scoped. The same IP or
+  hostname can exist independently in different engagements; queries, exports,
+  diffs, and mutations must respect that boundary.
+- Within an engagement, hosts are identified by IP, hostnames link M:N to hosts,
+  and services by `(host, port, proto)`.
+- Scan observations are immutable evidence; ingest merges rather than replacing
+  history. Effective state uses trustworthy scan evidence and coverage, not mere
+  port absence. Manual overrides win until reset to scan inheritance.
+- Ingest and projection maintenance must preserve user notes, status, tags,
+  attachments, credentials, and manual overrides.
+- Credentials are user data linked M:N to hosts/services. Deleting a host or
+  service removes its credential links, never the credential itself.
 
-## Core model rules
+## Navigation
 
-- Host = IP (primary); hostnames linked M:N. Service = (host, port, proto).
-- Each ingest is an immutable Observation snapshot. Current state = newest
-  observation per (host, port, proto) — ingest merges, never replaces.
-- Annotations (notes/status/tags/attachments) are user data and are **never**
-  touched by ingest. Credentials are the same: pure user data, M:N to hosts and
-  services; deleting a host/service drops its link rows but never the credential.
-
-## Design Context
-
-See `PRODUCT.md` (strategic) for the full brief. In short:
-
-- **Register:** product — a local operator tool; design serves the work.
-- **Character:** modern, clean, light, dense; monospace where data lives
-  (IPs/ports/versions), a consistent icon set for wayfinding. Explicitly **not**
-  a generic SaaS dashboard (no gradient hero-metrics, pastel card-grid, marketing
-  chrome); cards/elevation/icons only where they aid triage.
-- **Principles:** density serves triage · signal over chrome · notes are sacred
-  · change is the story · fast and local.
-- **A11y:** WCAG AA contrast, full keyboard nav + visible focus,
-  `prefers-reduced-motion` honored, status never conveyed by color alone.
-- The committed system is `DESIGN.md`, implemented by shadcn/ui `base-nova`
-  components and `frontend/src/index.css`.
+- `src/penrecon/models.py`: persisted entities and relationship constraints.
+- `src/penrecon/ingest.py` and `parsers/`: shared CLI/web import path and parser registry.
+- `src/penrecon/history.py`, `*projection*.py`, and `queries/`: evidence replay,
+  materialized read models, and scoped reads.
+- `src/penrecon/commands.py`: manual mutations; `web/`: FastAPI routes and static assets.
+- `frontend/src/`: React pages and Base UI components; `index.css`: shared styling.

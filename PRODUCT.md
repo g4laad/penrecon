@@ -1,77 +1,65 @@
 # Product
 
-## Register
+## Audience and purpose
 
-product
+penrecon is a single-user, local recon manager for a penetration tester working
+between terminal commands and scan results. It should replace grepping raw output
+with fast answers: what is open, what changed, what did I note, and which actions
+led here?
 
-## Users
+One instance supports multiple engagements with isolated inventory, observations,
+notes, credentials, and activity, even when target IPs overlap. Engagement selection
+is explicit in page URLs, so separate tabs can work on different engagements.
 
-A single penetration tester running their own local instance during an
-engagement. Context: mid-recon, scan files piling up, switching between the
-terminal and this UI to make sense of what's been found. They are technical,
-fast, and keyboard-driven; they want to scan a lot of hosts and services
-quickly, spot what changed since the last scan, and jot triage notes without
-friction. Not a team, not a client-facing deliverable — a personal operator
-tool.
+The core workflow is to import **nmap XML and Amass hostname/IP exports**, browse
+current hosts and services, compare any two scans, and maintain Markdown notes,
+status, tags, attachments, and credentials. Amass adds host/name mappings, not
+services. Import formats, setup, deployment, and operational contracts belong in
+[README.md](README.md); committed UI behavior belongs in [DESIGN.md](DESIGN.md).
 
-One local instance can hold multiple engagements. The operator creates or
-selects one before working; each keeps independent inventory, observations,
-notes, credentials, and activity, even when target IPs overlap. Selection is
-explicit in each page URL, so different tabs can work on different engagements.
+## Evidence and operator ownership
 
-## Product Purpose
+Two histories answer different questions:
 
-Ingest recon tool output (nmap XML today; masscan/httpx/nuclei/subfinder next),
-merge it into a current-state view of hosts and services, diff any two scans,
-and let the operator annotate findings with markdown notes, status, and tags
-that survive re-scans. A manually maintained command and action timeline helps
-reconstruct operator activity and can retain one attachment per entry; the
-tool does not execute commands or automatically capture terminal history.
-Success = the operator reaches for penrecon instead of grepping raw XML, and
-can answer “what’s open on this host, what changed since last week, what did I
-note about it, and what actions produced this state” in seconds.
+- **Operation log:** manually recorded commands and actions, with up to one
+  attachment per entry. It explains operator activity; it neither executes
+  commands nor automatically captures terminal history.
+- **Host service timeline:** timestamped scan evidence and manual service
+  additions, edits, and removals, with explicit sources and before/after values.
+  It explains how service state changed, independently of the operation log.
 
-Each host has a service timeline combining timestamped scan evidence and manual
-service additions, edits, and removals with before/after values. Sources remain
-explicit, separate from the manually maintained operation log. Deleting a service
-retains its historical evidence and does not imply a closed port.
-Partial scans never imply closure; missing evidence remains distinct from an
-explicit closed or filtered state. Historical scan evidence never overwrites
-operator annotations or manual service overrides.
+Re-scans preserve operator annotations and credentials. Manual service overrides
+win over scan evidence until reset. Historical evidence remains available when a
+service is removed from inventory; removal does not establish that a port closed.
 
-## Brand Personality
+Missing ports alone never imply closure, including in partial scans. Explicit
+states or unambiguous nmap coverage/aggregate evidence can establish closed or
+filtered states; ambiguous absence remains unknown. A scan diff's “removed” means
+absent from that scan, not confirmed closed.
 
-Modern, clean, dense, precise. Three words: **operator, legible, fast.** It
-should feel like a well-made instrument — a light, information-dense surface with
-monospace where the data lives (IPs, ports, versions) and a consistent icon set
-for wayfinding, carried with quiet confidence and zero marketing gloss. Calm
-under a lot of data. Reference points are clean modern operator tools (Linear,
-Stripe, Raycast), rendered dense.
+## Priorities and character
 
-## Anti-references
+- **Density serves triage.** Let a technical, keyboard-driven operator scan many
+  hosts and services without excessive padding or scrolling.
+- **Signal over chrome.** IPs, ports, versions, and changes carry the interface.
+  Use a modern, clean, light, precise surface; monospace for data and a consistent
+  icon set for wayfinding. Cards, elevation, and icons must aid triage, not fill
+  space. Avoid marketing dashboards and cluttered enterprise-security chrome.
+- **Notes are sacred.** Protect the operator's work above ingested data.
+- **Change is the story.** Make differences immediately legible.
+- **Fast and local.** Favor immediate feedback, keyboard-friendly workflows,
+  and no unnecessary network detours.
+- **Legibility is essential.** Meet WCAG AA text contrast, including muted data
+  and placeholders; provide full keyboard navigation and visible focus; honor
+  reduced-motion preferences. Pair status colors with text or shape so meaning
+  survives color-vision differences.
 
-Not a generic SaaS dashboard: no gradient hero-metric tiles, no pastel
-card-grid-everything, no marketing-flavored admin chrome. Cards, soft elevation,
-and icons are used only where they aid triage — never as filler; decoration that
-doesn't carry information is noise. Also avoid the heavy enterprise-security
-console look (cluttered toolbars, hierarchy-less tiny tables).
+The result should feel like a calm, well-made instrument: **operator, legible,
+fast**, without marketing gloss. Detailed interaction and accessibility contracts
+live in [DESIGN.md](DESIGN.md).
 
-## Design Principles
+## Non-goals
 
-- **Density serves triage.** Show many hosts and services at a glance; the
-  operator scans, they don't scroll through padding.
-- **Signal over chrome.** The data is the interface — IPs, ports, versions,
-  diffs. Minimize anything that isn't information.
-- **Notes are sacred.** User annotations are first-class and never lost to a
-  re-scan; the tool protects the operator's own work above ingested data.
-- **Change is the story.** "What's different since the last scan" must be
-  immediately legible, not buried.
-- **Fast and local.** Instant feedback, keyboard-friendly, no network detours.
-
-## Accessibility & Inclusion
-
-WCAG AA contrast on all text (including muted/monospace data and placeholders),
-full keyboard navigation with visible focus states, and `prefers-reduced-motion`
-honored on every animation. Status colors must stay distinguishable for
-common color-vision deficiencies (pair color with text/shape, never color
-alone).
+- Team collaboration or a client-facing deliverable.
+- Running recon commands or automatically collecting terminal activity.
+- Decorative dashboards that compete with evidence and triage.
