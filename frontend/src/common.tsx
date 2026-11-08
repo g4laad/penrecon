@@ -576,7 +576,7 @@ export function Pager({
         {total !== undefined ? `${total} results · ` : ""}Page {page} of {pages}
       </span>
       <div className="flex flex-wrap items-end gap-2">
-        <QueryForm className="flex flex-wrap items-end gap-2">
+        <QueryForm key={`${page}:${data.per ?? "10"}`} className="flex flex-wrap items-end gap-2">
           {Array.from(new URLSearchParams(location.search))
             .filter(([key]) => key !== "per" && key !== "page")
             .map(([key, value], index) => (

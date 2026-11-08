@@ -39,6 +39,8 @@ the app stopped, including any `-wal` and `-shm` files.
 
 Hosts pagination updates the inventory in place without reloading the page.
 The URL tracks the current page, including browser Back and Forward navigation.
+Service and operation pagination controls stay synchronized with the displayed
+page and row limit after Next/Previous or browser Back/Forward navigation.
 
 One shared SQLite database stores all engagements. Hosts, hostnames, services,
 scans, notes, triage, credentials, and operations are engagement-owned; the same

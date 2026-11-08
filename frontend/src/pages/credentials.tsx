@@ -552,7 +552,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
           )}
         </Empty>
       )}
-      {ready && <Pager key={`${data.page}:${data.per}`} data={{ page: data.page ?? 1, pages: data.pages ?? 1, per: data.per ?? "25" }} total={data.matched ?? total} />}
+      {ready && <Pager data={{ page: data.page ?? 1, pages: data.pages ?? 1, per: data.per ?? "25" }} total={data.matched ?? total} />}
     </div>
   );
 }
