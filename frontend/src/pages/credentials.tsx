@@ -34,7 +34,7 @@ function LinkAssociationForm({ credentialId, target, picker }: {
   if (picker.status === "blocked") return <p className="muted text-xs">{picker.message}</p>;
   const resolution = !selected ? "unselected" : picker.options.some((option) => option.value === selected) ? "selected" : "unavailable";
   const label = target === "host" ? "Link host" : "Link service";
-  return <MutationForm action={`/credentials/${credentialId}/link/${target}`} className="flex flex-wrap items-end gap-2" canSubmit={resolution === "selected"}>
+  return <MutationForm action={`/credentials/${credentialId}/${target === "host" ? "hosts" : "services"}`} method="PATCH" className="flex flex-wrap items-end gap-2" canSubmit={resolution === "selected"}>
     <Field label={label}>
       <NativeSelect name={`${target}_id`} value={selected} required onChange={(event) => setSelected(event.target.value)}>
         <option value="">Select a {target}…</option>
@@ -84,7 +84,8 @@ function CredentialLinks({
               <ScopedLink href={`/hosts/${host.host_id}`}
               className="mono min-w-0 break-all text-[13px] underline underline-offset-4">{host.ip}</ScopedLink>
               <MutationForm
-                action={`/credentials/${credential.id}/unlink/host/${host.host_id}`}
+                action={`/credentials/${credential.id}/hosts/${host.host_id}`}
+                method="DELETE"
                 confirm={`Unlink host ${host.ip} and its service links from this credential?`}
               >
                 <Button
@@ -124,7 +125,8 @@ function CredentialLinks({
               className="mono min-w-0 break-all text-[13px] underline underline-offset-4">{service.ip}:{service.port}/{service.proto}
               {service.name ? ` ${service.name}` : ""}</ScopedLink>
               <MutationForm
-                action={`/credentials/${credential.id}/unlink/service/${service.service_id}`}
+                action={`/credentials/${credential.id}/services/${service.service_id}`}
+                method="DELETE"
                 confirm={`Unlink ${service.ip}:${service.port}/${service.proto} from this credential?`}
               >
                 <Button
@@ -151,7 +153,7 @@ function CredentialLinks({
 function CredentialEditForm({ credential, kinds }: { credential: Credential; kinds: string[] }) {
   const [draft, setDraft] = useState({ username: credential.username, secret: credential.secret });
   const validity = credentialDraftValidity(draft.username, draft.secret);
-  return <MutationForm action={`/credentials/${credential.id}/edit`} canSubmit={validity === "valid"}>
+  return <MutationForm action={`/credentials/${credential.id}`} method="PUT" canSubmit={validity === "valid"}>
     <div onChange={(event) => {
       const field = event.target;
       if ((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && (field.name === "username" || field.name === "secret")) {
@@ -231,7 +233,8 @@ function CredentialDetail({
           Added <time className="mono">{credential.created_at}</time>
         </p>
         <MutationForm
-          action={`/credentials/${credential.id}/delete`}
+          action={`/credentials/${credential.id}`}
+          method="DELETE"
           confirm={`Delete credential ${credential.username || "(no username)"} and all its links? This cannot be undone.`}
         >
           <Button

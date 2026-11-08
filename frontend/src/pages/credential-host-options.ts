@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { engagementUrl } from "../common";
 import type { Host } from "../types";
+import { apiUrl } from "../lib/api";
 
 type HostOption = Pick<Host, "id" | "ip">;
 
@@ -25,7 +26,7 @@ export function useHostOptions(active: boolean): HostOptions {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(engagementUrl("/options/hosts"), {
+        const response = await fetch(apiUrl(engagementUrl("/options/hosts")), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         if (!response.ok) throw new Error("Unable to load hosts.");

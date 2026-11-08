@@ -4,10 +4,11 @@ from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlalchemy import event
 from sqlmodel import Session
 from sqlmodel import select
+from starlette.testclient import TestClient
 
 from penrecon.ingest import ingest_scan
 from penrecon.queries import resolved_services
-from tests.fixtures import SCAN_A
+from tests.fixtures import api_url, SCAN_A
 
 from penrecon.models import (
     CredKind,
@@ -229,3 +230,141 @@ def test_credential_lists_never_select_secrets_and_detail_loads_only_selected_li
     assert [service.service_id for service in detail.pickable_services] == [own_service_id]
     assert loaded_credentials == [selected_id]
     assert set(loaded_services) == {own_service_id}
+
+
+def test_credential_api_openapi_describes_forms_and_nested_projections(client: TestClient) -> None:
+    document = client.get("/openapi.json").json()
+    paths = document["paths"]
+    schemas = document["components"]["schemas"]
+    base = "/api/credentials"
+    for path, methods in paths.items():
+        if not path.startswith(base):
+            continue
+        assert "{engagement_id}" not in path
+        for operation in methods.values():
+            engagement = next(parameter for parameter in operation["parameters"] if parameter["name"] == "engagement_id")
+            assert engagement["in"] == "query"
+            assert engagement["required"] is True
+
+    def resolve(schema: dict) -> dict:
+        return schemas[schema["$ref"].rsplit("/", 1)[1]] if "$ref" in schema else schema
+
+    def success_schema(path: str, method: str) -> dict:
+        return resolve(paths[path][method]["responses"]["200"]["content"]["application/json"]["schema"])
+
+    listing = success_schema(base, "get")
+    assert set(listing["properties"]) == {"credentials", "total", "kinds", "q", "kind", "scope"}
+    summary = resolve(listing["properties"]["credentials"]["items"])
+    assert set(summary["properties"]) == {
+        "id", "kind", "username", "notes_preview", "host_count", "service_count",
+    }
+    detail = success_schema(base + "/{cred_id}", "get")
+    credential = resolve(detail["properties"]["credential"])
+    assert set(credential["properties"]) == {
+        "id", "kind", "username", "secret", "notes", "created_at",
+        "hosts", "services", "pickable_services",
+    }
+    hosts = resolve(credential["properties"]["hosts"]["items"])
+    assert set(hosts["properties"]) == {"host_id", "ip"}
+    for field in ("services", "pickable_services"):
+        service = resolve(credential["properties"][field]["items"])
+        assert set(service["properties"]) == {"service_id", "host_id", "ip", "port", "proto", "name"}
+
+    fields_by_operation = {
+        ("", "post"): {"kind", "username", "secret", "notes", "host_ids", "service_ids"},
+        ("/{cred_id}", "put"): {"kind", "username", "secret", "notes", "host_id"},
+        ("/{cred_id}", "delete"): {"host_id"},
+        ("/{cred_id}/hosts", "patch"): {"host_id"},
+        ("/{cred_id}/services", "patch"): {"service_id"},
+    }
+    for (suffix, method), fields in fields_by_operation.items():
+        operation = paths[base + suffix][method]
+        form = resolve(operation["requestBody"]["content"]["application/x-www-form-urlencoded"]["schema"])
+        assert set(form["properties"]) == fields
+    for suffix, method in (
+        ("", "post"), ("/{cred_id}", "put"), ("/{cred_id}", "delete"),
+        ("/{cred_id}/hosts", "patch"), ("/{cred_id}/services", "patch"),
+        ("/{cred_id}/hosts/{host_id}", "delete"),
+        ("/{cred_id}/services/{service_id}", "delete"),
+    ):
+        mutation = success_schema(base + suffix, method)
+        assert "ok" in mutation["required"]
+        assert paths[base + suffix][method]["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith("/ErrorResponse")
+
+
+def test_credential_api_json_only_association_workflow(client: TestClient) -> None:
+    assert client.post(
+        api_url("/scans"), files={"file": ("scan.xml", SCAN_A, "text/xml")},
+        data={"tool": "nmap"},
+    ).status_code == 200
+    hosts = client.get(api_url("/options/hosts")).json()["hosts"]
+    host_id = hosts[0]["id"]
+    services = client.get(api_url(f"/options/hosts/{host_id}/services")).json()["services"]
+    service_id = next(service["service_id"] for service in services if service["port"] == 22)
+    base = api_url("/credentials")
+    assert client.post(base, data={
+        "username": "operator", "secret": "private-secret-marker", "notes": "triage notes",
+    }).json() == {"ok": True}
+    listing = client.get(base, headers={"Accept": "text/html"})
+    assert listing.status_code == 200
+    assert listing.headers["content-type"].startswith("application/json")
+    assert listing.headers["cache-control"] == "no-store"
+    assert "private-secret-marker" not in listing.text
+    assert "secret" not in listing.json()["credentials"][0]
+    credential_id = listing.json()["credentials"][0]["id"]
+    path = api_url(f"/credentials/{credential_id}")
+    detail = client.get(path)
+    assert detail.headers["cache-control"] == "no-store"
+    assert detail.json()["credential"]["secret"] == "private-secret-marker"
+    assert detail.json()["credential"]["pickable_services"] == []
+
+    assert client.patch(api_url(f"/credentials/{credential_id}/services"), data={"service_id": service_id}).status_code == 422
+    assert client.patch(api_url(f"/credentials/{credential_id}/hosts")).status_code == 422
+    assert client.patch(api_url(f"/credentials/{credential_id}/hosts"), data={"host_id": host_id}).json() == {"ok": True}
+    available = client.get(path).json()["credential"]["pickable_services"]
+    assert {service["service_id"] for service in available} == {service["service_id"] for service in services}
+    assert client.patch(api_url(f"/credentials/{credential_id}/services"), data={"service_id": service_id}).json() == {"ok": True}
+    linked = client.get(path).json()["credential"]
+    assert linked["hosts"] == [{"host_id": host_id, "ip": "10.0.0.1"}]
+    assert linked["services"] == [{
+        "service_id": service_id, "host_id": host_id, "ip": "10.0.0.1",
+        "port": 22, "proto": "tcp", "name": "ssh",
+    }]
+    assert client.put(path, data={"username": "replacement"}).json() == {"ok": True}
+    replacement = client.get(path).json()["credential"]
+    assert (replacement["kind"], replacement["username"], replacement["secret"], replacement["notes"]) == (
+        "password", "replacement", "", "",
+    )
+    assert replacement["hosts"] == linked["hosts"]
+    assert replacement["services"] == linked["services"]
+    assert client.delete(api_url(f"/credentials/{credential_id}/services/{service_id}")).json() == {"ok": True}
+    assert client.get(path).json()["credential"]["services"] == []
+    assert client.patch(api_url(f"/credentials/{credential_id}/services"), data={"service_id": service_id}).status_code == 200
+    assert client.delete(api_url(f"/credentials/{credential_id}/hosts/{host_id}")).json() == {"ok": True}
+    unlinked = client.get(path).json()["credential"]
+    assert unlinked["hosts"] == unlinked["services"] == unlinked["pickable_services"] == []
+    assert client.put(path, data={
+        "kind": "token", "username": " revised ", "secret": " new secret ", "notes": " updated ",
+        "host_id": host_id,
+    }).json() == {"ok": True}
+    updated = client.get(path).json()["credential"]
+    assert (updated["kind"], updated["username"], updated["secret"], updated["notes"]) == (
+        "token", "revised", "new secret", "updated",
+    )
+
+    created = client.post("/api/engagements", data={"name": "Other engagement"}).json()
+    other_id = created["redirect_to"].strip("/").split("/")[1]
+    foreign_detail = client.get(api_url(f"/credentials/{credential_id}", other_id))
+    assert foreign_detail.status_code == 404
+    assert foreign_detail.headers["cache-control"] == "no-store"
+    foreign_path = api_url(f"/credentials/{credential_id}", other_id)
+    assert client.put(foreign_path, data={"username": "forbidden"}).status_code == 404
+    assert client.patch(api_url(f"/credentials/{credential_id}/hosts", other_id), data={"host_id": host_id}).status_code == 404
+    assert client.delete(foreign_path).status_code == 404
+    assert client.post(api_url(f"/credentials", other_id), data={
+        "username": "foreign", "host_ids": [str(host_id)], "service_ids": [str(service_id)],
+    }).status_code == 422
+    assert client.get(api_url(f"/credentials", other_id)).json()["credentials"] == []
+    assert client.request("DELETE", path, data={"host_id": host_id}).json() == {"ok": True}
+    assert client.get(path).status_code == 404
+    assert client.get(base).json()["credentials"] == []

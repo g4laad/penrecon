@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from tests.fixtures import TEST_ENGAGEMENT_ID
+import pytest
+from urllib.parse import urlencode, parse_qs, urlsplit
+
+from tests.fixtures import api_url, TEST_ENGAGEMENT_ID
+from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
@@ -84,3 +88,54 @@ def test_manual_only_service_shows(session: Session) -> None:
     assert view[8080].state == "open"
     assert view[8080].service_name == "http-proxy"
     assert view[8080].manual is True
+
+
+def test_missing_host_mutations_return_not_found(client: TestClient) -> None:
+    for method, data in (("PATCH", {"ip": "10.0.0.99"}), ("DELETE", {})):
+        response = client.request(method, api_url("/hosts/999"), data=data)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "host not found"
+
+
+def test_foreign_host_mutations_return_not_found_without_changing_inventory(client: TestClient) -> None:
+    created = client.post(api_url(f"/hosts"), data={"ip": "10.0.0.99"})
+    assert created.status_code == 200
+    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")[1:]
+    host_path = api_url(f"/hosts/{host_id}", engagement_id)
+    host_id = urlsplit(host_path).path.rsplit("/", 1)[1]
+    engagement = client.post("/api/engagements", data={"name": "Other inventory"})
+    assert engagement.status_code == 200
+    foreign_id = urlsplit(engagement.json()["redirect_to"]).path.strip("/").split("/")[1]
+    for method, data in (("PATCH", {"ip": "10.0.0.100"}), ("DELETE", {})):
+        response = client.request(method, api_url(f"/hosts/{host_id}", foreign_id), data=data)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "host not found"
+    assert client.get(host_path).json()["host"]["ip"] == "10.0.0.99"
+    assert client.get(api_url("/hosts", foreign_id)).json()["rows"] == []
+
+
+@pytest.mark.parametrize("raw", ["²", "٢", "not-a-number", "12345678901", "9" * 5000])
+def test_malformed_inventory_numbers_use_safe_defaults(client: TestClient, raw: str) -> None:
+    created = client.post(api_url(f"/hosts"), data={"ip": "10.0.0.99"})
+    assert created.status_code == 200
+    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")[1:]
+    host_path = api_url(f"/hosts/{host_id}", engagement_id)
+    host_id = urlsplit(host_path).path.rsplit("/", 1)[1]
+    added = client.post(api_url(urlsplit(host_path).path.removeprefix("/api") + "/services", parse_qs(urlsplit(host_path).query)["engagement_id"][0]), data={"port": "443", "service_name": "https"})
+    assert added.status_code == 200
+
+    for path in (api_url("/hosts"),):
+        response = client.get(api_url(urlsplit(path).path.removeprefix("/api") + "?" + urlencode({"port": raw, "page": raw, "per": raw}), parse_qs(urlsplit(path).query)["engagement_id"][0]))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["page"] == 1
+        assert data["matched"] == 1
+        assert data["rows"][0]["ip"] == "10.0.0.99"
+
+    for path in (host_path, api_url(f"/hosts/{host_id}/services")):
+        response = client.get(api_url(urlsplit(path).path.removeprefix("/api") + "?" + urlencode({"page": raw, "per": raw}), parse_qs(urlsplit(path).query)["engagement_id"][0]))
+        assert response.status_code == 200
+        data = response.json()
+        assert data["page"] == 1
+        assert data["svc_total"] == 1
+        assert data["services"][0]["port"] == 443

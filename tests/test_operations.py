@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from tests.fixtures import TEST_ENGAGEMENT_ID, ENGAGEMENT_PREFIX
-import shutil
+from urllib.parse import urlencode
+
+from tests.fixtures import TEST_ENGAGEMENT_ID, api_url
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event
+from penrecon.web import operations
 from sqlmodel import Session
 from starlette.testclient import TestClient
 
@@ -17,7 +19,7 @@ from penrecon.queries import operation_logs
 def _assert_outcome(response) -> None:
     assert response.status_code == 200
     assert "location" not in response.headers
-    assert response.json() == {"ok": True, "redirect_to": ENGAGEMENT_PREFIX + "/operations"}
+    assert response.json() == {"ok": True, "redirect_to": f"/e/{TEST_ENGAGEMENT_ID}/operations"}
 
 
 
@@ -39,11 +41,11 @@ def _create_operation(
     if data:
         fields.update(data)
     files = {"attachment": attachment} if attachment is not None else None
-    return client.post(ENGAGEMENT_PREFIX + "/operations", data=fields, files=files, follow_redirects=False)
+    return client.post(api_url("/operations"), data=fields, files=files, follow_redirects=False)
 
 
 def _only_operation_id(client: TestClient) -> int:
-    operations = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"]
+    operations = client.get(api_url("/operations")).json()["operations"]
     assert len(operations) == 1
     return int(operations[0]["id"])
 
@@ -94,31 +96,20 @@ def test_operation_logs_blank_query_returns_every_entry(session: Session) -> Non
     assert {row.command for row in operation_logs(session, "  ", engagement_id=TEST_ENGAGEMENT_ID)} == {"one", "two"}
 
 
-def test_operation_summaries_search_full_text_without_returning_details(session: Session) -> None:
+def test_operation_summaries_search_full_text_without_returning_details(client: TestClient) -> None:
     body = "evidence " * 10000 + "Straße needle"
-    session.add(OperationLog(
-        command="inspect", output=body, comments="private comment",
-        description="private description", engagement_id=TEST_ENGAGEMENT_ID,
+    _assert_outcome(_create_operation(
+        client,
+        command="inspect",
+        data={"output": body, "comments": "private comment", "description": "private description"},
     ))
-    session.commit()
 
-    statements = []
-
-    def record_sql(connection, cursor, statement, parameters, context, executemany) -> None:
-        statements.append(statement)
-
-    engine = session.get_bind()
-    event.listen(engine, "before_cursor_execute", record_sql)
-    try:
-        rows = operation_logs(session, "STRASSE NEEDLE", engagement_id=TEST_ENGAGEMENT_ID)
-    finally:
-        event.remove(engine, "before_cursor_execute", record_sql)
-    projections = [statement.split("FROM", 1)[0].lower() for statement in statements]
-    assert projections
-    assert all("operation_log.output" not in projection and "operation_log.comments" not in projection for projection in projections)
+    response = client.get(api_url("/operations" + "?" + urlencode({"q": "STRASSE NEEDLE"})))
+    assert response.status_code == 200
+    rows = response.json()["operations"]
     assert len(rows) == 1
-    assert vars(rows[0]).keys() == {"id", "started_at", "destination", "tool", "command"}
-    assert rows[0].command == "inspect"
+    assert rows[0].keys() == {"id", "started_at", "destination", "tool", "command"}
+    assert rows[0]["command"] == "inspect"
 
 
 
@@ -142,7 +133,7 @@ def test_create_operation_round_trips_all_detail_fields(client: TestClient) -> N
     )
     _assert_outcome(response)
 
-    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
+    operation = client.get(api_url(f"/operations/{_only_operation_id(client)}")).json()["operation"]
     assert operation["command"] == "nmap -sV target.internal"
     assert operation["started_at"] == "2026-09-22T09:15:00"
     assert operation["ended_at"] == "2026-09-22T09:45:00"
@@ -160,7 +151,7 @@ def test_create_operation_rejects_blank_command(client: TestClient) -> None:
     response = _create_operation(client, command="  ")
     assert response.status_code == 400
     assert response.json()["detail"]
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
+    assert client.get(api_url("/operations")).json()["operations"] == []
 
 
 def test_create_operation_rejects_invalid_date_ranges(client: TestClient) -> None:
@@ -179,14 +170,15 @@ def test_create_operation_rejects_invalid_date_ranges(client: TestClient) -> Non
     )
     assert malformed.status_code == 400
     assert "started_at" in malformed.json()["detail"]
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
+    assert client.get(api_url("/operations")).json()["operations"] == []
 
 
-def test_edit_preserves_existing_attachment_without_attachment_control(client: TestClient) -> None:
+def test_put_replaces_fields_and_preserves_attachment_without_attachment_control(client: TestClient) -> None:
     before_upload = _attachment_files()
     created = _create_operation(
         client,
         command="original command",
+        data={"source": "old source", "comments": "old comments", "tags": "old"},
         attachment=("original.txt", b"original bytes", "text/plain"),
     )
     _assert_outcome(created)
@@ -195,19 +187,22 @@ def test_edit_preserves_existing_attachment_without_attachment_control(client: T
     assert len(created_files) == 1
 
     operation_id = _only_operation_id(client)
-    edited = client.post(
-        ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+    edited = client.put(
+        api_url(f"/operations/{operation_id}"),
         data={"command": "edited command", "tool": "curl"},
         follow_redirects=False,
     )
     _assert_outcome(edited)
     assert _attachment_files() == after_upload
-    download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
     assert download.status_code == 200
     assert download.content == b"original bytes"
-    operation = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]
+    operation = client.get(api_url("/operations")).json()["operations"][0]
     assert operation["command"] == "edited command"
     assert operation["tool"] == "curl"
+    detail = client.get(api_url(f"/operations/{operation_id}")).json()["operation"]
+    assert detail["source"] == detail["comments"] == ""
+    assert detail["tags"] == []
 
 
 def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: TestClient) -> None:
@@ -220,16 +215,18 @@ def test_uploaded_attachment_downloads_with_original_name_and_bytes(client: Test
     _assert_outcome(response)
     after = _attachment_files()
     assert len(after - before) == 1
-    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
+    operation = client.get(api_url(f"/operations/{_only_operation_id(client)}")).json()["operation"]
     assert operation["attachment_name"] == "evidence notes.txt"
-    assert {"attachment_path", "engagement_id"}.isdisjoint(operation)
+    assert {"attachment_path", "attachment_media_type", "engagement_id"}.isdisjoint(operation)
 
     operation_id = _only_operation_id(client)
-    download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
     assert download.status_code == 200
     assert download.content == b"evidence\nbytes"
     assert "filename*=utf-8''evidence%20notes.txt" in download.headers["content-disposition"]
-    assert download.headers["content-type"].startswith("text/plain")
+    assert download.headers["content-type"] == "application/octet-stream"
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert download.headers["x-content-type-options"] == "nosniff"
 
 
 def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None:
@@ -246,8 +243,8 @@ def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None
     operation_id = _only_operation_id(client)
 
     before_replace = _attachment_files()
-    replaced = client.post(
-        ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+    replaced = client.put(
+        api_url(f"/operations/{operation_id}"),
         data={"command": "attach replaced"},
         files={"attachment": ("new.txt", b"new", "text/plain")},
         follow_redirects=False,
@@ -258,31 +255,31 @@ def test_attachment_replacement_conflict_and_removal(client: TestClient) -> None
     assert len(new_files) == 1
     new_file = next(iter(new_files))
     assert old_file not in after_replace
-    download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
     assert download.content == b"new"
     assert 'filename="new.txt"' in download.headers["content-disposition"]
 
     before_conflict = _attachment_files()
-    conflict = client.post(
-        ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+    conflict = client.put(
+        api_url(f"/operations/{operation_id}"),
         data={"command": "must not change", "remove_attachment": "true"},
         files={"attachment": ("conflict.txt", b"conflict", "text/plain")},
         follow_redirects=False,
     )
     assert conflict.status_code == 400
     assert _attachment_files() == before_conflict
-    assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").content == b"new"
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]["command"] == "attach replaced"
+    assert client.get(api_url(f"/operations/{operation_id}/attachment")).content == b"new"
+    assert client.get(api_url("/operations")).json()["operations"][0]["command"] == "attach replaced"
 
     before_remove = _attachment_files()
-    removed = client.post(
-        ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+    removed = client.put(
+        api_url(f"/operations/{operation_id}"),
         data={"command": "attachment removed", "remove_attachment": "true"},
         follow_redirects=False,
     )
     _assert_outcome(removed)
     assert _attachment_files() == before_remove - {new_file}
-    assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").status_code == 404
+    assert client.get(api_url(f"/operations/{operation_id}/attachment")).status_code == 404
 
 
 def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None:
@@ -299,18 +296,18 @@ def test_delete_operation_removes_row_and_attachment(client: TestClient) -> None
     operation_id = _only_operation_id(client)
 
     before_delete = _attachment_files()
-    deleted = client.post(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/delete", follow_redirects=False)
+    deleted = client.delete(api_url(f"/operations/{operation_id}"), follow_redirects=False)
     _assert_outcome(deleted)
     assert _attachment_files() == before_delete - {created_file}
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
-    assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").status_code == 404
+    assert client.get(api_url("/operations")).json()["operations"] == []
+    assert client.get(api_url(f"/operations/{operation_id}/attachment")).status_code == 404
 
 
 def test_missing_operation_ids_return_404(client: TestClient) -> None:
-    assert client.get(ENGAGEMENT_PREFIX + "/operations/999999").status_code == 404
-    assert client.post(ENGAGEMENT_PREFIX + "/operations/999999/edit", data={"command": "missing"}).status_code == 404
-    assert client.post(ENGAGEMENT_PREFIX + "/operations/999999/delete").status_code == 404
-    assert client.get(ENGAGEMENT_PREFIX + "/operations/999999/attachment").status_code == 404
+    assert client.get(api_url("/operations/999999")).status_code == 404
+    assert client.put(api_url("/operations/999999"), data={"command": "missing"}).status_code == 404
+    assert client.delete(api_url("/operations/999999")).status_code == 404
+    assert client.get(api_url("/operations/999999/attachment")).status_code == 404
 
 
 def test_search_and_pagination_retain_state_and_expected_rows(client: TestClient) -> None:
@@ -322,12 +319,12 @@ def test_search_and_pagination_retain_state_and_expected_rows(client: TestClient
         data={"source": "NeedleHost"},
     ))
 
-    search = client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "needlehost", "per": "10", "page": "1"}).json()
+    search = client.get(api_url("/operations" + "?" + urlencode({"q": "needlehost", "per": "10", "page": "1"}))).json()
     assert [row["command"] for row in search["operations"]] == ["endpoint result"]
     assert search["q"] == "needlehost"
     assert search["total"] == 1
 
-    first = client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "batch", "per": "10", "page": "1"}).json()
+    first = client.get(api_url("/operations" + "?" + urlencode({"q": "batch", "per": "10", "page": "1"}))).json()
     assert [row["command"] for row in first["operations"]] == [
         f"batch {index:02d}" for index in range(10, 0, -1)
     ]
@@ -337,7 +334,7 @@ def test_search_and_pagination_retain_state_and_expected_rows(client: TestClient
     assert first["per"] == "10"
     assert first["total"] == 11
 
-    second = client.get(ENGAGEMENT_PREFIX + "/operations", params={"q": "batch", "per": "10", "page": "2"}).json()
+    second = client.get(api_url("/operations" + "?" + urlencode({"q": "batch", "per": "10", "page": "2"}))).json()
     assert [row["command"] for row in second["operations"]] == ["batch 00"]
     assert second["page"] == 2
     assert second["per"] == "10"
@@ -348,12 +345,18 @@ def test_failed_attachment_write_and_commit_leave_no_new_file(
 ) -> None:
     before_write = _attachment_files()
 
-    def fail_copy(source, target) -> None:
-        target.write(b"partial")
-        raise OSError("simulated write failure")
+    original_open = Path.open
+
+    @contextmanager
+    def fail_write(path, mode="r", *args, **kwargs):
+        with original_open(path, mode, *args, **kwargs) as target:
+            if mode == "xb":
+                target.write(b"partial")
+                raise OSError("simulated write failure")
+            yield target
 
     with monkeypatch.context() as patch:
-        patch.setattr(shutil, "copyfileobj", fail_copy)
+        patch.setattr(operations.Path, "open", fail_write)
         with pytest.raises(OSError, match="simulated write failure"):
             _create_operation(
                 client,
@@ -384,7 +387,7 @@ def test_operation_mixed_timezone_inputs_return_validation_error(client: TestCli
     })
     assert response.status_code == 400
     assert "timezone" in response.json()["detail"].lower()
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"] == []
+    assert client.get(api_url("/operations")).json()["operations"] == []
 
 
 def test_operation_aware_dates_are_normalized_before_storage(client: TestClient) -> None:
@@ -392,7 +395,7 @@ def test_operation_aware_dates_are_normalized_before_storage(client: TestClient)
         "started_at": "2026-09-22T10:00+02:00", "ended_at": "2026-09-22T08:30Z",
     })
     _assert_outcome(response)
-    operation = client.get(ENGAGEMENT_PREFIX + f"/operations/{_only_operation_id(client)}").json()["operation"]
+    operation = client.get(api_url(f"/operations/{_only_operation_id(client)}")).json()["operation"]
     assert operation["started_at"] == "2026-09-22T08:00:00"
     assert operation["ended_at"] == "2026-09-22T08:30:00"
 
@@ -414,10 +417,10 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
 
     monkeypatch.setattr(Path, "unlink", deny_old_unlink)
     if action == "delete":
-        response = client.post(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/delete", follow_redirects=False)
+        response = client.delete(api_url(f"/operations/{operation_id}"), follow_redirects=False)
     else:
-        response = client.post(
-            ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+        response = client.put(
+            api_url(f"/operations/{operation_id}"),
             data={"command": "committed", "remove_attachment": str(action == "remove").lower()},
             files={"attachment": ("new.txt", b"new", "text/plain")} if action == "replace" else None,
             follow_redirects=False,
@@ -425,17 +428,17 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
     assert response.status_code == 200
     assert response.json()["committed"] is True
     assert response.json()["cleanup_pending"] is True
-    assert response.json()["redirect_to"] == ENGAGEMENT_PREFIX + "/operations"
+    assert response.json()["redirect_to"] == f"/e/{TEST_ENGAGEMENT_ID}/operations"
     assert response.json()["detail"]
     assert set(response.json()) == {"ok", "committed", "cleanup_pending", "detail", "redirect_to"}
     assert "location" not in response.headers
     assert old_file.is_file()
-    operations = client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"]
+    operations = client.get(api_url("/operations")).json()["operations"]
     if action == "delete":
         assert operations == []
     else:
         assert operations[0]["command"] == "committed"
-        download = client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment")
+        download = client.get(api_url(f"/operations/{operation_id}/attachment"))
         assert download.content == b"new" if action == "replace" else download.status_code == 404
 
 
@@ -452,11 +455,121 @@ def test_failed_attachment_replacement_keeps_old_metadata_and_file(
     with monkeypatch.context() as patch:
         patch.setattr(Session, "commit", fail_commit)
         with pytest.raises(RuntimeError, match="replacement commit failed"):
-            client.post(
-                ENGAGEMENT_PREFIX + f"/operations/{operation_id}/edit",
+            client.put(
+                api_url(f"/operations/{operation_id}"),
                 data={"command": "discard"},
                 files={"attachment": ("new.txt", b"new", "text/plain")},
             )
     assert _attachment_files() == before
-    assert client.get(ENGAGEMENT_PREFIX + "/operations").json()["operations"][0]["command"] == "original"
-    assert client.get(ENGAGEMENT_PREFIX + f"/operations/{operation_id}/attachment").content == b"old"
+    assert client.get(api_url("/operations")).json()["operations"][0]["command"] == "original"
+    assert client.get(api_url(f"/operations/{operation_id}/attachment")).content == b"old"
+
+
+def test_operation_reads_are_json_even_when_html_is_requested(client: TestClient) -> None:
+    _assert_outcome(_create_operation(client, command="enumerate"))
+    response = client.get(api_url("/operations"), headers={"Accept": "text/html"})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
+    assert response.json()["operations"][0]["command"] == "enumerate"
+
+
+def test_html_attachment_download_is_inert(client: TestClient) -> None:
+    payload = b"<script>document.location='https://example.invalid'</script>"
+    _assert_outcome(_create_operation(
+        client, attachment=("evidence.html", payload, "text/html"),
+    ))
+    download = client.get(api_url(f"/operations/{_only_operation_id(client)}/attachment"))
+    assert download.status_code == 200
+    assert download.content == payload
+    assert download.headers["content-type"] == "application/octet-stream"
+    assert download.headers["content-disposition"] == 'attachment; filename="evidence.html"'
+    assert download.headers["x-content-type-options"] == "nosniff"
+
+
+def test_oversized_attachment_rolls_back_and_removes_partial_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operations, "MAX_UPLOAD_BYTES", 64 * 1024 + 1)
+    before = _attachment_files()
+    response = _create_operation(
+        client, attachment=("too-large.bin", b"x" * (64 * 1024 + 2), "application/octet-stream"),
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"]
+    assert _attachment_files() == before
+    assert client.get(api_url("/operations")).json()["operations"] == []
+
+
+def test_attachment_at_size_limit_is_accepted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operations, "MAX_UPLOAD_BYTES", 64 * 1024 + 1)
+    payload = b"x" * (64 * 1024 + 1)
+    _assert_outcome(_create_operation(
+        client, attachment=("at-limit.bin", payload, "application/octet-stream"),
+    ))
+    download = client.get(api_url(f"/operations/{_only_operation_id(client)}/attachment"))
+    assert download.status_code == 200
+    assert download.content == payload
+
+
+def test_oversized_replacement_preserves_original_operation_and_attachment(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_outcome(_create_operation(
+        client, command="original", attachment=("original.txt", b"original", "text/plain"),
+    ))
+    operation_id = _only_operation_id(client)
+    before = _attachment_files()
+    monkeypatch.setattr(operations, "MAX_UPLOAD_BYTES", 64 * 1024 + 1)
+    response = client.put(
+        api_url(f"/operations/{operation_id}"),
+        data={"command": "must roll back"},
+        files={"attachment": ("oversized.bin", b"x" * (64 * 1024 + 2), "application/octet-stream")},
+    )
+    assert response.status_code == 413
+    assert _attachment_files() == before
+    detail = client.get(api_url(f"/operations/{operation_id}")).json()["operation"]
+    assert detail["command"] == "original"
+    assert detail["attachment_name"] == "original.txt"
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
+    assert download.content == b"original"
+
+
+def test_operation_openapi_describes_projections_mutations_and_binary_download(client: TestClient) -> None:
+    document = client.get("/openapi.json").json()
+    schemas = document["components"]["schemas"]
+    assert set(schemas["OperationSummary"]["properties"]) == {
+        "id", "started_at", "destination", "tool", "command",
+    }
+    assert set(schemas["OperationDetail"]["properties"]) == {
+        "id", "started_at", "ended_at", "source", "destination", "tool", "user_context",
+        "command", "output", "description", "comments", "tags", "attachment_name",
+        "created_at", "updated_at",
+    }
+    assert schemas["OperationsPage"]["properties"]["operations"]["items"]["$ref"] == (
+        "#/components/schemas/OperationSummary"
+    )
+    assert schemas["OperationDetailResponse"]["properties"]["operation"]["$ref"] == (
+        "#/components/schemas/OperationDetail"
+    )
+    base = "/api"
+    paths = document["paths"]
+    for path, methods in paths.items():
+        if not path.startswith(base + "/operations"):
+            continue
+        assert "{engagement_id}" not in path
+        for operation in methods.values():
+            engagement = next(parameter for parameter in operation["parameters"] if parameter["name"] == "engagement_id")
+            assert engagement["in"] == "query"
+            assert engagement["required"] is True
+    for suffix in ("/operations",):
+        response = paths[base + suffix]["get"]["responses"]["200"]
+        assert response["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/OperationsPage"
+    for suffix, method in (("/operations", "post"), ("/operations/{operation_id}", "put"), ("/operations/{operation_id}", "delete")):
+        response = paths[base + suffix][method]["responses"]["200"]
+        assert response["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/MutationResponse"
+    download = paths[base + "/operations/{operation_id}/attachment"]["get"]["responses"]["200"]
+    assert download["content"] == {
+        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+    }

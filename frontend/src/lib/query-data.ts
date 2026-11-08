@@ -17,10 +17,10 @@ export function queryResources(target: URL, previous: URL): { urls: string[]; pa
   if (!scope) return { urls: [target.pathname + target.search], partial: false };
   const [, prefix, path] = scope;
   if (path === "/") {
-    return { urls: [resourceURL(`${prefix}/data/hosts`, target.searchParams, inventoryKeys)], partial: true };
+    return { urls: [resourceURL(`${prefix}/hosts`, target.searchParams, inventoryKeys)], partial: true };
   }
   if (path === "/operations") {
-    return { urls: [resourceURL(`${prefix}/data/operations`, target.searchParams, ["q", "page", "per"])], partial: true };
+    return { urls: [resourceURL(`${prefix}/operations`, target.searchParams, ["q", "page", "per"])], partial: true };
   }
   if (/^\/hosts\/\d+$/.test(path)) {
     const changed = new Set([...target.searchParams.keys(), ...previous.searchParams.keys()]
@@ -32,10 +32,10 @@ export function queryResources(target: URL, previous: URL): { urls: string[]; pa
     const servicesChanged = serviceKeys.some((key) => changed.has(key));
     const urls: string[] = [];
     if (servicesChanged || (!timelineChanged && target.hash !== "#timeline")) {
-      urls.push(resourceURL(`${prefix}/data${path}/services`, target.searchParams, serviceKeys));
+      urls.push(resourceURL(`${prefix}${path}/services`, target.searchParams, serviceKeys));
     }
     if (timelineChanged || (!servicesChanged && target.hash === "#timeline")) {
-      urls.push(resourceURL(`${prefix}/data${path}/timeline`, target.searchParams, timelineKeys));
+      urls.push(resourceURL(`${prefix}${path}/timeline`, target.searchParams, timelineKeys));
     }
     return { urls, partial: true };
   }

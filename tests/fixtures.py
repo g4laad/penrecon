@@ -1,9 +1,16 @@
 """Minimal nmap XML fixtures for tests."""
 
 from __future__ import annotations
+from urllib.parse import parse_qsl, urlencode, urlsplit
+
 
 TEST_ENGAGEMENT_ID = "9fe3f60e-3a87-43cf-8f2a-4b6b016e42a1"
-ENGAGEMENT_PREFIX = f"/e/{TEST_ENGAGEMENT_ID}"
+
+
+def api_url(path: str, engagement_id: str = TEST_ENGAGEMENT_ID) -> str:
+    parts = urlsplit(path)
+    query = [*parse_qsl(parts.query, keep_blank_values=True), ("engagement_id", engagement_id)]
+    return "/api" + parts.path + "?" + urlencode(query)
 
 
 def _host(ip: str, ports: str, hostname: str = "a.example") -> str:

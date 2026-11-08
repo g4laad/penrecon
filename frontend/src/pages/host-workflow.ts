@@ -73,23 +73,23 @@ export type HostCommand =
   | { type: "delete-note"; noteId: number; label: string }
   | { type: "save-linked-credential" | "delete-linked-credential-everywhere"; credentialId: number };
 
-type HostCommandDescription = { action: string; confirm?: string };
+type HostCommandDescription = { action: string; method: "POST" | "PUT" | "PATCH" | "DELETE"; confirm?: string };
 
 export function describeHostCommand(command: HostCommand): HostCommandDescription {
   switch (command.type) {
-    case "save-service-overrides": return { action: `/services/${command.serviceId}/edit` };
-    case "reset-service-overrides": return { action: `/services/${command.serviceId}/edit`, confirm: "Reset all saved manual service values to the latest scan? Saved triage status and tags will be kept. Unsaved edits in this dialog will not be applied." };
-    case "delete-service": return { action: `/services/${command.serviceId}/delete`, confirm: `Delete ${command.label} and its associated data? A future scan that sees it will re-add it.` };
-    case "create-or-update-service": return { action: `/hosts/${command.hostId}/services` };
-    case "rename-host": return { action: `/hosts/${command.hostId}/edit` };
-    case "add-hostname": return { action: `/hosts/${command.hostId}/hostnames` };
-    case "hide-hostname": return { action: `/hosts/${command.hostId}/hostnames/${command.hostnameId}/delete`, confirm: `Remove hostname ${command.label} from this host? It will stay hidden on future scans.` };
-    case "delete-host": return { action: `/hosts/${command.hostId}/delete`, confirm: `Permanently delete host ${command.label} and all its services and notes? This cannot be undone.` };
-    case "save-host-triage": return { action: "/annotation" };
-    case "create-note": return { action: "/notes" };
-    case "save-note": return { action: `/notes/${command.noteId}/edit` };
-    case "delete-note": return { action: `/notes/${command.noteId}/delete`, confirm: `Delete note “${command.label}”? This cannot be undone.` };
-    case "save-linked-credential": return { action: `/credentials/${command.credentialId}/edit` };
-    case "delete-linked-credential-everywhere": return { action: `/credentials/${command.credentialId}/delete`, confirm: "Delete this credential and all its host and service links? This cannot be undone." };
+    case "save-service-overrides": return { action: `/services/${command.serviceId}`, method: "PUT" };
+    case "reset-service-overrides": return { action: `/services/${command.serviceId}`, method: "PUT", confirm: "Reset all saved manual service values to the latest scan? Saved triage status and tags will be kept. Unsaved edits in this dialog will not be applied." };
+    case "delete-service": return { action: `/services/${command.serviceId}`, method: "DELETE", confirm: `Delete ${command.label} and its associated data? A future scan that sees it will re-add it.` };
+    case "create-or-update-service": return { action: `/hosts/${command.hostId}/services`, method: "POST" };
+    case "rename-host": return { action: `/hosts/${command.hostId}`, method: "PATCH" };
+    case "add-hostname": return { action: `/hosts/${command.hostId}/hostnames`, method: "POST" };
+    case "hide-hostname": return { action: `/hosts/${command.hostId}/hostnames/${command.hostnameId}`, method: "DELETE", confirm: `Remove hostname ${command.label} from this host? It will stay hidden on future scans.` };
+    case "delete-host": return { action: `/hosts/${command.hostId}`, method: "DELETE", confirm: `Permanently delete host ${command.label} and all its services and notes? This cannot be undone.` };
+    case "save-host-triage": return { action: "/annotation", method: "PUT" };
+    case "create-note": return { action: "/notes", method: "POST" };
+    case "save-note": return { action: `/notes/${command.noteId}`, method: "PUT" };
+    case "delete-note": return { action: `/notes/${command.noteId}`, method: "DELETE", confirm: `Delete note “${command.label}”? This cannot be undone.` };
+    case "save-linked-credential": return { action: `/credentials/${command.credentialId}`, method: "PUT" };
+    case "delete-linked-credential-everywhere": return { action: `/credentials/${command.credentialId}`, method: "DELETE", confirm: "Delete this credential and all its host and service links? This cannot be undone." };
   }
 }

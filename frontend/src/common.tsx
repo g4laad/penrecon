@@ -28,6 +28,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import type { PageData } from "./types";
+import { apiUrl } from "./lib/api";
 
 /** Scope domain URLs to this tab's explicit engagement URL, never global state. */
 export function engagementUrl(url: string): string {
@@ -39,7 +40,8 @@ export function engagementUrl(url: string): string {
 }
 
 export function ScopedLink({ href, ...props }: ComponentProps<"a">) {
-  return <a {...props} href={href === undefined ? undefined : engagementUrl(href)} />;
+  const scoped = href === undefined ? undefined : engagementUrl(href);
+  return <a {...props} href={scoped !== undefined && props.download !== undefined ? apiUrl(scoped) : scoped} />;
 }
 
 export const PageContext = createContext<{
@@ -270,6 +272,7 @@ const saveRecoveryMessage =
 
 export function MutationForm({
   action,
+  method = "POST",
   children,
   confirm: confirmation,
   className = "stack",
@@ -277,6 +280,7 @@ export function MutationForm({
   canSubmit = true,
 }: {
   action: string;
+  method?: "POST" | "PUT" | "PATCH" | "DELETE";
   children: ReactNode;
   confirm?: string;
   className?: string;
@@ -310,7 +314,7 @@ export function MutationForm({
       setState({ phase: "saved" });
       modal?.close();
     } catch {
-      // The POST already succeeded. Recovery must never submit it again.
+      // The mutation already succeeded. Recovery must never submit it again.
       setState({ phase: "committed-refresh-failed", outcome });
     }
   }
@@ -337,7 +341,7 @@ export function MutationForm({
   return (
     <form
       ref={formRef}
-      action={engagementUrl(action)}
+      action={apiUrl(engagementUrl(action))}
       method="post"
       encType={encType}
       className={className}
@@ -357,14 +361,14 @@ export function MutationForm({
         try {
           let response: Response;
           try {
-            response = await fetch(engagementUrl(action), {
-              method: "POST",
+            response = await fetch(apiUrl(engagementUrl(action)), {
+              method,
               redirect: "error",
               // URL encoding preserves exact Markdown newlines.
               body: encType === "application/x-www-form-urlencoded"
                 ? new URLSearchParams(Array.from(body, ([key, value]) => [key, String(value)]))
                 : body,
-              headers: { Accept: "application/json" },
+              headers: { Accept: "application/json", "X-Penrecon-Request": "1" },
             });
           } catch {
             setState({ phase: "unconfirmed", message: saveRecoveryMessage });

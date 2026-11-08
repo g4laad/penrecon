@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { engagementUrl } from "../common";
+import { apiUrl } from "../lib/api";
 
 type DetailState<T> = {
   url: string;
@@ -23,7 +24,7 @@ export function SelectedDetail<T>({ url, revision, label, children }: {
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(engagementUrl(url), {
+        const response = await fetch(apiUrl(engagementUrl(url)), {
           headers: { Accept: "application/json" },
           cache: "no-store",
           signal: controller.signal,

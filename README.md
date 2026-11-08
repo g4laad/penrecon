@@ -21,8 +21,9 @@ Data (SQLite db + attachments) lives under `./data` — override with
 `PENRECON_DATA=/path`.
 
 Open `/engagements` to create or select an engagement. The header selector switches
-to the selected engagement's host inventory. Every domain URL starts with
-`/e/<uuid>/`; separate tabs can work on different engagements independently.
+to the selected engagement's host inventory. Browser workspace URLs start with
+`/e/<uuid>/`; API requests use `?engagement_id=<uuid>` instead. Separate tabs can
+work on different engagements independently.
 Upload files from the selected engagement's Scans page. Use the sidebar's
 Scans and Scan diff entries to switch between import history and comparisons.
 
@@ -32,7 +33,7 @@ The URL tracks the current page, including browser Back and Forward navigation.
 One shared SQLite database stores all engagements. Hosts, hostnames, services,
 scans, notes, triage, credentials, and operations are engagement-owned; the same
 IP or hostname can exist independently in multiple engagements. Search, exports,
-and scan comparisons are restricted to the engagement in the URL. Composite
+and scan comparisons are restricted to the engagement selected in the request. Composite
 foreign keys reject relationships between engagements.
 
 Retained files live under `data/engagements/<uuid>/scans/` and
@@ -306,7 +307,7 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
 
 - **Mutation outcomes:** forms distinguish rejected input, an unconfirmed save,
   confirmed save/reconciliation, and a confirmed save whose view refresh failed.
-  Confirmed-save recovery only refreshes the view; it never repeats the POST.
+  Confirmed-save recovery only refreshes the view; it never repeats the mutation.
   Unconfirmed requests keep the draft locked until you check current data or
   explicitly return to editing, because the earlier request may have committed.
 - **Drafts:** editing modals protect unsaved changes by default, including
@@ -409,28 +410,102 @@ smoke-tests its CLI.
 React source lives in `frontend/src`. Shared components are shadcn/ui's
 `base-nova` style, backed by `@base-ui/react`, with Tailwind CSS 4 and Lucide
 icons. Add components with `npx shadcn@latest add <component> -c frontend`.
-Page URLs return the React shell with initial page data and a slim navigation
-bootstrap. With `Accept: application/json`, they return only page context, without
-the engagement catalog or current-engagement identity. Mutations retain their form endpoints. Successful
-JSON mutations return only `{"ok": true}`, plus `redirect_to` when a destination
-is needed; they never issue HTTP redirects or return refreshed page collections.
-The frontend refreshes the current URL once for same-page outcomes, preserving
-filters and pagination, or navigates once for a different destination. HTML form
-submissions retain redirects where applicable. Attachment cleanup failures retain
-their committed-success notice; retrying a failed refresh never repeats the POST.
-Engagement ownership validation loads only the requested engagement. HTML
-bootstrap and `GET /e/{engagement_id}/bootstrap` load the workspace selector as
-ID/name pairs; the engagements page separately returns full records in `catalog`.
-Table, timeline, selector, mutation, export, and download responses do not load
-the navigation catalog.
-Scoped JSON reads use these resource URLs:
+Browser URLs return only the React shell and a slim ID/name navigation bootstrap.
+This navigation data is embedded only in HTML; there is no `/api/bootstrap`
+endpoint. API clients can list engagements through `GET /api/engagements`.
+Domain reads and mutations live exclusively under `/api`, independently of
+`Accept`; the old browser URLs no longer accept mutations or return JSON.
+The frontend loads initial data from the API, then refreshes affected resources.
+Successful mutations return `{"ok": true}`, plus a **document** `redirect_to`
+when navigation is needed. No API mutation issues an HTTP redirect. A failed
+refresh never repeats an already committed mutation; attachment cleanup failures
+retain their committed-success notice.
 
-| URL below `/e/{engagement_id}` | Response |
+Scoped endpoints take the required `engagement_id` **query parameter**, never a
+path segment: `/api/hosts/12?engagement_id=UUID`. Missing or empty scope returns
+422; an unknown engagement returns 404. The query selects the scope for reads,
+mutations, and downloads; body fields cannot override it. Engagement metadata
+edits use `PUT /api/engagements?engagement_id=UUID`; catalog listing and
+creation remain unscoped. Browser navigation keeps `/e/UUID/...` URLs so each tab
+retains its own engagement. Old `/api/e/...` and redundant `/api/data/...`
+endpoints are removed, not aliased.
+
+### Mutation methods
+
+`POST` creates resources or imports scans. `PUT` replaces the complete editable
+record: omitted optional form fields reset to their documented defaults, rather
+than retaining old values. Immutable evidence, identities, and separately linked
+resources are not replaced. `PATCH` changes only the specified part; `DELETE`
+removes a resource or association. The HTTP verb is `PATCH`, not `PATH`.
+Action suffixes (`/edit`, `/delete`, `/link`, `/unlink`) are no longer API routes.
+
+| Method | API resource | Behavior |
+| --- | --- | --- |
+| `PUT` | `/engagements` | Replace name and description |
+| `PUT` | `/services/{id}` | Replace all editable overrides, status, and tags; blank overrides restore scan values |
+| `PUT` | `/credentials/{id}` | Replace kind, username, secret, and notes; links are separate resources |
+| `PUT` | `/notes/{id}` | Replace title and Markdown body |
+| `PUT` | `/operations/{id}` | Replace editable log fields; attachment uses explicit keep/replace/remove intent |
+| `PUT` | `/annotation` | Replace host status and tags; `host_id` identifies the annotation |
+| `PATCH` | `/hosts/{id}` | Rename the IP without changing notes, services, or triage |
+| `PATCH` | `/credentials/{id}/hosts`, `/credentials/{id}/services` | Add the selected association without replacing existing links |
+| `DELETE` | `/hosts/{id}`, `/services/{id}`, `/credentials/{id}`, `/notes/{id}`, `/operations/{id}` | Delete the selected resource |
+| `DELETE` | `/hosts/{id}/hostnames/{hostname_id}` | Hide this host's hostname association |
+| `DELETE` | `/credentials/{id}/hosts/{host_id}`, `/credentials/{id}/services/{service_id}` | Remove the selected association |
+
+All rows require the `engagement_id` query parameter and mutation request header.
+
+### OpenAPI and local security
+
+`GET /openapi.json` describes the complete API, including nested response models,
+form inputs, validation/domain errors, upload fields, and download media types.
+Swagger UI is at `/docs` and ReDoc at `/redoc` (their UI assets require internet
+access). In Swagger's Authorize dialog, set `LocalRequest` to `1`.
+
+Keep the server on loopback. This remains a single-user local application, **not
+an authenticated multi-user or network service**. The custom request header is
+browser request protection, not a password. Exposing the server requires an
+authenticating reverse proxy and an explicit deployment/security review.
+
+- Accepted Host names: `localhost`, `127.0.0.1`, `[::1]`; `testserver` is reserved
+  for the test client. Arbitrary DNS names are rejected to resist DNS rebinding.
+- All mutations require `X-Penrecon-Request: 1`. Browser cross-origin API requests
+  are rejected; no permissive CORS policy is installed. CLI clients may omit Origin.
+- Every resource lookup and association validates engagement ownership; foreign
+  IDs return 404. Import never changes operator notes, triage, or credentials.
+- API and HTML responses use `Cache-Control: no-store`; validation errors omit
+  raw inputs. Downloaded attachments are inert `application/octet-stream` with
+  attachment disposition and `nosniff`; stored paths never leave the API.
+- Uploads are limited to 32 MiB each and total bodies to 33 MiB, including
+  chunked requests before form parsing. Attachment transactions retain rollback
+  cleanup and never report an already committed edit as an uncommitted failure.
+
+Inputs intentionally remain standard URL-encoded forms, or multipart forms for
+uploads. This keeps the existing human-readable contract without custom request
+decoding. For example:
+
+```sh
+curl -H 'X-Penrecon-Request: 1' -d 'name=Example' \
+  http://127.0.0.1:8000/api/engagements
+curl -H 'X-Penrecon-Request: 1' -F 'tool=nmap' -F 'file=@scan.xml' \
+  'http://127.0.0.1:8000/api/scans?engagement_id=ENGAGEMENT_ID'
+```
+
+The API composition and error policy live in `web/app.py`; shared contracts and
+engagement validation in `web/common.py`; HTTP protections in `web/security.py`.
+Domain routers are `web/engagements.py`, `web/inventory.py`,
+`web/credentials.py`, `web/evidence.py`, and `web/operations.py`.
+`web/pages.py` owns only HTML delivery. Persistence and domain transitions stay
+in the existing query, command, ingestion, and history modules.
+Scoped JSON reads use these resource URLs; append `engagement_id=UUID` to every
+request (alongside any filter or pagination parameters):
+
+| URL below `/api` | Response |
 | --- | --- |
-| `/data/hosts` | Inventory rows, counts, pagination, filters, and sort state |
-| `/data/hosts/{host_id}/services` | Service rows and service-table state |
-| `/data/hosts/{host_id}/timeline` | Host timeline only |
-| `/data/operations` | Paginated operation summaries and query state |
+| `/hosts` | Inventory rows, counts, pagination, filters, sort state, and statuses |
+| `/hosts/{host_id}/services` | Service rows and service-table state |
+| `/hosts/{host_id}/timeline` | Host timeline only |
+| `/operations` | Paginated operation summaries and query state |
 | `/credentials?filter=…&kind=…&scope=…` | Credential summaries, total count, and filter state |
 | `/credentials/{cred_id}` | Selected credential, including secret, full notes, and association pickers |
 | `/operations/{operation_id}` | Selected operation, including output, comments, and attachment metadata |
@@ -444,9 +519,9 @@ Query navigation keeps document URLs in browser history and merges resource
 responses into existing state, preserving unrelated host sections and navigation.
 Back/Forward restores the affected sections; failed requests retain the previous
 view and offer Retry. Mutation refreshes still reload full page context once.
-Inventory HTML defers rows until the browser measures its viewport, avoiding a
-discarded initial table query. Credential selectors load host options separately
-and service options only for selected hosts, with cancellation and retry.
+HTML contains no inventory rows, notes, or secrets; initial API loading precedes
+page rendering. Credential selectors load host options separately and service
+options only for selected hosts, with cancellation and retry.
 Page-data responses project only consumer-facing fields: storage paths,
 engagement ownership columns, and query-only filtering metadata stay server-side.
 Row-count choices live in the frontend; responses do not include

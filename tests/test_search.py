@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tests.fixtures import TEST_ENGAGEMENT_ID, ENGAGEMENT_PREFIX
+from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
@@ -83,7 +83,7 @@ def test_hostname_and_tag_and_cred_notes(session: Session) -> None:
 def test_note_hit_links_back_to_host(session: Session) -> None:
     hid = _seed(session)
     note = search(session, "candidate", engagement_id=TEST_ENGAGEMENT_ID).notes[0]  # matched on note body
-    assert note.href == ENGAGEMENT_PREFIX + f"/hosts/{hid}"
+    assert note.href == f"/e/{TEST_ENGAGEMENT_ID}/hosts/{hid}"
     assert note.title == "Postgres"
     assert "10.0.0.5" in note.where
 

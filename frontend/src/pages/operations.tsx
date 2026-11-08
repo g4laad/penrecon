@@ -142,7 +142,8 @@ function OperationForm({ operation }: { operation?: Operation }) {
       setAttachment({ intent: "keep" });
     }}>
       <MutationForm
-        action={operation ? `/operations/${operation.id}/edit` : "/operations"}
+        action={operation ? `/operations/${operation.id}` : "/operations"}
+        method={operation ? "PUT" : "POST"}
         canSubmit={timestampComplete(started) && timestampComplete(ended)}
       >
     <div ref={fields} className="form-grid">
@@ -319,7 +320,8 @@ function OperationEditor({ operation }: { operation: Operation }) {
           Updated {operation.updated_at.replace("T", " ").slice(0, 16)}
         </p>
         <MutationForm
-          action={`/operations/${operation.id}/delete`}
+          action={`/operations/${operation.id}`}
+          method="DELETE"
           confirm={`Delete operation #${operation.id} and its attachment? This cannot be undone.`}
         >
           <Button type="submit" variant="destructive">

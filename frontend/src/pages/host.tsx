@@ -47,12 +47,13 @@ function timestamp(value: string) {
 function HostActionForm({
   command,
   ...props
-}: Omit<ComponentProps<typeof MutationForm>, "action" | "confirm"> & { command: HostCommand }) {
-  const { action, confirm } = describeHostCommand(command);
+}: Omit<ComponentProps<typeof MutationForm>, "action" | "method" | "confirm"> & { command: HostCommand }) {
+  const { action, method, confirm } = describeHostCommand(command);
   return (
     <MutationForm
       {...props}
       action={action}
+      method={method}
       confirm={confirm}
     />
   );

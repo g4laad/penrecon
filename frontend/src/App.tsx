@@ -38,6 +38,7 @@ import {
 import type { HostRow, PageData } from "./types";
 import { AppShell, navigation } from "./components/app-shell";
 import { queryResources } from "./lib/query-data";
+import { apiUrl } from "./lib/api";
 
 const HostPage = lazy(() =>
   import("./pages/host").then((module) => ({ default: module.HostPage })),
@@ -491,7 +492,7 @@ function EngagementsPage({ data }: { data: PageData }) {
                       <Pencil />
                     </Button>
                   }>
-                    <MutationForm action={`/engagements/${engagement.id}/edit`}>
+                    <MutationForm action={`/engagements?engagement_id=${engagement.id}`} method="PUT">
                       <Field label="Name" name="name" defaultValue={engagement.name} required />
                       <Field label="Description"><Textarea name="description" defaultValue={engagement.description} rows={3} /></Field>
                       <div className="flex justify-end"><Button type="submit">Save changes</Button></div>
@@ -520,6 +521,7 @@ export default function App() {
         document.getElementById("page-data")?.textContent ?? "{}",
       ) as PageData,
   );
+  const [initialized, setInitialized] = useState(false);
   const path = location.pathname.replace(/^\/e\/[^/]+/, "") || "/";
   const queryRequest = useRef<AbortController | null>(null);
   const queryFocus = useRef<HTMLElement | null>(null);
@@ -532,7 +534,7 @@ export default function App() {
     }
     queryFocus.current = null;
   }, [data]);
-  const [query, setQuery] = useState<QueryState>({ phase: "ready" });
+  const [query, setQuery] = useState<QueryState>({ phase: "loading", url: location.href });
   const queryPending = query.phase === "loading";
   const queryError = query.phase === "failed" ? query : null;
   const [notice, setNotice] = useState<string | null>(null);
@@ -545,11 +547,11 @@ export default function App() {
     setQuery({ phase: "loading", url: target.href });
     const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     try {
-      const resources = propagateError
+      const resources = propagateError || !initialized
         ? { urls: [target.pathname + target.search], partial: false }
         : queryResources(target, new URL(loadedQuery.current, location.origin));
       const patches = await Promise.all(resources.urls.map(async (resource) => {
-        const response = await fetch(resource, {
+        const response = await fetch(apiUrl(resource), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         if (!response.ok) throw new Error(`Unable to update view (${response.status}). Try again.`);
@@ -577,7 +579,8 @@ export default function App() {
         setQuery({ phase: "ready" });
         setData((previous) => resources.partial
           ? { ...previous, ...next }
-          : { ...next, engagement: previous.engagement, engagements: previous.engagements });
+          : { ...next, engagement: next.engagement ?? previous.engagement, engagements: next.engagements ?? previous.engagements });
+        setInitialized(true);
       });
       if (new URL(oldURL).hash !== target.hash) {
         window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: target.href }));
@@ -594,14 +597,15 @@ export default function App() {
         queryRequest.current = null;
       }
     }
-  }, []);
+  }, [initialized]);
   const updateQuery = useCallback((url: string, replace = false) => {
     void loadQuery(url, !replace);
   }, [loadQuery]);
   useEffect(() => {
+    if (!initialized) void loadQuery(location.href, false);
     const syncQuery = () => {
       if (location.pathname !== pagePath.current) return;
-      if (location.pathname + location.search !== loadedQuery.current) {
+      if (!initialized || location.pathname + location.search !== loadedQuery.current) {
         void loadQuery(location.href, false);
       } else {
         queryRequest.current?.abort();
@@ -614,7 +618,7 @@ export default function App() {
       window.removeEventListener("popstate", syncQuery);
       queryRequest.current?.abort();
     };
-  }, [loadQuery]);
+  }, [initialized, loadQuery]);
   const refresh = async () => {
     // Refresh and navigation share request ownership; older responses cannot
     // overwrite a mutation's newly reconciled data.
@@ -672,6 +676,8 @@ export default function App() {
             <p>{queryError.message}</p>
             <Button type="button" variant="outline" size="sm" aria-disabled={queryPending} onClick={() => { if (!queryPending) void loadQuery(queryError.url, true); }}>Retry</Button>
           </div>}
+          {!initialized && queryPending && <p role="status" className="muted">Loading page…</p>}
+          {initialized && <>
           <WorkflowBoundary>
           <Suspense fallback={<p role="status" className="muted">Loading page…</p>}>
           {path === "/engagements" ? (
@@ -693,6 +699,7 @@ export default function App() {
           )}
           </Suspense>
           </WorkflowBoundary>
+          </>}
         </main>
       </AppShell>
     </PageContext.Provider>

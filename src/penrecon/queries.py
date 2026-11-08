@@ -445,7 +445,11 @@ def resolve_per_page(raw: str) -> int | None:
     limit); an empty/unknown/non-whitelisted value falls back to the default."""
     if raw == "all":
         return None
-    return int(raw) if raw.isdigit() and int(raw) in PER_PAGE_OPTIONS else PER_PAGE_DEFAULT
+    if len(raw) <= 10 and raw.isascii() and raw.isdecimal():
+        value = int(raw)
+        if value in PER_PAGE_OPTIONS:
+            return value
+    return PER_PAGE_DEFAULT
 
 
 def paginate(

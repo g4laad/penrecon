@@ -52,6 +52,9 @@ def client() -> Iterator[TestClient]:
             yield s
 
     app.dependency_overrides[get_session] = _override
-    with TestClient(app, headers={"Accept": "application/json"}, follow_redirects=False) as c:
+    with TestClient(
+        app, headers={"Accept": "application/json", "X-Penrecon-Request": "1"},
+        follow_redirects=False,
+    ) as c:
         yield c
     app.dependency_overrides.clear()

@@ -8,6 +8,7 @@ import { Field, MutationForm, engagementUrl } from "../common";
 import type { Host, ServiceOption } from "../types";
 import { associationReadiness, credentialDraftValidity, initialAssociations, transitionAssociations, type AssociationEvent, type CredentialTarget } from "./credential-workflow";
 import type { HostOptions } from "./credential-host-options";
+import { apiUrl } from "../lib/api";
 
 const HOSTS_PER_PAGE = 50;
 
@@ -25,7 +26,7 @@ function HostServices({ host, target, dispatch }: {
     dispatch({ type: "started", hostId: host.id, attempt, request });
     void (async () => {
       try {
-        const response = await fetch(engagementUrl(`/options/hosts/${host.id}/services`), {
+        const response = await fetch(apiUrl(engagementUrl(`/options/hosts/${host.id}/services`)), {
           headers: { Accept: "application/json" }, signal: controller.signal,
         });
         if (!response.ok) throw new Error("Unable to load services.");
