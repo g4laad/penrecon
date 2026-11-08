@@ -1,4 +1,5 @@
 """Workspace catalog and editable engagement metadata."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,18 +30,33 @@ class CatalogResponse(BaseModel):
 
 
 @router.get("/engagements", response_model=CatalogResponse)
-def catalog(sort: str = "created_at", dir: str = "", session: Session = Depends(get_session)) -> dict[str, object]:
+def catalog(
+    sort: str = "created_at", dir: str = "", session: Session = Depends(get_session)
+) -> dict[str, object]:
     sort = sort if sort in ("name", "created_at") else "created_at"
     direction = dir if dir in ("asc", "desc") else "asc" if sort == "name" else "desc"
-    order = col(Engagement.name).collate("NOCASE") if sort == "name" else col(Engagement.created_at)
-    rows = session.exec(select(Engagement).order_by(
-        order.desc() if direction == "desc" else order.asc(), col(Engagement.id).asc(),
-    )).all()
+    order = (
+        col(Engagement.name).collate("NOCASE")
+        if sort == "name"
+        else col(Engagement.created_at)
+    )
+    rows = session.exec(
+        select(Engagement).order_by(
+            order.desc() if direction == "desc" else order.asc(),
+            col(Engagement.id).asc(),
+        )
+    ).all()
     return {"catalog": rows, "sort": sort, "direction": direction}
 
 
-@router.post("/engagements", response_model=MutationResponse, response_model_exclude_unset=True)
-def create_engagement(name: str = Form(""), description: str = Form(""), session: Session = Depends(get_session)) -> JSONResponse:
+@router.post(
+    "/engagements", response_model=MutationResponse, response_model_exclude_unset=True
+)
+def create_engagement(
+    name: str = Form(""),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+) -> JSONResponse:
     clean_name = name.strip()
     if not clean_name:
         raise HTTPException(400, detail="Enter an engagement name.")
@@ -51,8 +67,15 @@ def create_engagement(name: str = Form(""), description: str = Form(""), session
     return mutation_response(f"/{engagement.id}/")
 
 
-@router.put("/engagements", response_model=MutationResponse, response_model_exclude_unset=True)
-def edit_engagement(engagement_id: str = Query(..., min_length=1), name: str = Form(""), description: str = Form(""), session: Session = Depends(get_session)) -> dict[str, bool]:
+@router.put(
+    "/engagements", response_model=MutationResponse, response_model_exclude_unset=True
+)
+def edit_engagement(
+    engagement_id: str = Query(..., min_length=1),
+    name: str = Form(""),
+    description: str = Form(""),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
     engagement = session.get(Engagement, engagement_id)
     if engagement is None:
         raise HTTPException(404, detail="engagement not found")

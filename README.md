@@ -452,9 +452,18 @@ another tool, implement its parser in a new module and register it in `PARSERS`.
 ## Dev
 
 ```sh
-uv run pytest
-uv run mypy src/penrecon
+uv sync --locked --group dev
+uv run --locked ruff check src tests
+uv run --locked ruff format --check src tests
+uv run --locked pytest
+uv run --locked mypy src/penrecon
 ```
+
+Ruff is locked in `uv.lock`, with repository-local rules in `pyproject.toml`.
+Lint checks Python errors, unused imports/variables, and import ordering.
+To apply safe lint fixes and formatting, run `uv run --locked ruff check --fix src tests`
+and `uv run --locked ruff format src tests`. Keep the narrow SQLAlchemy and
+late-import exceptions: they preserve SQL expressions and model initialization order.
 
 For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
 This watches and rebuilds the local bundle; refresh the browser after changes.
@@ -463,9 +472,10 @@ layout instead of reusing stale JavaScript or CSS.
 `npm --prefix frontend run build` checks TypeScript and produces release assets.
 
 GitHub Actions runs on pushes, pull requests, and manual dispatches. The workflow
-in `.github/workflows/ci.yml` installs locked dependencies, runs pytest and mypy,
-checks TypeScript and builds the frontend, then packages a wheel and smoke-tests
-its installed CLI. CI uses Python from `.python-version` and Node.js 22.
+in `.github/workflows/ci.yml` installs locked dependencies, checks Python lint and
+formatting, runs pytest and mypy, checks TypeScript and builds the frontend,
+then packages a wheel and smoke-tests its installed CLI. CI uses Python from
+`.python-version` and Node.js 22.
 A separate Ubuntu job builds the Nix package from the locked flake inputs and
 smoke-tests its CLI.
 

@@ -8,8 +8,8 @@ Annotations and manual overrides are never touched.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -33,9 +33,13 @@ class ScanParseError(ValueError):
     """Scan content does not match the selected tool's import format."""
 
 
-
 def _upsert_host(
-    session: Session, ip: str, now: datetime, discovery: DiscoveryIndex, *, engagement_id: str
+    session: Session,
+    ip: str,
+    now: datetime,
+    discovery: DiscoveryIndex,
+    *,
+    engagement_id: str,
 ) -> Host:
     ip = normalize_ip(ip)
     host = discovery.hosts.get(ip)
@@ -50,36 +54,61 @@ def _upsert_host(
 
 
 def _upsert_service(
-    session: Session, host_id: int, port: int, proto: str, discovery: DiscoveryIndex,
-    *, engagement_id: str,
+    session: Session,
+    host_id: int,
+    port: int,
+    proto: str,
+    discovery: DiscoveryIndex,
+    *,
+    engagement_id: str,
 ) -> None:
     key = (host_id, port, proto)
     if key not in discovery.services:
-        session.add(Service(engagement_id=engagement_id, host_id=host_id, port=port, proto=proto))
+        session.add(
+            Service(
+                engagement_id=engagement_id, host_id=host_id, port=port, proto=proto
+            )
+        )
         discovery.services.add(key)
     # The index is loaded afresh for each import, so deleted services are
     # recreated without restoring their old overrides or annotations.
 
 
 def _store_host(
-    session: Session, scan_id: int, hr: HostResult, now: datetime,
-    discovery: DiscoveryIndex, *, engagement_id: str
+    session: Session,
+    scan_id: int,
+    hr: HostResult,
+    now: datetime,
+    discovery: DiscoveryIndex,
+    *,
+    engagement_id: str,
 ) -> None:
     host = _upsert_host(session, hr.ip, now, discovery, engagement_id=engagement_id)
     assert host.id is not None
-    session.add(HostScanEvidence(
-        engagement_id=engagement_id,
-        scan_id=scan_id,
-        host_id=host.id,
-        scanned_at=hr.scanned_at,
-        coverage=hr.coverage,
-        ports=[asdict(port) for port in hr.ports],
-    ))
+    session.add(
+        HostScanEvidence(
+            engagement_id=engagement_id,
+            scan_id=scan_id,
+            host_id=host.id,
+            scanned_at=hr.scanned_at,
+            coverage=hr.coverage,
+            ports=[asdict(port) for port in hr.ports],
+        )
+    )
     for name in hr.hostnames:
         if name:
-            link_hostname(session, host.id, name, now, engagement_id=engagement_id, discovery=discovery)
+            link_hostname(
+                session,
+                host.id,
+                name,
+                now,
+                engagement_id=engagement_id,
+                discovery=discovery,
+            )
     for p in hr.ports:
-        _upsert_service(session, host.id, p.port, p.proto, discovery, engagement_id=engagement_id)
+        _upsert_service(
+            session, host.id, p.port, p.proto, discovery, engagement_id=engagement_id
+        )
         session.add(
             Observation(
                 engagement_id=engagement_id,
@@ -110,8 +139,13 @@ def _parse_scan(data: bytes, tool: str) -> ScanResult:
 
 
 def _stage_scan(
-    session: Session, result: ScanResult, filename: str, tool: str,
-    now: datetime, *, engagement_id: str,
+    session: Session,
+    result: ScanResult,
+    filename: str,
+    tool: str,
+    now: datetime,
+    *,
+    engagement_id: str,
 ) -> Scan:
     scan = Scan(
         engagement_id=engagement_id,
@@ -139,7 +173,9 @@ def _retain_raw(scan: Scan, data: bytes, destination: Path) -> None:
 
 
 def _rollback_import(
-    session: Session, destination: Path | None, error: BaseException,
+    session: Session,
+    destination: Path | None,
+    error: BaseException,
 ) -> None:
     try:
         session.rollback()
@@ -149,7 +185,9 @@ def _rollback_import(
         try:
             destination.unlink(missing_ok=True)
         except Exception as exc:
-            error.add_note(f"Uncommitted raw scan cleanup failed at {destination}: {exc}")
+            error.add_note(
+                f"Uncommitted raw scan cleanup failed at {destination}: {exc}"
+            )
 
 
 def ingest_scan(
@@ -164,11 +202,19 @@ def ingest_scan(
     destination: Path | None = None
     try:
         scan = _stage_scan(
-            session, result, filename, tool, datetime.now(UTC), engagement_id=engagement_id,
+            session,
+            result,
+            filename,
+            tool,
+            datetime.now(UTC),
+            engagement_id=engagement_id,
         )
         # Assign before writing so even a partially written file is cleaned up.
         # Only the basename of a client-supplied filename enters the retained path.
-        destination = engagement_scans_dir(engagement_id) / f"{scan.id}_{uuid4().hex}_{Path(filename).name}"
+        destination = (
+            engagement_scans_dir(engagement_id)
+            / f"{scan.id}_{uuid4().hex}_{Path(filename).name}"
+        )
         _retain_raw(scan, data, destination)
         session.commit()
     except BaseException as exc:

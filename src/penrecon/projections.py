@@ -16,11 +16,17 @@ from sqlmodel import Session, col, select
 
 from penrecon import inventory_projection, scan_projection, timeline_projection
 
-
 if TYPE_CHECKING:
     from penrecon.history import TimelineEntry
     from penrecon.models import (
-        Annotation, Host, Hostname, HostHostname, HostScanEvidence, Observation, Scan, Service,
+        Annotation,
+        Host,
+        HostHostname,
+        Hostname,
+        HostScanEvidence,
+        Observation,
+        Scan,
+        Service,
     )
 
 _PENDING = "scan_projection_pending"
@@ -32,7 +38,9 @@ _REPLAY_TARGETS = "scan_projection_targets"
 
 
 @cache
-def _evidence_types() -> tuple[type[Scan], type[Host], type[HostScanEvidence], type[Observation]]:
+def _evidence_types() -> tuple[
+    type[Scan], type[Host], type[HostScanEvidence], type[Observation]
+]:
     from penrecon.models import Host, HostScanEvidence, Observation, Scan
 
     return Scan, Host, HostScanEvidence, Observation
@@ -40,10 +48,16 @@ def _evidence_types() -> tuple[type[Scan], type[Host], type[HostScanEvidence], t
 
 @cache
 def _inventory_types() -> tuple[
-    type[Scan], type[Host], type[HostScanEvidence], type[Observation],
-    type[Annotation], type[Hostname], type[HostHostname], type[Service],
+    type[Scan],
+    type[Host],
+    type[HostScanEvidence],
+    type[Observation],
+    type[Annotation],
+    type[Hostname],
+    type[HostHostname],
+    type[Service],
 ]:
-    from penrecon.models import Annotation, Hostname, HostHostname, Service
+    from penrecon.models import Annotation, HostHostname, Hostname, Service
 
     return _evidence_types() + (Annotation, Hostname, HostHostname, Service)
 
@@ -124,7 +138,9 @@ def prepare_read(session: Session) -> None:
         replay_targets = session.info.pop(_REPLAY_TARGETS, {})
         session.info.pop("timeline_raw", None)
         for engagement_id in sorted(evidence_scopes):
-            scan_projection.rebuild_engagement(session, engagement_id, replay_targets.get(engagement_id))
+            scan_projection.rebuild_engagement(
+                session, engagement_id, replay_targets.get(engagement_id)
+            )
         session.flush()
         for engagement_id in sorted(inventory_scopes):
             inventory_projection.rebuild_inventory(session, engagement_id)
@@ -140,7 +156,8 @@ def prepare_read(session: Session) -> None:
             _timeline_pending(session).update(timeline_scopes)
             for engagement_id, scope in replay_targets.items():
                 _replay_targets(session).setdefault(
-                    engagement_id, scan_projection.ReplayScope(),
+                    engagement_id,
+                    scan_projection.ReplayScope(),
                 ).merge(scope)
         else:
             session.info.pop(_PENDING, None)
@@ -155,7 +172,12 @@ def prepare_read(session: Session) -> None:
 
 def _collect_changes(session: Session) -> None:
     from penrecon.models import (
-        Host, HostScanDelta, HostScanEvidence, ManualServiceEvent, Observation, Scan,
+        Host,
+        HostScanDelta,
+        HostScanEvidence,
+        ManualServiceEvent,
+        Observation,
+        Scan,
         ScanEvidenceComplete,
     )
 
@@ -180,12 +202,20 @@ def _collect_changes(session: Session) -> None:
                     # An expired scope can be assigned without loading its old
                     # value. Query by stable PK before flush loses that scope.
                     mapper = state.mapper
-                    previous = session.connection().execute(
-                        select(mapper.local_table.c.engagement_id).where(*(
-                            column == value
-                            for column, value in zip(mapper.primary_key, state.identity, strict=True)
-                        ))
-                    ).scalar_one_or_none()
+                    previous = (
+                        session.connection()
+                        .execute(
+                            select(mapper.local_table.c.engagement_id).where(
+                                *(
+                                    column == value
+                                    for column, value in zip(
+                                        mapper.primary_key, state.identity, strict=True
+                                    )
+                                )
+                            )
+                        )
+                        .scalar_one_or_none()
+                    )
                     if previous is not None:
                         scopes.add(previous)
                 if isinstance(row, ManualServiceEvent):
@@ -196,7 +226,8 @@ def _collect_changes(session: Session) -> None:
                     continue
                 if (
                     isinstance(row, Host)
-                    and row not in session.new and row not in session.deleted
+                    and row not in session.new
+                    and row not in session.deleted
                     and not state.attrs.ip.history.has_changes()
                     and not history.has_changes()
                 ):
@@ -205,12 +236,15 @@ def _collect_changes(session: Session) -> None:
                 evidence_scopes.update(scopes)
                 for engagement_id in scopes:
                     target = _replay_targets(session).setdefault(
-                        engagement_id, scan_projection.ReplayScope(),
+                        engagement_id,
+                        scan_projection.ReplayScope(),
                     )
                     if len(scopes) > 1 or (history.has_changes() and state.identity):
                         target.full = True
                     if isinstance(row, Host):
-                        if row in session.deleted or (state.attrs.ip.history.has_changes() and state.identity):
+                        if row in session.deleted or (
+                            state.attrs.ip.history.has_changes() and state.identity
+                        ):
                             # Renaming/deleting a legacy identity can reattribute
                             # raw evidence on another canonical sibling.
                             target.full = True
@@ -220,40 +254,58 @@ def _collect_changes(session: Session) -> None:
                             target.hosts.add(row.id)
                     elif isinstance(row, Scan):
                         target.scans[id(row)] = row
-                        if row in session.deleted and row.id is not None and row.id not in target.deleted_scans:
+                        if (
+                            row in session.deleted
+                            and row.id is not None
+                            and row.id not in target.deleted_scans
+                        ):
                             # Capture dependencies before FK cascades remove
                             # evidence and persisted deltas, even on explicit flush.
                             target.deleted_scans.add(row.id)
-                            complete = session.exec(select(ScanEvidenceComplete.scan_id).where(
-                                ScanEvidenceComplete.engagement_id == engagement_id,
-                                ScanEvidenceComplete.scan_id == row.id,
-                            )).first()
+                            complete = session.exec(
+                                select(ScanEvidenceComplete.scan_id).where(
+                                    ScanEvidenceComplete.engagement_id == engagement_id,
+                                    ScanEvidenceComplete.scan_id == row.id,
+                                )
+                            ).first()
                             if complete is None:
                                 target.full = True
                             for model in (HostScanDelta, HostScanEvidence, Observation):
-                                target.hosts.update(session.execute(
-                                    select(model.host_id).where(
-                                        model.engagement_id == engagement_id,
-                                        model.scan_id == row.id,
-                                    )
-                                ).scalars())
+                                target.hosts.update(
+                                    session.execute(
+                                        select(model.host_id).where(
+                                            model.engagement_id == engagement_id,
+                                            model.scan_id == row.id,
+                                        )
+                                    ).scalars()
+                                )
                     elif isinstance(row, (HostScanEvidence, Observation)):
                         target.hosts.add(row.host_id)
                         host_history = state.attrs.host_id.history
                         target.hosts.update(host_history.deleted)
-                        if host_history.has_changes() and state.identity and not host_history.deleted:
+                        if (
+                            host_history.has_changes()
+                            and state.identity
+                            and not host_history.deleted
+                        ):
                             target.full = True
 
 
 def latest_for_host(
-    session: Session, host_id: int, *, engagement_id: str,
+    session: Session,
+    host_id: int,
+    *,
+    engagement_id: str,
 ) -> dict[tuple[int, str], Observation]:
     from penrecon.models import HostScanState, Observation
 
     prepare_read(session)
-    row = session.execute(select(HostScanState).where(
-        HostScanState.engagement_id == engagement_id, HostScanState.host_id == host_id,
-    )).scalar_one_or_none()
+    row = session.execute(
+        select(HostScanState).where(
+            HostScanState.engagement_id == engagement_id,
+            HostScanState.host_id == host_id,
+        )
+    ).scalar_one_or_none()
     if row is None:
         return {}
     observations = [Observation.model_validate(value) for value in row.latest]
@@ -261,22 +313,31 @@ def latest_for_host(
 
 
 def scan_history(
-    session: Session, host_id: int, *, engagement_id: str,
+    session: Session,
+    host_id: int,
+    *,
+    engagement_id: str,
 ) -> tuple[list[TimelineEntry], dict[tuple[int, str], Observation]]:
     from penrecon.models import HostScanDelta
 
     latest = latest_for_host(session, host_id, engagement_id=engagement_id)
     adapter = scan_projection.timeline_adapter()
     entries = [
-        adapter.validate_python(value) for value in session.execute(
+        adapter.validate_python(value)
+        for value in session.execute(
             select(HostScanDelta.entry).where(
-                HostScanDelta.engagement_id == engagement_id, HostScanDelta.host_id == host_id,
+                HostScanDelta.engagement_id == engagement_id,
+                HostScanDelta.host_id == host_id,
             )
         ).scalars()
     ]
-    entries.sort(key=lambda entry: (
-        entry.occurred_at, entry.imported_at, entry.scan_id or 0,
-    ))
+    entries.sort(
+        key=lambda entry: (
+            entry.occurred_at,
+            entry.imported_at,
+            entry.scan_id or 0,
+        )
+    )
     return entries, latest
 
 
@@ -288,57 +349,94 @@ def backfill_missing(session: Session) -> None:
     a new table was added on startup.
     """
     from penrecon.models import (
-        CurrentService, Host, HostScanDelta, HostScanState, HostSummary, HostSummaryTag,
-        HostTimelineEntry, ManualServiceEvent, Service,
+        CurrentService,
+        Host,
+        HostScanDelta,
+        HostScanState,
+        HostSummary,
+        HostSummaryTag,
+        HostTimelineEntry,
+        ManualServiceEvent,
+        Service,
     )
 
     prepare_read(session)
-    evidence_scopes = set(session.execute(
-        select(Host.engagement_id).outerjoin(
-            HostScanState,
-            (col(HostScanState.host_id) == col(Host.id))
-            & (col(HostScanState.engagement_id) == col(Host.engagement_id)),
-        ).where(col(HostScanState.host_id).is_(None)).distinct()
-    ).scalars())
-    inventory_scopes = evidence_scopes | set(session.execute(
-        select(Host.engagement_id).outerjoin(
-            HostSummary,
-            (col(HostSummary.host_id) == col(Host.id))
-            & (col(HostSummary.engagement_id) == col(Host.engagement_id)),
-        ).where(col(HostSummary.host_id).is_(None)).distinct()
-    ).scalars()) | set(session.execute(
-        select(Service.engagement_id).outerjoin(
-            CurrentService,
-            (col(CurrentService.service_id) == col(Service.id))
-            & (col(CurrentService.engagement_id) == col(Service.engagement_id)),
-        ).where(col(CurrentService.service_id).is_(None)).distinct()
-    ).scalars())
+    evidence_scopes = set(
+        session.execute(
+            select(Host.engagement_id)
+            .outerjoin(
+                HostScanState,
+                (col(HostScanState.host_id) == col(Host.id))
+                & (col(HostScanState.engagement_id) == col(Host.engagement_id)),
+            )
+            .where(col(HostScanState.host_id).is_(None))
+            .distinct()
+        ).scalars()
+    )
+    inventory_scopes = (
+        evidence_scopes
+        | set(
+            session.execute(
+                select(Host.engagement_id)
+                .outerjoin(
+                    HostSummary,
+                    (col(HostSummary.host_id) == col(Host.id))
+                    & (col(HostSummary.engagement_id) == col(Host.engagement_id)),
+                )
+                .where(col(HostSummary.host_id).is_(None))
+                .distinct()
+            ).scalars()
+        )
+        | set(
+            session.execute(
+                select(Service.engagement_id)
+                .outerjoin(
+                    CurrentService,
+                    (col(CurrentService.service_id) == col(Service.id))
+                    & (col(CurrentService.engagement_id) == col(Service.engagement_id)),
+                )
+                .where(col(CurrentService.service_id).is_(None))
+                .distinct()
+            ).scalars()
+        )
+    )
     # Empty tag membership is valid. Only an actual summary tag without its
     # corresponding membership row indicates a missing additive projection.
     tags = func.json_each(HostSummary.tags).table_valued("value")
-    inventory_scopes.update(session.execute(
-        select(HostSummary.engagement_id).select_from(HostSummary).join(tags, true())
-        .outerjoin(
-            HostSummaryTag,
-            (col(HostSummaryTag.engagement_id) == col(HostSummary.engagement_id))
-            & (col(HostSummaryTag.host_id) == col(HostSummary.host_id))
-            & (col(HostSummaryTag.tag) == tags.c.value),
-        ).where(col(HostSummaryTag.host_id).is_(None)).distinct()
-    ).scalars())
+    inventory_scopes.update(
+        session.execute(
+            select(HostSummary.engagement_id)
+            .select_from(HostSummary)
+            .join(tags, true())
+            .outerjoin(
+                HostSummaryTag,
+                (col(HostSummaryTag.engagement_id) == col(HostSummary.engagement_id))
+                & (col(HostSummaryTag.host_id) == col(HostSummary.host_id))
+                & (col(HostSummaryTag.tag) == tags.c.value),
+            )
+            .where(col(HostSummaryTag.host_id).is_(None))
+            .distinct()
+        ).scalars()
+    )
     timeline_scopes: set[str] = set()
     for model, source, source_id in (
         (HostScanDelta, "scan", HostScanDelta.scan_id),
         (ManualServiceEvent, "manual", ManualServiceEvent.id),
     ):
-        timeline_scopes.update(session.execute(
-            select(model.engagement_id).outerjoin(
-                HostTimelineEntry,
-                (col(HostTimelineEntry.engagement_id) == col(model.engagement_id))
-                & (col(HostTimelineEntry.host_id) == col(model.host_id))
-                & (col(HostTimelineEntry.source) == source)
-                & (col(HostTimelineEntry.source_id) == col(source_id)),
-            ).where(col(HostTimelineEntry.host_id).is_(None)).distinct()
-        ).scalars())
+        timeline_scopes.update(
+            session.execute(
+                select(model.engagement_id)
+                .outerjoin(
+                    HostTimelineEntry,
+                    (col(HostTimelineEntry.engagement_id) == col(model.engagement_id))
+                    & (col(HostTimelineEntry.host_id) == col(model.host_id))
+                    & (col(HostTimelineEntry.source) == source)
+                    & (col(HostTimelineEntry.source_id) == col(source_id)),
+                )
+                .where(col(HostTimelineEntry.host_id).is_(None))
+                .distinct()
+            ).scalars()
+        )
     if not (inventory_scopes or timeline_scopes):
         return
     _pending(session).update(evidence_scopes)
@@ -351,13 +449,16 @@ def _before_commit(session: Session) -> None:
     prepare_read(session)
 
 
-def _after_transaction_create(session: Session, transaction: SessionTransaction) -> None:
+def _after_transaction_create(
+    session: Session, transaction: SessionTransaction
+) -> None:
     if transaction.nested:
         # begin_nested flushes outer source rows before creating the savepoint.
         # A read can consume their invalidations inside it; rollback must then
         # restore all invalidations because projection writes also rolled back.
         _savepoints(session)[transaction] = (
-            set(_pending(session)), set(_inventory_pending(session)),
+            set(_pending(session)),
+            set(_inventory_pending(session)),
             set(_timeline_pending(session)),
             {key: value.copy() for key, value in _replay_targets(session).items()},
         )
@@ -387,8 +488,11 @@ def _after_rollback(session: Session) -> None:
 
 def _after_soft_rollback(session: Session, transaction: SessionTransaction) -> None:
     if transaction.nested:
-        evidence_scopes, inventory_scopes, timeline_scopes, targets = _savepoints(session).pop(
-            transaction, (set(), set(), set(), {}),
+        evidence_scopes, inventory_scopes, timeline_scopes, targets = _savepoints(
+            session
+        ).pop(
+            transaction,
+            (set(), set(), set(), {}),
         )
         session.info[_PENDING] = evidence_scopes
         session.info[_INVENTORY_PENDING] = inventory_scopes

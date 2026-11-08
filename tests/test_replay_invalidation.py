@@ -18,16 +18,27 @@ def _scan(ip: str, version: str = "1") -> bytes:
 
 
 def _host(session: Session, ip: str) -> Host:
-    return session.exec(select(Host).where(
-        Host.engagement_id == TEST_ENGAGEMENT_ID, Host.ip == ip,
-    )).one()
+    return session.exec(
+        select(Host).where(
+            Host.engagement_id == TEST_ENGAGEMENT_ID,
+            Host.ip == ip,
+        )
+    ).one()
 
 
-def test_deleting_unrelated_latest_scan_restores_previous_new_marker(session: Session) -> None:
+def test_deleting_unrelated_latest_scan_restores_previous_new_marker(
+    session: Session,
+) -> None:
     for ip in ("10.0.0.1", "10.0.0.2"):
-        ingest_scan(session, _scan(ip), f"{ip}.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+        ingest_scan(
+            session, _scan(ip), f"{ip}.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID
+        )
     latest = ingest_scan(
-        session, _scan("10.0.0.3"), "latest.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID,
+        session,
+        _scan("10.0.0.3"),
+        "latest.xml",
+        "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
     )
     host = _host(session, "10.0.0.2")
     assert host.id is not None
@@ -39,18 +50,37 @@ def test_deleting_unrelated_latest_scan_restores_previous_new_marker(session: Se
     assert host_change(session, host.id, engagement_id=TEST_ENGAGEMENT_ID) == "new"
     rows = host_rows(session, engagement_id=TEST_ENGAGEMENT_ID)
     assert {row.ip: row.change for row in rows} == {
-        "10.0.0.1": "", "10.0.0.2": "new", "10.0.0.3": "",
+        "10.0.0.1": "",
+        "10.0.0.2": "new",
+        "10.0.0.3": "",
     }
-    assert [service.version for service in resolved_services(
-        session, host.id, engagement_id=TEST_ENGAGEMENT_ID,
-    )] == ["1"]
+    assert [
+        service.version
+        for service in resolved_services(
+            session,
+            host.id,
+            engagement_id=TEST_ENGAGEMENT_ID,
+        )
+    ] == ["1"]
 
 
-def test_scan_metadata_edit_refreshes_history_after_explicit_flush(session: Session) -> None:
+def test_scan_metadata_edit_refreshes_history_after_explicit_flush(
+    session: Session,
+) -> None:
     scan = ingest_scan(
-        session, _scan("10.0.0.1"), "original.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID,
+        session,
+        _scan("10.0.0.1"),
+        "original.xml",
+        "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
     )
-    ingest_scan(session, _scan("10.0.0.2"), "other.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    ingest_scan(
+        session,
+        _scan("10.0.0.2"),
+        "other.xml",
+        "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
+    )
     host = _host(session, "10.0.0.1")
     assert host.id is not None
     scan.filename = "renamed.xml"
@@ -61,12 +91,22 @@ def test_scan_metadata_edit_refreshes_history_after_explicit_flush(session: Sess
     assert latest[(80, "tcp")].version == "1"
 
 
-def test_nested_rollback_retains_flushed_outer_evidence_invalidation(session: Session) -> None:
+def test_nested_rollback_retains_flushed_outer_evidence_invalidation(
+    session: Session,
+) -> None:
     first = ingest_scan(
-        session, _scan("10.0.0.1"), "baseline.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID,
+        session,
+        _scan("10.0.0.1"),
+        "baseline.xml",
+        "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
     )
     changed = ingest_scan(
-        session, _scan("10.0.0.1", "2"), "changed.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID,
+        session,
+        _scan("10.0.0.1", "2"),
+        "changed.xml",
+        "nmap",
+        engagement_id=TEST_ENGAGEMENT_ID,
     )
     host = _host(session, "10.0.0.1")
     assert host.id is not None
@@ -75,9 +115,17 @@ def test_nested_rollback_retains_flushed_outer_evidence_invalidation(session: Se
         entries, _ = host_history(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
         assert [entry.filename for entry in entries] == [first.filename, "outer.xml"]
         session.delete(changed)
-        assert resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)[0].version == "1"
+        assert (
+            resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)[
+                0
+            ].version
+            == "1"
+        )
         savepoint.rollback()
     session.commit()
     entries, _ = host_history(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
     assert [entry.filename for entry in entries] == [first.filename, "outer.xml"]
-    assert resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)[0].version == "2"
+    assert (
+        resolved_services(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)[0].version
+        == "2"
+    )

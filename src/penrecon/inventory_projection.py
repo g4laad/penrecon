@@ -11,18 +11,29 @@ from sqlmodel import Session, col, select
 
 def rebuild_inventory(session: Session, engagement_id: str) -> None:
     from penrecon.models import (
-        Annotation, CurrentService, Host, Hostname, HostHostname, HostScanState,
-        HostSummary, HostSummaryTag, Observation, Service, Status,
+        Annotation,
+        CurrentService,
+        Host,
+        HostHostname,
+        Hostname,
+        HostScanState,
+        HostSummary,
+        HostSummaryTag,
+        Observation,
+        Service,
+        Status,
     )
     from penrecon.queries.inventory import service_state
 
     states = {
-        row.host_id: row for row in session.execute(
+        row.host_id: row
+        for row in session.execute(
             select(HostScanState).where(HostScanState.engagement_id == engagement_id)
         ).scalars()
     }
     annotations = {
-        row.host_id: row for row in session.execute(
+        row.host_id: row
+        for row in session.execute(
             select(Annotation).where(
                 Annotation.engagement_id == engagement_id,
                 col(Annotation.host_id).is_not(None),
@@ -31,19 +42,23 @@ def rebuild_inventory(session: Session, engagement_id: str) -> None:
     }
     names: dict[int, list[str]] = defaultdict(list)
     for host_id, name in session.execute(
-        select(HostHostname.host_id, Hostname.name).join(
+        select(HostHostname.host_id, Hostname.name)
+        .join(
             Hostname,
             (col(Hostname.id) == col(HostHostname.hostname_id))
             & (col(Hostname.engagement_id) == col(HostHostname.engagement_id)),
-        ).where(
+        )
+        .where(
             HostHostname.engagement_id == engagement_id,
             HostHostname.hidden == False,  # noqa: E712
-        ).order_by(Hostname.name)
+        )
+        .order_by(Hostname.name)
     ):
         names[host_id].append(name)
     services: dict[int, list[Service]] = defaultdict(list)
     for service in session.execute(
-        select(Service).where(Service.engagement_id == engagement_id)
+        select(Service)
+        .where(Service.engagement_id == engagement_id)
         .order_by(col(Service.port), Service.proto, col(Service.id))
     ).scalars():
         services[service.host_id].append(service)
@@ -64,26 +79,42 @@ def rebuild_inventory(session: Session, engagement_id: str) -> None:
         for service in services.get(host.id, []):
             observation = latest.get((service.port, service.proto))
             effective = service_state(service, observation)
-            current_rows.append({
-                "engagement_id": engagement_id,
-                "service_id": service.id,
-                "host_id": host.id,
-                "port": service.port,
-                "proto": service.proto,
-                "state": effective.state,
-                "service_name": effective.service_name,
-                "product": effective.product,
-                "version": effective.version,
-                "observation_id": observation.id if observation else None,
-                "last_seen": observation.observed_at.strftime("%Y-%m-%d %H:%M") if observation else "",
-                "manual": observation is None or any((
-                    service.m_state, service.m_service_name, service.m_product, service.m_version,
-                )),
-                "service_name_lower": (effective.service_name or "").lower(),
-                "search_text": " ".join(value for value in (
-                    effective.service_name, effective.product, effective.version,
-                ) if value).lower(),
-            })
+            current_rows.append(
+                {
+                    "engagement_id": engagement_id,
+                    "service_id": service.id,
+                    "host_id": host.id,
+                    "port": service.port,
+                    "proto": service.proto,
+                    "state": effective.state,
+                    "service_name": effective.service_name,
+                    "product": effective.product,
+                    "version": effective.version,
+                    "observation_id": observation.id if observation else None,
+                    "last_seen": observation.observed_at.strftime("%Y-%m-%d %H:%M")
+                    if observation
+                    else "",
+                    "manual": observation is None
+                    or any(
+                        (
+                            service.m_state,
+                            service.m_service_name,
+                            service.m_product,
+                            service.m_version,
+                        )
+                    ),
+                    "service_name_lower": (effective.service_name or "").lower(),
+                    "search_text": " ".join(
+                        value
+                        for value in (
+                            effective.service_name,
+                            effective.product,
+                            effective.version,
+                        )
+                        if value
+                    ).lower(),
+                }
+            )
             if effective.state == "open":
                 open_services.append((service.port, effective.service_name))
         # TCP and UDP may share a port, with only one having a name.
@@ -94,36 +125,56 @@ def rebuild_inventory(session: Session, engagement_id: str) -> None:
         change = state.change if state else ""
         ip_sort = "4294967296"
         parts = host.ip.split(".")
-        if len(parts) == 4 and all(part.isascii() and part.isdecimal() for part in parts):
+        if len(parts) == 4 and all(
+            part.isascii() and part.isdecimal() for part in parts
+        ):
             octets = [int(part) for part in parts]
             if all(value <= 255 for value in octets):
                 # Legacy dotted addresses can retain leading zeroes.
-                numeric_ip = sum(value << shift for value, shift in zip(octets, (24, 16, 8, 0), strict=True))
+                numeric_ip = sum(
+                    value << shift
+                    for value, shift in zip(octets, (24, 16, 8, 0), strict=True)
+                )
                 ip_sort = f"{numeric_ip:010d}"
-        summary_rows.append({
-            "engagement_id": engagement_id,
-            "host_id": host.id,
-            "ip": host.ip,
-            "ip_sort": ip_sort,
-            "open_count": len(open_services),
-            "status": str(annotation.status if annotation else Status.new),
-            "triaged": annotation is not None,
-            "change": change,
-            "change_rank": {"new": 0, "changed": 1}.get(change, 2),
-            "hostnames": hostnames,
-            "tags": tags,
-            "open_services": open_services,
-            "search_values": [value.lower() for value in (
-                host.ip, *hostnames, *(name for _port, name in open_services if name), *tags,
-            )],
-        })
-        tag_rows.extend({
-            "engagement_id": engagement_id, "host_id": host.id, "tag": tag,
-        } for tag in sorted(set(tags)))
+        summary_rows.append(
+            {
+                "engagement_id": engagement_id,
+                "host_id": host.id,
+                "ip": host.ip,
+                "ip_sort": ip_sort,
+                "open_count": len(open_services),
+                "status": str(annotation.status if annotation else Status.new),
+                "triaged": annotation is not None,
+                "change": change,
+                "change_rank": {"new": 0, "changed": 1}.get(change, 2),
+                "hostnames": hostnames,
+                "tags": tags,
+                "open_services": open_services,
+                "search_values": [
+                    value.lower()
+                    for value in (
+                        host.ip,
+                        *hostnames,
+                        *(name for _port, name in open_services if name),
+                        *tags,
+                    )
+                ],
+            }
+        )
+        tag_rows.extend(
+            {
+                "engagement_id": engagement_id,
+                "host_id": host.id,
+                "tag": tag,
+            }
+            for tag in sorted(set(tags))
+        )
 
     for model, rows in (
-        (CurrentService, current_rows), (HostSummary, summary_rows), (HostSummaryTag, tag_rows),
+        (CurrentService, current_rows),
+        (HostSummary, summary_rows),
+        (HostSummaryTag, tag_rows),
     ):
         session.execute(delete(model).where(col(model.engagement_id) == engagement_id))
         for start in range(0, len(rows), 500):
-            session.execute(insert(model), rows[start:start + 500])
+            session.execute(insert(model), rows[start : start + 500])

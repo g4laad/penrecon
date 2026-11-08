@@ -1,4 +1,5 @@
 """Local-only HTTP protections, applied before parsing or domain handlers."""
+
 from __future__ import annotations
 
 from urllib.parse import urlsplit
@@ -26,29 +27,49 @@ class LocalSecurityMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        headers = {key.decode("latin1").lower(): value.decode("latin1") for key, value in scope["headers"]}
+        headers = {
+            key.decode("latin1").lower(): value.decode("latin1")
+            for key, value in scope["headers"]
+        }
         api = scope["path"] == "/api" or scope["path"].startswith("/api/")
 
         async def secure_send(message: Message) -> None:
             if message["type"] == "http.response.start":
                 values = list(message["headers"])
-                values += [(b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"no-referrer"), (b"x-frame-options", b"DENY")]
+                values += [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                    (b"x-frame-options", b"DENY"),
+                ]
                 if api or not scope["path"].startswith("/static/"):
-                    values = [(k, v) for k, v in values if k.lower() != b"cache-control"]
+                    values = [
+                        (k, v) for k, v in values if k.lower() != b"cache-control"
+                    ]
                     values.append((b"cache-control", b"no-store"))
                 if scope["path"] not in ("/docs", "/redoc", "/docs/oauth2-redirect"):
-                    values.append((b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"))
+                    values.append(
+                        (
+                            b"content-security-policy",
+                            b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                        )
+                    )
                 message = {**message, "headers": values}
             await send(message)
 
         async def reject(status: int, detail: str) -> None:
-            await JSONResponse({"detail": detail}, status_code=status)(scope, receive, secure_send)
+            await JSONResponse({"detail": detail}, status_code=status)(
+                scope, receive, secure_send
+            )
+
         try:
             authority = urlsplit("//" + headers.get("host", ""))
             trusted = (
                 authority.hostname in {"localhost", "127.0.0.1", "::1", "testserver"}
-                and authority.username is None and authority.password is None
-                and not authority.path and not authority.query and not authority.fragment
+                and authority.username is None
+                and authority.password is None
+                and not authority.path
+                and not authority.query
+                and not authority.fragment
             )
             authority.port  # reject malformed or out-of-range ports
         except ValueError:
@@ -60,17 +81,29 @@ class LocalSecurityMiddleware:
         if api:
             origin = headers.get("origin")
             try:
-                expected = urlsplit(f"{scope.get('scheme', 'http')}://{headers.get('host', '')}")
+                expected = urlsplit(
+                    f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
+                )
                 supplied = urlsplit(origin) if origin else None
             except ValueError:
                 await reject(403, "Invalid request origin.")
                 return
-            if headers.get("sec-fetch-site") == "cross-site" or (supplied is not None and (
-                supplied.scheme != expected.scheme or supplied.netloc != expected.netloc or supplied.path or supplied.query or supplied.fragment
-            )):
+            if headers.get("sec-fetch-site") == "cross-site" or (
+                supplied is not None
+                and (
+                    supplied.scheme != expected.scheme
+                    or supplied.netloc != expected.netloc
+                    or supplied.path
+                    or supplied.query
+                    or supplied.fragment
+                )
+            ):
                 await reject(403, "Cross-origin API requests are not allowed.")
                 return
-            if scope["method"] not in ("GET", "HEAD", "OPTIONS") and headers.get("x-penrecon-request") != "1":
+            if (
+                scope["method"] not in ("GET", "HEAD", "OPTIONS")
+                and headers.get("x-penrecon-request") != "1"
+            ):
                 await reject(403, "Mutations require X-Penrecon-Request: 1.")
                 return
             raw_length = headers.get("content-length")
@@ -117,7 +150,11 @@ class LocalSecurityMiddleware:
                     chunk = await body.read(min(65536, remaining))
                     remaining -= len(chunk)
                     replay_complete = remaining == 0
-                    return {"type": "http.request", "body": chunk, "more_body": remaining > 0}
+                    return {
+                        "type": "http.request",
+                        "body": chunk,
+                        "more_body": remaining > 0,
+                    }
 
                 await self.app(scope, replay, secure_send)
                 return

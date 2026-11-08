@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import pytest
-
-from tests.fixtures import TEST_ENGAGEMENT_ID
 from sqlmodel import Session
 
 from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
 from penrecon.queries.diff import diff_scans
 from penrecon.queries.inventory import host_rows
-from tests.fixtures import SCAN_A, SCAN_B
+from tests.fixtures import SCAN_A, SCAN_B, TEST_ENGAGEMENT_ID
 
 
 def test_diff_added_removed_changed(session: Session) -> None:
-    a = ingest_scan(session, SCAN_A.encode(), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
-    b = ingest_scan(session, SCAN_B.encode(), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    a = ingest_scan(
+        session, SCAN_A.encode(), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID
+    )
+    b = ingest_scan(
+        session, SCAN_B.encode(), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID
+    )
     assert a.id is not None and b.id is not None
 
     result = diff_scans(session, a.id, b.id, engagement_id=TEST_ENGAGEMENT_ID)
@@ -38,7 +40,9 @@ def test_diff_added_removed_changed(session: Session) -> None:
     [("", "open"), ('<extraports state="closed" count="1"/>', "closed")],
 )
 def test_snapshot_diff_does_not_inherit_replayed_port_evidence(
-    session: Session, ports: str, current_state: str,
+    session: Session,
+    ports: str,
+    current_state: str,
 ) -> None:
     baseline = (
         '<nmaprun start="100"><host><address addr="10.0.0.1" addrtype="ipv4"/>'
@@ -51,8 +55,12 @@ def test_snapshot_diff_does_not_inherit_replayed_port_evidence(
         '<host><address addr="10.0.0.1" addrtype="ipv4"/>'
         f"<ports>{ports}</ports></host></nmaprun>"
     ).encode()
-    before = ingest_scan(session, baseline, "baseline.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
-    after = ingest_scan(session, omitted, "omitted.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
+    before = ingest_scan(
+        session, baseline, "baseline.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID
+    )
+    after = ingest_scan(
+        session, omitted, "omitted.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID
+    )
     assert before.id is not None and after.id is not None
     host = host_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
     _, latest = host_history(session, host.id, engagement_id=TEST_ENGAGEMENT_ID)
@@ -60,7 +68,9 @@ def test_snapshot_diff_does_not_inherit_replayed_port_evidence(
 
     # Snapshot comparison still reports absence, not an inferred closure or an
     # inherited open observation from a different scan.
-    difference = diff_scans(session, before.id, after.id, engagement_id=TEST_ENGAGEMENT_ID)
+    difference = diff_scans(
+        session, before.id, after.id, engagement_id=TEST_ENGAGEMENT_ID
+    )
     assert [(entry.port, entry.proto, entry.kind) for entry in difference.entries] == [
         (80, "tcp", "removed"),
     ]

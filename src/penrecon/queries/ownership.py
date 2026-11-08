@@ -7,7 +7,6 @@ from sqlmodel import Session, select
 
 from penrecon.models import EngagementOwned
 
-
 _Owned = TypeVar("_Owned", bound=EngagementOwned)
 
 
@@ -28,6 +27,9 @@ def get_owned(
     return session.exec(
         select(model).where(
             model.engagement_id == engagement_id,
-            *(column == value for column, value in zip(primary_key, values, strict=True)),
+            *(
+                column == value
+                for column, value in zip(primary_key, values, strict=True)
+            ),
         )
     ).first()

@@ -52,7 +52,9 @@ def _engagements_create(args: argparse.Namespace) -> None:
 def _serve(args: argparse.Namespace) -> None:
     import uvicorn
 
-    uvicorn.run("penrecon.web.app:app", host="127.0.0.1", port=args.port, reload=args.reload)
+    uvicorn.run(
+        "penrecon.web.app:app", host="127.0.0.1", port=args.port, reload=args.reload
+    )
 
 
 def _ingest(args: argparse.Namespace) -> None:
@@ -64,7 +66,9 @@ def _ingest(args: argparse.Namespace) -> None:
         scan = ingest_scan(
             session, data, path.name, args.tool, engagement_id=args.engagement
         )
-    print(f"ingested scan #{scan.id}: {scan.host_count} hosts from {path.name} ({args.tool})")
+    print(
+        f"ingested scan #{scan.id}: {scan.host_count} hosts from {path.name} ({args.tool})"
+    )
 
 
 def _seed(args: argparse.Namespace) -> None:
@@ -78,7 +82,9 @@ def _seed(args: argparse.Namespace) -> None:
         for number in range(1, 11):
             try:
                 outcome = seed_mock_engagement(
-                    session, args.count, name=f"Mock engagement {number:02d}",
+                    session,
+                    args.count,
+                    name=f"Mock engagement {number:02d}",
                 )
             except ValueError as exc:
                 raise SystemExit(str(exc)) from exc
@@ -93,10 +99,14 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_engagements = sub.add_parser("engagements", help="list or create engagements")
-    engagements_sub = p_engagements.add_subparsers(dest="engagements_cmd", required=True)
+    engagements_sub = p_engagements.add_subparsers(
+        dest="engagements_cmd", required=True
+    )
     p_engagements_list = engagements_sub.add_parser("list", help="list all engagements")
     p_engagements_list.set_defaults(func=_engagements_list)
-    p_engagements_create = engagements_sub.add_parser("create", help="create an engagement")
+    p_engagements_create = engagements_sub.add_parser(
+        "create", help="create an engagement"
+    )
     p_engagements_create.add_argument("name")
     p_engagements_create.add_argument("--description", default="")
     p_engagements_create.set_defaults(func=_engagements_create)
@@ -112,9 +122,13 @@ def main() -> None:
     p_ingest.add_argument("--engagement", type=_engagement_id, required=True)
     p_ingest.set_defaults(func=_ingest)
 
-    p_seed = sub.add_parser("seed", help="create 10 engagements filled with linked mock data")
+    p_seed = sub.add_parser(
+        "seed", help="create 10 engagements filled with linked mock data"
+    )
     p_seed.add_argument(
-        "--count", type=int, default=100,
+        "--count",
+        type=int,
+        default=100,
         help="rows per type per engagement (100–131070)",
     )
     p_seed.set_defaults(func=_seed)

@@ -17,8 +17,8 @@ from starlette.testclient import TestClient
 
 import penrecon.models  # noqa: F401  (register tables)
 from penrecon.db import enable_sqlite_fks, get_session
-from penrecon.web.app import app
 from penrecon.models import Engagement
+from penrecon.web.app import app
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 
@@ -53,7 +53,8 @@ def client() -> Iterator[TestClient]:
 
     app.dependency_overrides[get_session] = _override
     with TestClient(
-        app, headers={"Accept": "application/json", "X-Penrecon-Request": "1"},
+        app,
+        headers={"Accept": "application/json", "X-Penrecon-Request": "1"},
         follow_redirects=False,
     ) as c:
         yield c

@@ -8,7 +8,7 @@ from ipaddress import ip_address
 
 from sqlmodel import Session, col, select
 
-from penrecon.models import Host, Hostname, HostHostname, Service
+from penrecon.models import Host, HostHostname, Hostname, Service
 
 
 def normalize_ip(raw: str) -> str:
@@ -25,7 +25,11 @@ def same_ip(left: str, right: str) -> bool:
 
 
 def find_host_by_ip(
-    session: Session, ip: str, *, engagement_id: str, excluding: int | None = None,
+    session: Session,
+    ip: str,
+    *,
+    engagement_id: str,
+    excluding: int | None = None,
 ) -> Host | None:
     """Reuse the lowest-ID equivalent identity without rewriting or merging rows.
 
@@ -34,12 +38,18 @@ def find_host_by_ip(
     exclude their own ID to guard against every equivalent conflicting identity.
     """
     canonical = normalize_ip(ip)
-    return next((
-        host for host in session.exec(
-            select(Host).where(Host.engagement_id == engagement_id).order_by(col(Host.id))
-        ).all()
-        if host.id != excluding and same_ip(host.ip, canonical)
-    ), None)
+    return next(
+        (
+            host
+            for host in session.exec(
+                select(Host)
+                .where(Host.engagement_id == engagement_id)
+                .order_by(col(Host.id))
+            ).all()
+            if host.id != excluding and same_ip(host.ip, canonical)
+        ),
+        None,
+    )
 
 
 def normalize_hostname(raw: str) -> str:
@@ -76,7 +86,9 @@ class DiscoveryIndex:
     def load(cls, session: Session, *, engagement_id: str) -> DiscoveryIndex:
         hosts: dict[str, Host] = {}
         for host in session.exec(
-            select(Host).where(Host.engagement_id == engagement_id).order_by(col(Host.id))
+            select(Host)
+            .where(Host.engagement_id == engagement_id)
+            .order_by(col(Host.id))
         ).all():
             try:
                 canonical = normalize_ip(host.ip)
@@ -86,7 +98,9 @@ class DiscoveryIndex:
         names: dict[str, list[Hostname]] = {}
         names_by_id: dict[int, str] = {}
         for hostname in session.exec(
-            select(Hostname).where(Hostname.engagement_id == engagement_id).order_by(col(Hostname.id))
+            select(Hostname)
+            .where(Hostname.engagement_id == engagement_id)
+            .order_by(col(Hostname.id))
         ).all():
             try:
                 canonical = normalize_hostname(hostname.name)
@@ -105,18 +119,23 @@ class DiscoveryIndex:
         services = {
             (host_id, port, proto)
             for host_id, port, proto in session.exec(
-                select(Service.host_id, Service.port, Service.proto)
-                .where(Service.engagement_id == engagement_id)
+                select(Service.host_id, Service.port, Service.proto).where(
+                    Service.engagement_id == engagement_id
+                )
             ).all()
         }
         return cls(engagement_id, hosts, names, links, services)
 
 
-def _equivalent_hostnames(session: Session, name: str, engagement_id: str) -> list[Hostname]:
+def _equivalent_hostnames(
+    session: Session, name: str, engagement_id: str
+) -> list[Hostname]:
     canonical = normalize_hostname(name)
     matches: list[Hostname] = []
     for hostname in session.exec(
-        select(Hostname).where(Hostname.engagement_id == engagement_id).order_by(col(Hostname.id))
+        select(Hostname)
+        .where(Hostname.engagement_id == engagement_id)
+        .order_by(col(Hostname.id))
     ).all():
         try:
             equivalent = normalize_hostname(hostname.name) == canonical
@@ -128,19 +147,31 @@ def _equivalent_hostnames(session: Session, name: str, engagement_id: str) -> li
 
 
 def _hostname_links(
-    session: Session, host_id: int, names: list[Hostname], engagement_id: str,
+    session: Session,
+    host_id: int,
+    names: list[Hostname],
+    engagement_id: str,
 ) -> list[HostHostname]:
     identities = {name.id for name in names}
     return [
-        link for link in session.exec(select(HostHostname).where(
-            HostHostname.engagement_id == engagement_id, HostHostname.host_id == host_id,
-        )).all()
+        link
+        for link in session.exec(
+            select(HostHostname).where(
+                HostHostname.engagement_id == engagement_id,
+                HostHostname.host_id == host_id,
+            )
+        ).all()
         if link.hostname_id in identities
     ]
 
 
 def link_hostname(
-    session: Session, host_id: int, name: str, now: datetime, *, engagement_id: str,
+    session: Session,
+    host_id: int,
+    name: str,
+    now: datetime,
+    *,
+    engagement_id: str,
     discovery: DiscoveryIndex | None = None,
 ) -> None:
     """Refresh equivalent associations without rewriting legacy identities.
@@ -152,8 +183,16 @@ def link_hostname(
     name = normalize_hostname(name)
     if discovery is not None and discovery.engagement_id != engagement_id:
         raise ValueError("discovery index belongs to another engagement")
-    names = discovery.hostnames.get(name, []) if discovery is not None else _equivalent_hostnames(session, name, engagement_id)
-    links = discovery.links.get((host_id, name), []) if discovery is not None else _hostname_links(session, host_id, names, engagement_id)
+    names = (
+        discovery.hostnames.get(name, [])
+        if discovery is not None
+        else _equivalent_hostnames(session, name, engagement_id)
+    )
+    links = (
+        discovery.links.get((host_id, name), [])
+        if discovery is not None
+        else _hostname_links(session, host_id, names, engagement_id)
+    )
     if links:
         hidden = any(link.hidden for link in links)
         for link in links:
@@ -195,7 +234,10 @@ def hide_hostname(
     hostname = session.get(Hostname, hostname_id)
     assert hostname is not None
     links = _hostname_links(
-        session, host_id, _equivalent_hostnames(session, hostname.name, engagement_id), engagement_id,
+        session,
+        host_id,
+        _equivalent_hostnames(session, hostname.name, engagement_id),
+        engagement_id,
     )
     changed = False
     for equivalent in links:

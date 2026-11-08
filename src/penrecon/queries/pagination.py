@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-PER_PAGE_OPTIONS = (10, 25, 50)  # selectable page sizes; "all" (no limit) is the 4th choice
+PER_PAGE_OPTIONS = (
+    10,
+    25,
+    50,
+)  # selectable page sizes; "all" (no limit) is the 4th choice
 PER_PAGE_DEFAULT = 10
+
 
 def resolve_per_page(raw: str) -> int | None:
     """Map a ``?per`` query value to a row limit. ``"all"`` -> ``None`` (no
@@ -15,9 +20,8 @@ def resolve_per_page(raw: str) -> int | None:
     return PER_PAGE_DEFAULT
 
 
-
-
 SORT_DEFAULT_DIR = {"change": "asc", "ports": "desc", "ip": "asc", "status": "asc"}
+
 
 def _page_bounds(total: int, page: int, per_page: int | None) -> tuple[int, int]:
     if per_page is None:
@@ -26,4 +30,9 @@ def _page_bounds(total: int, page: int, per_page: int | None) -> tuple[int, int]
     return max(1, min(page, pages)), pages
 
 
-SERVICE_SORT_DEFAULT_DIR = {"port": "asc", "state": "asc", "service": "asc", "status": "asc"}
+SERVICE_SORT_DEFAULT_DIR = {
+    "port": "asc",
+    "state": "asc",
+    "service": "asc",
+    "status": "asc",
+}

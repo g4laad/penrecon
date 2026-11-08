@@ -31,7 +31,9 @@ def search(session: Session, q: str, *, engagement_id: str) -> SearchResults:
     creds = [
         CredentialHit(cid, kind, username, [])
         for cid, kind, username, notes in session.exec(
-            select(Credential.id, Credential.kind, Credential.username, Credential.notes)
+            select(
+                Credential.id, Credential.kind, Credential.username, Credential.notes
+            )
             .where(Credential.engagement_id == engagement_id)
             .order_by(Credential.created_at.desc())  # type: ignore[attr-defined]
         ).all()

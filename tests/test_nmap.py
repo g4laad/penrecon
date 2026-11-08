@@ -20,22 +20,33 @@ def test_parse_nmap_basic() -> None:
     assert ports[80].service_name == "http"
 
 
-@pytest.mark.parametrize("state", [
-    "open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered",
-])
+@pytest.mark.parametrize(
+    "state",
+    [
+        "open",
+        "closed",
+        "filtered",
+        "unfiltered",
+        "open|filtered",
+        "closed|filtered",
+    ],
+)
 def test_parse_preserves_meaningful_nmap_states(state: str) -> None:
     data = SCAN_A.replace('state="open"', f'state="{state}"').encode()
     assert {port.state for port in nmap.parse(data)[0].ports} == {state}
 
 
-@pytest.mark.parametrize("evidence", [
-    '<port protocol="tcp" portid="80"><state state="mystery"/></port>',
-    '<extraports state="mystery" count="1"/>',
-])
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        '<port protocol="tcp" portid="80"><state state="mystery"/></port>',
+        '<extraports state="mystery" count="1"/>',
+    ],
+)
 def test_parse_rejects_unknown_nmap_states(evidence: str) -> None:
     data = (
         '<nmaprun><host><address addr="10.0.0.1" addrtype="ipv4"/>'
-        f'<ports>{evidence}</ports></host></nmaprun>'
+        f"<ports>{evidence}</ports></host></nmaprun>"
     ).encode()
     with pytest.raises(ValueError, match="mystery"):
         nmap.parse(data)
@@ -60,7 +71,8 @@ def test_duplicate_hosts_merge_explicit_evidence_without_inventing_coverage() ->
     assert hosts[0].ip == "2001:db8::1"
     assert hosts[0].hostnames == ["api.example", "other.example"]
     assert [(port.port, port.proto, port.state) for port in hosts[0].ports] == [
-        (22, "tcp", "open"), (80, "tcp", "open|filtered"),
+        (22, "tcp", "open"),
+        (80, "tcp", "open|filtered"),
     ]
     assert hosts[0].coverage.get("states", []) == []
 

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, or_, select as sql_select
+from sqlalchemy import func, or_
+from sqlalchemy import select as sql_select
 from sqlmodel import Session, col, select
 
 from penrecon.models import OperationLog
@@ -28,31 +29,50 @@ class OperationPage:
 
 
 def operation_logs(
-    session: Session, q: str = "", *, engagement_id: str,
-    page: int = 1, per_page: int | None = 25,
+    session: Session,
+    q: str = "",
+    *,
+    engagement_id: str,
+    page: int = 1,
+    per_page: int | None = 25,
 ) -> OperationPage:
     """Search/count/page in SQLite without loading off-page summaries or bodies."""
     statement = sql_select(
-        col(OperationLog.id), col(OperationLog.started_at), col(OperationLog.destination),
-        col(OperationLog.tool), col(OperationLog.command),
+        col(OperationLog.id),
+        col(OperationLog.started_at),
+        col(OperationLog.destination),
+        col(OperationLog.tool),
+        col(OperationLog.command),
     ).where(col(OperationLog.engagement_id) == engagement_id)
     needle = q.strip().casefold()
     if needle:
         tags = func.json_each(OperationLog.tags).table_valued("value")
-        tag_match = select(tags.c.value).where(
-            func.instr(func.casefold(tags.c.value), needle) > 0,
-        ).exists()
-        statement = statement.where(or_(
-            *(
-                func.instr(func.casefold(value), needle) > 0
-                for value in (
-                    OperationLog.source, OperationLog.destination, OperationLog.tool,
-                    OperationLog.user_context, OperationLog.command, OperationLog.output,
-                    OperationLog.description, OperationLog.comments, OperationLog.attachment_name,
-                )
-            ),
-            tag_match,
-        ))
+        tag_match = (
+            select(tags.c.value)
+            .where(
+                func.instr(func.casefold(tags.c.value), needle) > 0,
+            )
+            .exists()
+        )
+        statement = statement.where(
+            or_(
+                *(
+                    func.instr(func.casefold(value), needle) > 0
+                    for value in (
+                        OperationLog.source,
+                        OperationLog.destination,
+                        OperationLog.tool,
+                        OperationLog.user_context,
+                        OperationLog.command,
+                        OperationLog.output,
+                        OperationLog.description,
+                        OperationLog.comments,
+                        OperationLog.attachment_name,
+                    )
+                ),
+                tag_match,
+            )
+        )
     total = session.execute(
         sql_select(func.count()).select_from(statement.subquery()),
     ).scalar_one()
@@ -68,8 +88,11 @@ def operation_logs(
     return OperationPage(
         [
             OperationSummary(oid, started_at, destination, tool, command)
-            for oid, started_at, destination, tool, command
-            in session.connection().execute(statement)
+            for oid, started_at, destination, tool, command in session.connection().execute(
+                statement
+            )
         ],
-        total, page, pages,
+        total,
+        page,
+        pages,
     )

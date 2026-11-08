@@ -21,8 +21,11 @@ class NoteHit:
 
 
 def get_annotation(
-    session: Session, *, engagement_id: str,
-    host_id: int | None = None, service_id: int | None = None
+    session: Session,
+    *,
+    engagement_id: str,
+    host_id: int | None = None,
+    service_id: int | None = None,
 ) -> Annotation | None:
     """The triage annotation for a host or service. Pass exactly one id."""
     assert (host_id is None) != (service_id is None), "pass exactly one target id"
@@ -34,7 +37,8 @@ def get_annotation(
         ).first()
     return session.exec(
         select(Annotation).where(
-            Annotation.engagement_id == engagement_id, Annotation.service_id == service_id
+            Annotation.engagement_id == engagement_id,
+            Annotation.service_id == service_id,
         )
     ).first()
 
@@ -56,7 +60,9 @@ def upsert_annotation(
         session, host_id=host_id, service_id=service_id, engagement_id=engagement_id
     )
     if ann is None:
-        ann = Annotation(engagement_id=engagement_id, host_id=host_id, service_id=service_id)
+        ann = Annotation(
+            engagement_id=engagement_id, host_id=host_id, service_id=service_id
+        )
         session.add(ann)
     ann.status = status
     ann.tags = tags
@@ -86,7 +92,11 @@ def _note_preview(body: str, ql: str, width: int = 200) -> str:
         return body[:width] + ("…" if len(body) > width else "")
     start = max(0, i - 60)
     end = min(len(body), i + len(ql) + 140)
-    return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
+    return (
+        ("…" if start else "")
+        + body[start:end].strip()
+        + ("…" if end < len(body) else "")
+    )
 
 
 def search_notes(session: Session, ql: str, *, engagement_id: str) -> list[NoteHit]:
@@ -94,7 +104,9 @@ def search_notes(session: Session, ql: str, *, engagement_id: str) -> list[NoteH
     only on hosts, and the FK cascade drops them with the host, so the host
     always exists (the None guard is just for the type checker)."""
     hits: list[NoteHit] = []
-    for note in session.exec(select(Note).where(Note.engagement_id == engagement_id)).all():
+    for note in session.exec(
+        select(Note).where(Note.engagement_id == engagement_id)
+    ).all():
         if ql not in note.title.lower() and ql not in note.body_md.lower():
             continue
         host = get_owned(session, Host, note.host_id, engagement_id=engagement_id)
@@ -102,8 +114,11 @@ def search_notes(session: Session, ql: str, *, engagement_id: str) -> list[NoteH
             continue
         hits.append(
             NoteHit(
-                href=f"/{engagement_id}/hosts/{host.id}", where=host.ip, kind="host",
-                title=note.title, preview=_note_preview(note.body_md, ql),
+                href=f"/{engagement_id}/hosts/{host.id}",
+                where=host.ip,
+                kind="host",
+                title=note.title,
+                preview=_note_preview(note.body_md, ql),
             )
         )
     return hits

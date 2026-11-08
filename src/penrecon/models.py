@@ -13,7 +13,16 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, CheckConstraint, Column, ForeignKeyConstraint, Index, Text, UniqueConstraint, desc
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    ForeignKeyConstraint,
+    Index,
+    Text,
+    UniqueConstraint,
+    desc,
+)
 from sqlmodel import Field, SQLModel
 
 
@@ -45,7 +54,9 @@ class Engagement(SQLModel, table=True):
 
 
 class EngagementOwned(SQLModel):
-    engagement_id: str = Field(foreign_key="engagement.id", ondelete="CASCADE", index=True)
+    engagement_id: str = Field(
+        foreign_key="engagement.id", ondelete="CASCADE", index=True
+    )
 
 
 class Scan(EngagementOwned, table=True):
@@ -68,7 +79,11 @@ class ScanEvidenceComplete(EngagementOwned, table=True):
 
     __tablename__ = "scan_evidence_complete"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "scan_id"],
+            ["scan.engagement_id", "scan.id"],
+            ondelete="CASCADE",
+        ),
     )
     scan_id: int = Field(primary_key=True)
 
@@ -96,8 +111,16 @@ class Hostname(EngagementOwned, table=True):
 class HostHostname(EngagementOwned, table=True):
     __tablename__ = "host_hostname"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "hostname_id"], ["hostname.engagement_id", "hostname.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "hostname_id"],
+            ["hostname.engagement_id", "hostname.id"],
+            ondelete="CASCADE",
+        ),
     )
     host_id: int = Field(primary_key=True)
     hostname_id: int = Field(primary_key=True)
@@ -116,7 +139,11 @@ class Service(EngagementOwned, table=True):
     __table_args__ = (
         UniqueConstraint("engagement_id", "id"),
         UniqueConstraint("engagement_id", "host_id", "port", "proto"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     host_id: int = Field(index=True)
@@ -132,8 +159,16 @@ class Observation(EngagementOwned, table=True):
     """One (host, port, proto) as seen by one scan. The snapshot record."""
 
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "scan_id"],
+            ["scan.engagement_id", "scan.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     scan_id: int = Field(index=True)
@@ -158,8 +193,16 @@ class HostScanEvidence(EngagementOwned, table=True):
     __tablename__ = "host_scan_evidence"
     __table_args__ = (
         UniqueConstraint("engagement_id", "scan_id", "host_id"),
-        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "scan_id"],
+            ["scan.engagement_id", "scan.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     scan_id: int = Field(index=True)
@@ -174,7 +217,11 @@ class HostScanState(EngagementOwned, table=True):
 
     __tablename__ = "host_scan_state"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     host_id: int = Field(primary_key=True)
     latest: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
@@ -186,8 +233,16 @@ class HostScanDelta(EngagementOwned, table=True):
 
     __tablename__ = "host_scan_delta"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "scan_id"], ["scan.engagement_id", "scan.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "scan_id"],
+            ["scan.engagement_id", "scan.id"],
+            ondelete="CASCADE",
+        ),
     )
     host_id: int = Field(primary_key=True)
     scan_id: int = Field(primary_key=True)
@@ -199,15 +254,32 @@ class HostTimelineEntry(EngagementOwned, table=True):
 
     __tablename__ = "host_timeline_entry"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        CheckConstraint("source IN ('scan', 'manual')", name="host_timeline_entry_source"),
-        Index(
-            "ix_host_timeline_scope_order", "engagement_id", "host_id",
-            desc("occurred_at"), desc("imported_at"), desc("source"), desc("source_id"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "source IN ('scan', 'manual')", name="host_timeline_entry_source"
         ),
         Index(
-            "ix_host_timeline_scope_changed_order", "engagement_id", "host_id", "changed",
-            desc("occurred_at"), desc("imported_at"), desc("source"), desc("source_id"),
+            "ix_host_timeline_scope_order",
+            "engagement_id",
+            "host_id",
+            desc("occurred_at"),
+            desc("imported_at"),
+            desc("source"),
+            desc("source_id"),
+        ),
+        Index(
+            "ix_host_timeline_scope_changed_order",
+            "engagement_id",
+            "host_id",
+            "changed",
+            desc("occurred_at"),
+            desc("imported_at"),
+            desc("source"),
+            desc("source_id"),
         ),
     )
     host_id: int = Field(primary_key=True)
@@ -223,12 +295,46 @@ class CurrentService(EngagementOwned, table=True):
 
     __tablename__ = "current_service"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        Index("ix_current_service_scope_port_state_host", "engagement_id", "port", "state", "host_id"),
-        Index("ix_current_service_scope_host_port", "engagement_id", "host_id", "port", "service_id"),
-        Index("ix_current_service_scope_host_state_port", "engagement_id", "host_id", "state", "port", "service_id"),
-        Index("ix_current_service_scope_host_name_port", "engagement_id", "host_id", "service_name_lower", "port", "service_id"),
+        ForeignKeyConstraint(
+            ["engagement_id", "service_id"],
+            ["service.engagement_id", "service.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_current_service_scope_port_state_host",
+            "engagement_id",
+            "port",
+            "state",
+            "host_id",
+        ),
+        Index(
+            "ix_current_service_scope_host_port",
+            "engagement_id",
+            "host_id",
+            "port",
+            "service_id",
+        ),
+        Index(
+            "ix_current_service_scope_host_state_port",
+            "engagement_id",
+            "host_id",
+            "state",
+            "port",
+            "service_id",
+        ),
+        Index(
+            "ix_current_service_scope_host_name_port",
+            "engagement_id",
+            "host_id",
+            "service_name_lower",
+            "port",
+            "service_id",
+        ),
     )
     service_id: int = Field(primary_key=True)
     host_id: int
@@ -250,11 +356,40 @@ class HostSummary(EngagementOwned, table=True):
 
     __tablename__ = "host_summary"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        Index("ix_host_summary_scope_change_open_ip", "engagement_id", "change_rank", desc("open_count"), "ip", "host_id"),
-        Index("ix_host_summary_scope_status_ip", "engagement_id", "status", "ip", "host_id"),
-        Index("ix_host_summary_scope_open_ip", "engagement_id", "open_count", "ip", "host_id"),
-        Index("ix_host_summary_scope_ip_sort_ip", "engagement_id", "ip_sort", "ip", "host_id"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        Index(
+            "ix_host_summary_scope_change_open_ip",
+            "engagement_id",
+            "change_rank",
+            desc("open_count"),
+            "ip",
+            "host_id",
+        ),
+        Index(
+            "ix_host_summary_scope_status_ip",
+            "engagement_id",
+            "status",
+            "ip",
+            "host_id",
+        ),
+        Index(
+            "ix_host_summary_scope_open_ip",
+            "engagement_id",
+            "open_count",
+            "ip",
+            "host_id",
+        ),
+        Index(
+            "ix_host_summary_scope_ip_sort_ip",
+            "engagement_id",
+            "ip_sort",
+            "ip",
+            "host_id",
+        ),
     )
     host_id: int = Field(primary_key=True)
     ip: str
@@ -266,7 +401,9 @@ class HostSummary(EngagementOwned, table=True):
     change_rank: int = 2
     hostnames: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     tags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    open_services: list[tuple[int, str | None]] = Field(default_factory=list, sa_column=Column(JSON))
+    open_services: list[tuple[int, str | None]] = Field(
+        default_factory=list, sa_column=Column(JSON)
+    )
     search_values: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
 
@@ -275,7 +412,11 @@ class HostSummaryTag(EngagementOwned, table=True):
 
     __tablename__ = "host_summary_tag"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
         Index("ix_host_summary_tag_scope_tag_host", "engagement_id", "tag", "host_id"),
     )
     host_id: int = Field(primary_key=True)
@@ -291,8 +432,14 @@ class ManualServiceEvent(EngagementOwned, table=True):
 
     __tablename__ = "manual_service_event"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        CheckConstraint("kind IN ('added', 'changed', 'removed')", name="manual_service_event_kind"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "kind IN ('added', 'changed', 'removed')", name="manual_service_event_kind"
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     host_id: int = Field(index=True)
@@ -302,8 +449,12 @@ class ManualServiceEvent(EngagementOwned, table=True):
     kind: str
     before: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
     after: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
-    before_overrides: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
-    after_overrides: dict[str, str | None] | None = Field(default=None, sa_column=Column(JSON))
+    before_overrides: dict[str, str | None] | None = Field(
+        default=None, sa_column=Column(JSON)
+    )
+    after_overrides: dict[str, str | None] | None = Field(
+        default=None, sa_column=Column(JSON)
+    )
 
 
 class Annotation(EngagementOwned, table=True):
@@ -321,8 +472,16 @@ class Annotation(EngagementOwned, table=True):
         ),
         UniqueConstraint("engagement_id", "host_id"),
         UniqueConstraint("engagement_id", "service_id"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "service_id"],
+            ["service.engagement_id", "service.id"],
+            ondelete="CASCADE",
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     host_id: int | None = None
@@ -338,7 +497,11 @@ class Note(EngagementOwned, table=True):
     a host's notes with the host."""
 
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     host_id: int = Field(index=True)
@@ -394,8 +557,16 @@ class Credential(EngagementOwned, table=True):
 class CredentialHost(EngagementOwned, table=True):
     __tablename__ = "credential_host"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "credential_id"], ["credential.engagement_id", "credential.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "host_id"], ["host.engagement_id", "host.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "credential_id"],
+            ["credential.engagement_id", "credential.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "host_id"],
+            ["host.engagement_id", "host.id"],
+            ondelete="CASCADE",
+        ),
     )
     credential_id: int = Field(primary_key=True)
     host_id: int = Field(primary_key=True)
@@ -404,8 +575,16 @@ class CredentialHost(EngagementOwned, table=True):
 class CredentialService(EngagementOwned, table=True):
     __tablename__ = "credential_service"
     __table_args__ = (
-        ForeignKeyConstraint(["engagement_id", "credential_id"], ["credential.engagement_id", "credential.id"], ondelete="CASCADE"),
-        ForeignKeyConstraint(["engagement_id", "service_id"], ["service.engagement_id", "service.id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(
+            ["engagement_id", "credential_id"],
+            ["credential.engagement_id", "credential.id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["engagement_id", "service_id"],
+            ["service.engagement_id", "service.id"],
+            ondelete="CASCADE",
+        ),
     )
     credential_id: int = Field(primary_key=True)
     service_id: int = Field(primary_key=True)

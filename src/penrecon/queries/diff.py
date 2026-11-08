@@ -32,7 +32,8 @@ def _obs_by_key(
         select(Observation, Host.ip)
         .join(Host, Host.id == Observation.host_id)  # type: ignore[arg-type]
         .where(
-            Observation.engagement_id == engagement_id, Host.engagement_id == engagement_id,
+            Observation.engagement_id == engagement_id,
+            Host.engagement_id == engagement_id,
             Observation.scan_id == scan_id,
         )
     )
@@ -76,5 +77,7 @@ def diff_scans(
         sa, sb = _summary(obs_a[key]), _summary(obs_b[key])
         if sa != sb:
             ip, port, proto = key
-            result.entries.append(DiffEntry(ip, port, proto, "changed", before=sa, after=sb))
+            result.entries.append(
+                DiffEntry(ip, port, proto, "changed", before=sa, after=sb)
+            )
     return result

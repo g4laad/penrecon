@@ -20,8 +20,8 @@ from penrecon.models import (
     Engagement,
     Host,
     HostHostname,
-    HostScanEvidence,
     Hostname,
+    HostScanEvidence,
     Note,
     Observation,
     ObsState,
@@ -43,8 +43,13 @@ _PROFILES = (
 
 
 def _retain_mock_scan(
-    session: Session, scan: Scan, host: Host, name: str,
-    ports: list[PortResult], observed: datetime, created_files: list[Path],
+    session: Session,
+    scan: Scan,
+    host: Host,
+    name: str,
+    ports: list[PortResult],
+    observed: datetime,
+    created_files: list[Path],
 ) -> None:
     """Retain matching XML and durable evidence without committing seed work."""
     assert scan.id is not None and host.id is not None
@@ -65,7 +70,7 @@ def _retain_mock_scan(
         f'<?xml version="1.0"?><nmaprun scanner="nmap" start="{timestamp}" version="7.95">'
         f'{coverage}<host><status state="up"/><address addr="{host.ip}" addrtype="ipv4"/>'
         f'<hostnames><hostname name="{name}" type="user"/></hostnames>'
-        f'<ports>{port_xml}</ports></host>'
+        f"<ports>{port_xml}</ports></host>"
         f'<runstats><finished time="{timestamp}" elapsed="0" exit="success"/>'
         '<hosts up="1" down="0" total="1"/></runstats></nmaprun>'
     )
@@ -75,23 +80,36 @@ def _retain_mock_scan(
         created_files.append(raw_path)
         raw_file.write(xml)
     scan.raw_path = str(raw_path.relative_to(DATA_DIR))
-    session.add(HostScanEvidence(
-        engagement_id=scan.engagement_id, scan_id=scan.id, host_id=host.id,
-        scanned_at=evidence.scanned_at, coverage=evidence.coverage,
-        ports=[asdict(port) for port in evidence.ports],
-    ))
-    session.add(ScanEvidenceComplete(
-        engagement_id=scan.engagement_id, scan_id=scan.id,
-    ))
+    session.add(
+        HostScanEvidence(
+            engagement_id=scan.engagement_id,
+            scan_id=scan.id,
+            host_id=host.id,
+            scanned_at=evidence.scanned_at,
+            coverage=evidence.coverage,
+            ports=[asdict(port) for port in evidence.ports],
+        )
+    )
+    session.add(
+        ScanEvidenceComplete(
+            engagement_id=scan.engagement_id,
+            scan_id=scan.id,
+        )
+    )
 
 
 def _seed_host_timeline(
-    session: Session, host: Host, name: str, observed: datetime,
+    session: Session,
+    host: Host,
+    name: str,
+    observed: datetime,
     created_files: list[Path],
 ) -> None:
     """Give the first host a navigable history ending at its normal snapshot."""
     http = PortResult(80, "tcp", service_name="http", product="nginx", version="1.22.1")
-    https = PortResult(443, "tcp", service_name="https", product="Apache httpd", version="2.4.58")
+    https = PortResult(
+        443, "tcp", service_name="https", product="Apache httpd", version="2.4.58"
+    )
     ssh = PortResult(22, "tcp", service_name="ssh", product="OpenSSH", version="9.6")
     closed = [replace(http, state="closed"), https]
     reopened = [replace(http, version="1.23.0"), replace(https, state="filtered"), ssh]
@@ -109,19 +127,32 @@ def _seed_host_timeline(
     for index, (label, ports) in enumerate(snapshots):
         scanned_at = observed - timedelta(days=len(snapshots) - index)
         scan = Scan(
-            engagement_id=host.engagement_id, filename=f"mock-timeline-{index + 1:02d}-{label}.xml",
-            tool="nmap", source_format="nmap", imported_at=scanned_at, host_count=1,
+            engagement_id=host.engagement_id,
+            filename=f"mock-timeline-{index + 1:02d}-{label}.xml",
+            tool="nmap",
+            source_format="nmap",
+            imported_at=scanned_at,
+            host_count=1,
         )
         session.add(scan)
         session.flush()
         _retain_mock_scan(session, scan, host, name, ports, scanned_at, created_files)
         for port in ports:
-            session.add(Observation(
-                engagement_id=host.engagement_id, scan_id=scan.id, host_id=host.id,
-                port=port.port, proto=port.proto, state=ObsState(port.state),
-                service_name=port.service_name, product=port.product, version=port.version,
-                extra={"mock": True}, observed_at=scanned_at,
-            ))
+            session.add(
+                Observation(
+                    engagement_id=host.engagement_id,
+                    scan_id=scan.id,
+                    host_id=host.id,
+                    port=port.port,
+                    proto=port.proto,
+                    state=ObsState(port.state),
+                    service_name=port.service_name,
+                    product=port.product,
+                    version=port.version,
+                    extra={"mock": True},
+                    observed_at=scanned_at,
+                )
+            )
 
 
 @dataclass(frozen=True)
@@ -134,7 +165,10 @@ class SeededEngagement:
 
 
 def seed_mock_engagement(
-    session: Session, count: int = 100, *, name: str,
+    session: Session,
+    count: int = 100,
+    *,
+    name: str,
 ) -> SeededEngagement:
     """Create and seed a new engagement, committing it only with its contents.
 
@@ -145,7 +179,8 @@ def seed_mock_engagement(
     if not 100 <= count <= 131070:
         raise ValueError("count must be between 100 and 131070")
     engagement = Engagement(
-        name=name, description="Synthetic recon workspace for local testing only.",
+        name=name,
+        description="Synthetic recon workspace for local testing only.",
     )
     session.add(engagement)
     try:
@@ -179,9 +214,12 @@ def seed_database(
         table for table in SQLModel.metadata.sorted_tables if "engagement_id" in table.c
     ]
     for table in tables:
-        if session.execute(
-            select(table).where(table.c.engagement_id == engagement_id).limit(1)
-        ).first() is not None:
+        if (
+            session.execute(
+                select(table).where(table.c.engagement_id == engagement_id).limit(1)
+            ).first()
+            is not None
+        ):
             raise ValueError("mock data requires an empty engagement")
 
     now = datetime.now(UTC)
@@ -198,21 +236,33 @@ def seed_database(
             number = index + 1
             ip = str(IPv4Address(int(IPv4Address("198.18.0.0")) + number))
             name = f"host-{number:05d}.mock.test"
-            port, proto, service_name, product, version = _PROFILES[index % len(_PROFILES)]
+            port, proto, service_name, product, version = _PROFILES[
+                index % len(_PROFILES)
+            ]
             state = states[index % len(states)]
             observed = now - timedelta(minutes=count - index)
-            host = Host(engagement_id=engagement_id, ip=ip, first_seen=observed, last_seen=observed)
+            host = Host(
+                engagement_id=engagement_id,
+                ip=ip,
+                first_seen=observed,
+                last_seen=observed,
+            )
             hostname = Hostname(engagement_id=engagement_id, name=name)
             scan = Scan(
                 engagement_id=engagement_id,
-                filename=f"mock-{number:05d}.xml", tool="nmap", source_format="nmap",
-                imported_at=observed, host_count=1,
+                filename=f"mock-{number:05d}.xml",
+                tool="nmap",
+                source_format="nmap",
+                imported_at=observed,
+                host_count=1,
             )
             credential = Credential(
                 engagement_id=engagement_id,
-                kind=kinds[index % len(kinds)], username=f"mock-user-{number:05d}",
+                kind=kinds[index % len(kinds)],
+                username=f"mock-user-{number:05d}",
                 secret=f"MOCK-NOT-A-REAL-SECRET-{number:05d}",
-                notes="Synthetic credential for local testing only.", created_at=observed,
+                notes="Synthetic credential for local testing only.",
+                created_at=observed,
             )
             session.add_all([host, hostname, scan, credential])
             session.flush()
@@ -223,31 +273,53 @@ def seed_database(
             for svc_port, svc_proto, svc_name, svc_product, svc_version in profiles:
                 svc_state = ObsState.open if index == 0 else state
                 service = Service(
-                    engagement_id=engagement_id, host_id=host.id, port=svc_port, proto=svc_proto
+                    engagement_id=engagement_id,
+                    host_id=host.id,
+                    port=svc_port,
+                    proto=svc_proto,
                 )
                 session.add(service)
                 session.flush()
                 assert service.id is not None
-                session.add_all([
-                    Observation(
-                        engagement_id=engagement_id,
-                        scan_id=scan.id, host_id=host.id, port=svc_port, proto=svc_proto,
-                        state=svc_state, service_name=svc_name, product=svc_product,
-                        version=svc_version, extra={"mock": True}, observed_at=observed,
-                    ),
-                    Annotation(
-                        engagement_id=engagement_id,
-                        service_id=service.id, status=statuses[(index + 1) % len(statuses)],
-                        tags=["mock", svc_name], updated_at=observed,
-                    ),
-                    CredentialService(
-                        engagement_id=engagement_id, credential_id=credential.id, service_id=service.id
-                    ),
-                ])
-                ports.append(PortResult(
-                    svc_port, svc_proto, state=svc_state.value,
-                    service_name=svc_name, product=svc_product, version=svc_version,
-                ))
+                session.add_all(
+                    [
+                        Observation(
+                            engagement_id=engagement_id,
+                            scan_id=scan.id,
+                            host_id=host.id,
+                            port=svc_port,
+                            proto=svc_proto,
+                            state=svc_state,
+                            service_name=svc_name,
+                            product=svc_product,
+                            version=svc_version,
+                            extra={"mock": True},
+                            observed_at=observed,
+                        ),
+                        Annotation(
+                            engagement_id=engagement_id,
+                            service_id=service.id,
+                            status=statuses[(index + 1) % len(statuses)],
+                            tags=["mock", svc_name],
+                            updated_at=observed,
+                        ),
+                        CredentialService(
+                            engagement_id=engagement_id,
+                            credential_id=credential.id,
+                            service_id=service.id,
+                        ),
+                    ]
+                )
+                ports.append(
+                    PortResult(
+                        svc_port,
+                        svc_proto,
+                        state=svc_state.value,
+                        service_name=svc_name,
+                        product=svc_product,
+                        version=svc_version,
+                    )
+                )
 
             _retain_mock_scan(session, scan, host, name, ports, observed, created_files)
             if index == 0:
@@ -258,45 +330,62 @@ def seed_database(
             with attachment.open("x") as attachment_file:
                 created_files.append(attachment)
                 attachment_file.write(output)
-            session.add_all([
-                HostHostname(
-                    engagement_id=engagement_id, host_id=host.id,
-                    hostname_id=hostname.id, last_seen=observed,
-                ),
-                Annotation(
-                    engagement_id=engagement_id,
-                    host_id=host.id, status=statuses[index % len(statuses)],
-                    tags=["mock", "internal"], updated_at=observed,
-                ),
-                Note(
-                    engagement_id=engagement_id,
-                    host_id=host.id, title=f"Mock triage: {name}",
-                    body_md=f"## Synthetic finding\n\nReview `{ip}:{port}` ({product}).\n\n"
-                    "- [x] Discovery complete\n- [ ] Validate configuration\n\n"
-                    "This is generated test data, not a real finding.",
-                    created_at=observed, updated_at=observed,
-                ),
-                CredentialHost(
-                    engagement_id=engagement_id, credential_id=credential.id, host_id=host.id
-                ),
-                OperationLog(
-                    engagement_id=engagement_id,
-                    started_at=observed, ended_at=observed + timedelta(seconds=30),
-                    source="198.19.255.254", destination=ip, tool="nmap",
-                    user_context=f"mock-operator-{index % 5 + 1}",
-                    command=f"nmap -sV -p {port} {ip}", output=output,
-                    description=f"Mock reconnaissance of {name}",
-                    comments="Synthetic operation; this command was not executed.",
-                    tags=["mock", "recon"], attachment_name=attachment.name,
-                    attachment_path=str(attachment.relative_to(DATA_DIR)),
-                    attachment_media_type="text/plain",
-                    created_at=observed, updated_at=observed,
-                ),
-            ])
+            session.add_all(
+                [
+                    HostHostname(
+                        engagement_id=engagement_id,
+                        host_id=host.id,
+                        hostname_id=hostname.id,
+                        last_seen=observed,
+                    ),
+                    Annotation(
+                        engagement_id=engagement_id,
+                        host_id=host.id,
+                        status=statuses[index % len(statuses)],
+                        tags=["mock", "internal"],
+                        updated_at=observed,
+                    ),
+                    Note(
+                        engagement_id=engagement_id,
+                        host_id=host.id,
+                        title=f"Mock triage: {name}",
+                        body_md=f"## Synthetic finding\n\nReview `{ip}:{port}` ({product}).\n\n"
+                        "- [x] Discovery complete\n- [ ] Validate configuration\n\n"
+                        "This is generated test data, not a real finding.",
+                        created_at=observed,
+                        updated_at=observed,
+                    ),
+                    CredentialHost(
+                        engagement_id=engagement_id,
+                        credential_id=credential.id,
+                        host_id=host.id,
+                    ),
+                    OperationLog(
+                        engagement_id=engagement_id,
+                        started_at=observed,
+                        ended_at=observed + timedelta(seconds=30),
+                        source="198.19.255.254",
+                        destination=ip,
+                        tool="nmap",
+                        user_context=f"mock-operator-{index % 5 + 1}",
+                        command=f"nmap -sV -p {port} {ip}",
+                        output=output,
+                        description=f"Mock reconnaissance of {name}",
+                        comments="Synthetic operation; this command was not executed.",
+                        tags=["mock", "recon"],
+                        attachment_name=attachment.name,
+                        attachment_path=str(attachment.relative_to(DATA_DIR)),
+                        attachment_media_type="text/plain",
+                        created_at=observed,
+                        updated_at=observed,
+                    ),
+                ]
+            )
         session.flush()
         counts = {
             table.name: session.execute(
-                select(func.count()).select_from(table)
+                select(func.count())
+                .select_from(table)
                 .where(table.c.engagement_id == engagement_id)
             ).scalar_one()
             for table in tables

@@ -61,7 +61,7 @@ def _timestamp(*values: str | None) -> datetime | None:
         try:
             if value is not None:
                 return datetime.fromtimestamp(float(value), UTC)
-        except (ValueError, OverflowError, OSError):
+        except ValueError, OverflowError, OSError:
             continue
     return None
 
@@ -70,10 +70,18 @@ def _scan_coverage(root: ET.Element) -> dict[str, set[int]]:
     scanned: dict[str, set[int]] = {}
     invalid: set[str] = set()
     for info in root.findall("scaninfo"):
-        proto = normalize_protocol(info.get("protocol", "")) if info.get("protocol", "").strip() else ""
+        proto = (
+            normalize_protocol(info.get("protocol", ""))
+            if info.get("protocol", "").strip()
+            else ""
+        )
         selected = _port_set(info.get("services", ""))
         count = _count(info.get("numservices"))
-        if not proto or selected is None or (count is not None and len(selected) != count):
+        if (
+            not proto
+            or selected is None
+            or (count is not None and len(selected) != count)
+        ):
             invalid.add(proto)
             continue
         scanned.setdefault(proto, set()).update(selected)
@@ -83,8 +91,10 @@ def _scan_coverage(root: ET.Element) -> dict[str, set[int]]:
 
 
 def _coverage(
-    host: ET.Element, ports: list[PortResult],
-    scanned: dict[str, set[int]], scanned_ranges: dict[str, list[list[int]]],
+    host: ET.Element,
+    ports: list[PortResult],
+    scanned: dict[str, set[int]],
+    scanned_ranges: dict[str, list[list[int]]],
 ) -> dict[str, Any]:
     explicit = {(port.proto, port.port) for port in ports}
     assigned: dict[tuple[str, int], str] = {}
@@ -98,7 +108,11 @@ def _coverage(
             continue
         named: set[tuple[str, int]] = set()
         for reason in group.findall("extrareasons"):
-            proto = normalize_protocol(reason.get("proto", "")) if reason.get("proto", "").strip() else ""
+            proto = (
+                normalize_protocol(reason.get("proto", ""))
+                if reason.get("proto", "").strip()
+                else ""
+            )
             values = _port_set(reason.get("ports", ""))
             count = _count(reason.get("count"))
             if not proto or values is None or count != len(values):
@@ -123,7 +137,8 @@ def _coverage(
         excluded = explicit | assigned.keys()
         remaining = {
             (proto, port)
-            for proto, values in scanned.items() for port in values
+            for proto, values in scanned.items()
+            for port in values
             if (proto, port) not in excluded
         }
         if len(remaining) == sum(count for _, count in outstanding):
@@ -134,7 +149,10 @@ def _coverage(
             groups.setdefault((proto, state), set()).add(port)
     return {
         "known": bool(scanned),
-        "ports": {proto: [pair.copy() for pair in ranges] for proto, ranges in scanned_ranges.items()},
+        "ports": {
+            proto: [pair.copy() for pair in ranges]
+            for proto, ranges in scanned_ranges.items()
+        },
         "states": [
             {"proto": proto, "state": state, "ports": _ranges(values)}
             for (proto, state), values in sorted(groups.items())
@@ -155,7 +173,11 @@ def parse(data: bytes) -> ScanResult:
     scanned_ranges: dict[str, list[list[int]]] = {}
     for host in root.findall("host"):
         address = next(
-            (node.get("addr") for node in host.findall("address") if node.get("addrtype") in {"ipv4", "ipv6"}),
+            (
+                node.get("addr")
+                for node in host.findall("address")
+                if node.get("addrtype") in {"ipv4", "ipv6"}
+            ),
             None,
         )
         if address is None:
@@ -166,44 +188,76 @@ def parse(data: bytes) -> ScanResult:
             number = _count(node.get("portid"))
             proto = node.get("protocol")
             state = node.find("state")
-            if number is None or number > 65535 or not proto or state is None or not state.get("state"):
+            if (
+                number is None
+                or number > 65535
+                or not proto
+                or state is None
+                or not state.get("state")
+            ):
                 raise ValueError("Invalid nmap port evidence")
             service = node.find("service")
             extra: dict[str, Any] = {}
             scripts = node.findall("script")
             if scripts:
-                extra["scripts"] = {script.get("id", ""): script.get("output", "") for script in scripts}
-            ports.append(PortResult(
-                port=number,
-                proto=normalize_protocol(proto),
-                state=_state(state.get("state", "")),
-                service_name=service.get("name") or None if service is not None else None,
-                product=service.get("product") or None if service is not None else None,
-                version=service.get("version") or None if service is not None else None,
-                extra=extra,
-            ))
+                extra["scripts"] = {
+                    script.get("id", ""): script.get("output", "") for script in scripts
+                }
+            ports.append(
+                PortResult(
+                    port=number,
+                    proto=normalize_protocol(proto),
+                    state=_state(state.get("state", "")),
+                    service_name=service.get("name") or None
+                    if service is not None
+                    else None,
+                    product=service.get("product") or None
+                    if service is not None
+                    else None,
+                    version=service.get("version") or None
+                    if service is not None
+                    else None,
+                    extra=extra,
+                )
+            )
         ports = list({(port.port, port.proto): port for port in ports}.values())
-        names = list(dict.fromkeys(
-            normalize_hostname(node.get("name", ""))
-            for node in host.findall("hostnames/hostname") if node.get("name")
-        ))
+        names = list(
+            dict.fromkeys(
+                normalize_hostname(node.get("name", ""))
+                for node in host.findall("hostnames/hostname")
+                if node.get("name")
+            )
+        )
         if scanned is None:
             scanned = _scan_coverage(root)
-            scanned_ranges = {proto: _ranges(values) for proto, values in scanned.items()}
+            scanned_ranges = {
+                proto: _ranges(values) for proto, values in scanned.items()
+            }
         result = HostResult(
             ip=address,
             hostnames=names,
             ports=ports,
-            scanned_at=_timestamp(host.get("starttime"), root.get("start"), host.get("endtime"), finished.get("time") if finished is not None else None),
+            scanned_at=_timestamp(
+                host.get("starttime"),
+                root.get("start"),
+                host.get("endtime"),
+                finished.get("time") if finished is not None else None,
+            ),
             coverage=_coverage(host, ports, scanned, scanned_ranges),
         )
         previous = hosts.get(address)
         if previous is not None:
             result.hostnames = list(dict.fromkeys(previous.hostnames + names))
-            result.ports = list({
-                (port.port, port.proto): port for port in previous.ports + ports
-            }.values())
-            times = [value for value in (previous.scanned_at, result.scanned_at) if value is not None]
+            result.ports = list(
+                {
+                    (port.port, port.proto): port for port in previous.ports + ports
+                }.values()
+            )
+            times = [
+                value
+                for value in (previous.scanned_at, result.scanned_at)
+                if value is not None
+            ]
             result.scanned_at = max(times) if times else None
             if previous.coverage != result.coverage:
                 result.coverage = {}

@@ -30,8 +30,13 @@ from tests.fixtures import SCAN_A, TEST_ENGAGEMENT_ID, api_url
 
 
 @pytest.fixture
-def import_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Engine, list[Session]]]:
-    engine = create_engine(f"sqlite:///{tmp_path / 'imports.db'}", connect_args={"check_same_thread": False})
+def import_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[Engine, list[Session]]]:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'imports.db'}",
+        connect_args={"check_same_thread": False},
+    )
     db.enable_sqlite_fks(engine)
     monkeypatch.setattr(db, "engine", engine)
     monkeypatch.setattr(db, "DATA_DIR", tmp_path)
@@ -57,13 +62,18 @@ def import_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tu
 
 def _client() -> AsyncClient:
     return AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver",
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
         headers={"X-Penrecon-Request": "1", "Accept": "application/json"},
     )
 
 
 async def _upload(client: AsyncClient, filename: str = "scan.xml") -> Any:
-    return await client.post(api_url("/scans"), files={"file": (filename, SCAN_A, "text/xml")}, data={"tool": "nmap"})
+    return await client.post(
+        api_url("/scans"),
+        files={"file": (filename, SCAN_A, "text/xml")},
+        data={"tool": "nmap"},
+    )
 
 
 def _assert_retained(engine: Engine, expected: int) -> None:
@@ -76,12 +86,15 @@ def _assert_retained(engine: Engine, expected: int) -> None:
             assert (db.DATA_DIR / scan.raw_path).read_bytes() == SCAN_A.encode()
         assert len(session.exec(select(Host)).all()) == (1 if expected else 0)
         assert len(session.exec(select(Observation)).all()) == 2 * expected
-        assert session.exec(select(Scan).where(Scan.engagement_id == "other")).all() == []
+        assert (
+            session.exec(select(Scan).where(Scan.engagement_id == "other")).all() == []
+        )
     assert len(list(db.DATA_DIR.rglob("*.xml"))) == expected
 
 
 def test_upload_parsing_leaves_event_loop_and_read_routes_responsive(
-    import_store: tuple[Engine, list[Session]], monkeypatch: pytest.MonkeyPatch,
+    import_store: tuple[Engine, list[Session]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine, request_sessions = import_store
     entered, release = threading.Event(), threading.Event()
@@ -107,7 +120,9 @@ def test_upload_parsing_leaves_event_loop_and_read_routes_responsive(
             upload = asyncio.create_task(_upload(client))
             try:
                 assert await anyio.to_thread.run_sync(entered.wait, 2)
-                assert not upload.done(), "the upload blocked the event loop until parsing finished"
+                assert not upload.done(), (
+                    "the upload blocked the event loop until parsing finished"
+                )
                 for path in ("/hosts", "/scans"):
                     response = await asyncio.wait_for(client.get(api_url(path)), 1)
                     assert response.status_code == 200
@@ -118,7 +133,10 @@ def test_upload_parsing_leaves_event_loop_and_read_routes_responsive(
                 response = await upload
             assert response.status_code == 200
             assert commits
-            assert all(session not in request_sessions and thread != loop_thread for session, thread in commits)
+            assert all(
+                session not in request_sessions and thread != loop_thread
+                for session, thread in commits
+            )
 
     try:
         asyncio.run(scenario())
@@ -133,7 +151,14 @@ def test_wal_readers_and_competing_upload_writers_preserve_both_scans(
     engine, _ = import_store
     insert_started = threading.Event()
 
-    def observe_insert(_conn: Any, _cursor: Any, statement: str, _parameters: Any, _context: Any, _many: bool) -> None:
+    def observe_insert(
+        _conn: Any,
+        _cursor: Any,
+        statement: str,
+        _parameters: Any,
+        _context: Any,
+        _many: bool,
+    ) -> None:
         if statement.startswith("INSERT INTO scan "):
             insert_started.set()
 
@@ -143,8 +168,14 @@ def test_wal_readers_and_competing_upload_writers_preserve_both_scans(
         async with _client() as client:
             with engine.connect() as lock:
                 lock.exec_driver_sql("BEGIN IMMEDIATE")
-                lock.exec_driver_sql("UPDATE engagement SET name = 'Committed writer' WHERE id = ?", (TEST_ENGAGEMENT_ID,))
-                uploads = [asyncio.create_task(_upload(client, f"{index}.xml")) for index in range(2)]
+                lock.exec_driver_sql(
+                    "UPDATE engagement SET name = 'Committed writer' WHERE id = ?",
+                    (TEST_ENGAGEMENT_ID,),
+                )
+                uploads = [
+                    asyncio.create_task(_upload(client, f"{index}.xml"))
+                    for index in range(2)
+                ]
                 try:
                     assert await anyio.to_thread.run_sync(insert_started.wait, 2)
                     assert not any(upload.done() for upload in uploads)
@@ -189,7 +220,9 @@ def test_wal_upload_commits_while_existing_reader_keeps_its_snapshot(
 
 @pytest.mark.parametrize("failure", ["parse", "partial_write", "commit", "refresh"])
 def test_worker_errors_preserve_rollback_and_retained_file_semantics(
-    import_store: tuple[Engine, list[Session]], monkeypatch: pytest.MonkeyPatch, failure: str,
+    import_store: tuple[Engine, list[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
 ) -> None:
     engine, _ = import_store
     if failure == "partial_write":
@@ -201,11 +234,13 @@ def test_worker_errors_preserve_rollback_and_retained_file_semantics(
 
         monkeypatch.setattr(Path, "write_bytes", broken_write)
     elif failure == "commit":
+
         def broken_commit(_session: Session) -> None:
             raise RuntimeError("scan commit failed")
 
         monkeypatch.setattr(Session, "commit", broken_commit)
     elif failure == "refresh":
+
         def broken_refresh(_session: Session, *_args: Any, **_kwargs: Any) -> None:
             raise RuntimeError("scan refresh failed")
 
@@ -214,11 +249,17 @@ def test_worker_errors_preserve_rollback_and_retained_file_semantics(
     async def scenario() -> None:
         async with _client() as client:
             if failure == "parse":
-                response = await client.post(api_url("/scans"), files={"file": ("bad.xml", b"not XML", "text/xml")})
+                response = await client.post(
+                    api_url("/scans"),
+                    files={"file": ("bad.xml", b"not XML", "text/xml")},
+                )
                 assert response.status_code == 400
                 assert "XML" in response.json()["detail"]
             else:
-                with pytest.raises((OSError, RuntimeError), match="partial scan write|scan commit failed|scan refresh failed"):
+                with pytest.raises(
+                    (OSError, RuntimeError),
+                    match="partial scan write|scan commit failed|scan refresh failed",
+                ):
                     await _upload(client)
 
     asyncio.run(scenario())
@@ -226,7 +267,8 @@ def test_worker_errors_preserve_rollback_and_retained_file_semantics(
 
 
 def test_worker_rechecks_ownership_and_always_closes_upload(
-    import_store: tuple[Engine, list[Session]], monkeypatch: pytest.MonkeyPatch,
+    import_store: tuple[Engine, list[Session]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine, _ = import_store
 
@@ -240,7 +282,11 @@ def test_worker_rechecks_ownership_and_always_closes_upload(
         monkeypatch.setattr(evidence, "MAX_UPLOAD_BYTES", 8)
         async with _client() as client:
             assert (await _upload(client)).status_code == 413
-            assert (await client.post(api_url("/scans", "missing"), files={"file": ("scan.xml", SCAN_A)})).status_code == 404
+            assert (
+                await client.post(
+                    api_url("/scans", "missing"), files={"file": ("scan.xml", SCAN_A)}
+                )
+            ).status_code == 404
 
     asyncio.run(scenario())
     _assert_retained(engine, 0)
@@ -249,7 +295,9 @@ def test_worker_rechecks_ownership_and_always_closes_upload(
 @pytest.mark.parametrize("cancellation", ["anyio", "asyncio"])
 @pytest.mark.parametrize("fail_after_write", [False, True])
 def test_request_cancellation_waits_for_worker_commit_or_compensation(
-    import_store: tuple[Engine, list[Session]], monkeypatch: pytest.MonkeyPatch, fail_after_write: bool,
+    import_store: tuple[Engine, list[Session]],
+    monkeypatch: pytest.MonkeyPatch,
+    fail_after_write: bool,
     cancellation: str,
 ) -> None:
     engine, _ = import_store
@@ -272,13 +320,16 @@ def test_request_cancellation_waits_for_worker_commit_or_compensation(
         upload_tasks: list[asyncio.Task[Any]] = []
         file = UploadFile(io.BytesIO(SCAN_A.encode()), filename="scan.xml")
         with Session(engine) as request_session:
+
             async def upload() -> None:
                 task = asyncio.current_task()
                 assert task is not None
                 upload_tasks.append(task)
                 try:
                     with scope:
-                        await evidence.upload_scan(file, "nmap", TEST_ENGAGEMENT_ID, request_session)
+                        await evidence.upload_scan(
+                            file, "nmap", TEST_ENGAGEMENT_ID, request_session
+                        )
                 except (OSError, asyncio.CancelledError) as exc:
                     errors.append(exc)
                 finally:
@@ -305,9 +356,14 @@ def test_request_cancellation_waits_for_worker_commit_or_compensation(
                     await complete.wait()
             assert file.file.closed
             if cancellation == "asyncio":
-                assert len(errors) == 1 and isinstance(errors[0], asyncio.CancelledError)
+                assert len(errors) == 1 and isinstance(
+                    errors[0], asyncio.CancelledError
+                )
                 if fail_after_write:
-                    assert any("cancelled request write failure" in note for note in errors[0].__notes__)
+                    assert any(
+                        "cancelled request write failure" in note
+                        for note in errors[0].__notes__
+                    )
             else:
                 assert bool(errors) is fail_after_write
 
@@ -317,11 +373,14 @@ def test_request_cancellation_waits_for_worker_commit_or_compensation(
 
 @pytest.mark.parametrize("memory", [False, True])
 def test_database_initialization_is_idempotent_and_durable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, memory: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    memory: bool,
 ) -> None:
     engine = create_engine(
         "sqlite://" if memory else f"sqlite:///{tmp_path / 'database.db'}",
-        connect_args={"check_same_thread": False}, **({"poolclass": StaticPool} if memory else {}),
+        connect_args={"check_same_thread": False},
+        **({"poolclass": StaticPool} if memory else {}),
     )
     db.enable_sqlite_fks(engine)
     monkeypatch.setattr(db, "engine", engine)
@@ -338,17 +397,29 @@ def test_database_initialization_is_idempotent_and_durable(
             if not memory:
                 engine.dispose()
             with engine.connect() as connection:
-                assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one() == ("memory" if memory else "wal")
-                assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == db.SQLITE_BUSY_TIMEOUT_MS
-                assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 2
-                assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+                assert connection.exec_driver_sql(
+                    "PRAGMA journal_mode"
+                ).scalar_one() == ("memory" if memory else "wal")
+                assert (
+                    connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+                    == db.SQLITE_BUSY_TIMEOUT_MS
+                )
+                assert (
+                    connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 2
+                )
+                assert (
+                    connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+                )
     finally:
         engine.dispose()
 
 
-@pytest.mark.parametrize("outcome", ["success", "oversize", "disconnect", "handler_error", "cancel"])
+@pytest.mark.parametrize(
+    "outcome", ["success", "oversize", "disconnect", "handler_error", "cancel"]
+)
 def test_security_disk_spooling_is_off_loop_bounded_and_closed(
-    monkeypatch: pytest.MonkeyPatch, outcome: str,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
 ) -> None:
     disk_files: list[Any] = []
     disk_operations: list[str] = []
@@ -365,14 +436,18 @@ def test_security_disk_spooling_is_off_loop_bounded_and_closed(
                 return value
 
             def off_loop(*args: Any, **kwargs: Any) -> Any:
-                assert threading.get_ident() != loop_thread, f"disk {name} ran on the event loop"
+                assert threading.get_ident() != loop_thread, (
+                    f"disk {name} ran on the event loop"
+                )
                 disk_operations.append(name)
                 return value(*args, **kwargs)
 
             return off_loop
 
     def guarded_temporary_file(*args: Any, **kwargs: Any) -> Any:
-        assert threading.get_ident() != loop_thread, "disk creation ran on the event loop"
+        assert threading.get_ident() != loop_thread, (
+            "disk creation ran on the event loop"
+        )
         file = GuardedFile(temporary_file(*args, **kwargs))
         disk_files.append(file)
         return file
@@ -380,9 +455,17 @@ def test_security_disk_spooling_is_off_loop_bounded_and_closed(
     monkeypatch.setattr(tempfile, "TemporaryFile", guarded_temporary_file)
     monkeypatch.setattr(security, "MAX_REQUEST_BYTES", 2 * 1024 * 1024)
     payload = b"retained request bytes" * 60_000
-    messages = [{"type": "http.request", "body": payload, "more_body": outcome in {"oversize", "disconnect"}}]
+    messages = [
+        {
+            "type": "http.request",
+            "body": payload,
+            "more_body": outcome in {"oversize", "disconnect"},
+        }
+    ]
     if outcome == "oversize":
-        messages.append({"type": "http.request", "body": b"x" * 1024 * 1024, "more_body": False})
+        messages.append(
+            {"type": "http.request", "body": b"x" * 1024 * 1024, "more_body": False}
+        )
     elif outcome == "disconnect":
         messages.append({"type": "http.disconnect"})
     responses: list[Any] = []
@@ -410,7 +493,13 @@ def test_security_disk_spooling_is_off_loop_bounded_and_closed(
             await anyio.sleep(0)
         await JSONResponse({"sha256": digest.hexdigest()})(scope, replay, reply)
 
-    scope = {"type": "http", "method": "POST", "path": "/api/scans", "scheme": "http", "headers": [(b"host", b"testserver"), (b"x-penrecon-request", b"1")]}
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/scans",
+        "scheme": "http",
+        "headers": [(b"host", b"testserver"), (b"x-penrecon-request", b"1")],
+    }
     outer_scope: anyio.CancelScope
 
     async def scenario() -> None:
@@ -434,4 +523,7 @@ def test_security_disk_spooling_is_off_loop_bounded_and_closed(
         assert responses[0]["status"] == (200 if outcome == "success" else 413)
         assert (b"cache-control", b"no-store") in responses[0]["headers"]
         if outcome == "success":
-            assert json.loads(responses[1]["body"])["sha256"] == hashlib.sha256(payload).hexdigest()
+            assert (
+                json.loads(responses[1]["body"])["sha256"]
+                == hashlib.sha256(payload).hexdigest()
+            )
