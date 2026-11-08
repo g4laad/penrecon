@@ -315,7 +315,7 @@ def test_credential_api_json_only_association_workflow(client: TestClient) -> No
     )
 
     created = client.post("/api/engagements", data={"name": "Other engagement"}).json()
-    other_id = created["redirect_to"].strip("/").split("/")[1]
+    other_id = created["redirect_to"].strip("/")
     foreign_detail = client.get(api_url(f"/credentials/{credential_id}", other_id))
     assert foreign_detail.status_code == 404
     assert foreign_detail.headers["cache-control"] == "no-store"
@@ -344,7 +344,7 @@ def test_credential_pages_count_filter_clamp_and_isolate(client: TestClient) -> 
             "username": f"operator-{index:02}", "kind": "token" if index < 12 else "password",
             "secret": "never-return-this",
         }).status_code == 200
-    other = client.post("/api/engagements", data={"name": "Other"}).json()["redirect_to"].split("/")[2]
+    other = client.post("/api/engagements", data={"name": "Other"}).json()["redirect_to"].strip("/")
     assert client.post(api_url("/credentials", other), data={"username": "operator-foreign"}).status_code == 200
     default = client.get(api_url("/credentials"))
     assert default.headers["cache-control"] == "no-store"

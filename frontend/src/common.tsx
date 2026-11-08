@@ -33,10 +33,10 @@ import { apiUrl } from "./lib/api";
 /** Scope domain URLs to this tab's explicit engagement URL, never global state. */
 export function engagementUrl(url: string): string {
   if (!url.startsWith("/") || url.startsWith("//") ||
-      /^\/(?:e|engagements)(?:\/|[?#]|$)/.test(url)) return url;
-  const match = location.pathname.match(/^\/e\/([^/]+)(?:\/|$)/);
+      /^\/(?:engagements|[0-9a-f-]{36})(?:\/|[?#]|$)/.test(url)) return url;
+  const match = location.pathname.match(/^\/([0-9a-f-]{36})(?:\/|$)/);
   if (!match) throw new Error("Domain navigation requires an engagement");
-  return `/e/${match[1]}${url}`;
+  return `/${match[1]}${url}`;
 }
 
 export function ScopedLink({ href, ...props }: ComponentProps<"a">) {

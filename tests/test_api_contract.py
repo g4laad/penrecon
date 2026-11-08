@@ -134,7 +134,7 @@ def test_validation_errors_are_field_addressable_without_echoing_secrets(client:
 def test_foreign_host_mutation_returns_404_without_changing_owner(client: TestClient) -> None:
     engagement = client.post("/api/engagements", data={"name": "Other"})
     assert engagement.status_code == 200
-    other_id = urlsplit(engagement.json()["redirect_to"]).path.strip("/").split("/")[1]
+    other_id = urlsplit(engagement.json()["redirect_to"]).path.strip("/")
     created = client.post(api_url("/hosts", other_id), data={"ip": "10.0.0.8"})
     assert created.status_code == 200
     document_path = urlsplit(created.json()["redirect_to"]).path
@@ -259,7 +259,7 @@ def test_mutation_rejects_incorrect_request_marker_without_writing(client: TestC
 
 @pytest.mark.parametrize("path,fields", [
     ("/engagements", {"name": "Must not exist"}),
-    (f"/e/{TEST_ENGAGEMENT_ID}/hosts", {"ip": "10.0.0.8"}),
+    (f"/{TEST_ENGAGEMENT_ID}/hosts", {"ip": "10.0.0.8"}),
 ])
 def test_document_urls_do_not_accept_api_mutations(
     client: TestClient, path: str, fields: dict[str, str],

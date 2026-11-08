@@ -483,7 +483,7 @@ function EngagementsPage({ data }: { data: PageData }) {
             </TableRow></TableHeader>
             <TableBody>{data.catalog.map((engagement) => (
               <TableRow key={engagement.id}>
-                <TableCell className="min-w-40 max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/e/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
+                <TableCell className="min-w-40 max-w-64 whitespace-normal [overflow-wrap:anywhere] font-medium"><ScopedLink href={`/${engagement.id}/`}>{engagement.name}</ScopedLink></TableCell>
                 <TableCell className="min-w-48 max-w-xl whitespace-pre-wrap [overflow-wrap:anywhere]">{engagement.description}</TableCell>
                 <TableCell className="mono"><time dateTime={engagement.created_at}>{engagement.created_at.replace("T", " ").slice(0, 16)}</time></TableCell>
                 <TableCell className="text-right">
@@ -522,7 +522,7 @@ export default function App() {
       ) as PageData,
   );
   const [initialized, setInitialized] = useState(false);
-  const path = location.pathname.replace(/^\/e\/[^/]+/, "") || "/";
+  const path = data.engagement ? location.pathname.replace(/^\/[^/]+/, "") || "/" : location.pathname;
   const queryRequest = useRef<AbortController | null>(null);
   const queryFocus = useRef<HTMLElement | null>(null);
   const loadedQuery = useRef(location.pathname + location.search);

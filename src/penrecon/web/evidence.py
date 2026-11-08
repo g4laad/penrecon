@@ -208,7 +208,7 @@ async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap
     finally:
         with CancelScope(shield=True):
             await file.close()
-    return mutation_response(request, f"/e/{engagement_id}/scans")
+    return mutation_response(request, f"/{engagement_id}/scans")
 
 
 @router.get("/diff", response_model=DiffResponse)

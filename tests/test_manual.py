@@ -100,12 +100,12 @@ def test_missing_host_mutations_return_not_found(client: TestClient) -> None:
 def test_foreign_host_mutations_return_not_found_without_changing_inventory(client: TestClient) -> None:
     created = client.post(api_url(f"/hosts"), data={"ip": "10.0.0.99"})
     assert created.status_code == 200
-    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")[1:]
+    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")
     host_path = api_url(f"/hosts/{host_id}", engagement_id)
     host_id = urlsplit(host_path).path.rsplit("/", 1)[1]
     engagement = client.post("/api/engagements", data={"name": "Other inventory"})
     assert engagement.status_code == 200
-    foreign_id = urlsplit(engagement.json()["redirect_to"]).path.strip("/").split("/")[1]
+    foreign_id = urlsplit(engagement.json()["redirect_to"]).path.strip("/")
     for method, data in (("PATCH", {"ip": "10.0.0.100"}), ("DELETE", {})):
         response = client.request(method, api_url(f"/hosts/{host_id}", foreign_id), data=data)
         assert response.status_code == 404
@@ -118,7 +118,7 @@ def test_foreign_host_mutations_return_not_found_without_changing_inventory(clie
 def test_malformed_inventory_numbers_use_safe_defaults(client: TestClient, raw: str) -> None:
     created = client.post(api_url(f"/hosts"), data={"ip": "10.0.0.99"})
     assert created.status_code == 200
-    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")[1:]
+    engagement_id, _, host_id = urlsplit(created.json()["redirect_to"]).path.strip("/").split("/")
     host_path = api_url(f"/hosts/{host_id}", engagement_id)
     host_id = urlsplit(host_path).path.rsplit("/", 1)[1]
     added = client.post(api_url(urlsplit(host_path).path.removeprefix("/api") + "/services", parse_qs(urlsplit(host_path).query)["engagement_id"][0]), data={"port": "443", "service_name": "https"})

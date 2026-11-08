@@ -43,13 +43,13 @@ def catalog_page(session: Session = Depends(get_session)) -> HTMLResponse:
     return shell(session)
 
 
-@router.get("/e/{engagement_id}/", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/hosts/{host_id}", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/credentials", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/scans", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/diff", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/operations", response_class=HTMLResponse)
-@router.get("/e/{engagement_id}/search", response_class=HTMLResponse)
+@router.get("/{engagement_id}/", response_class=HTMLResponse)
+@router.get("/{engagement_id}/hosts/{host_id}", response_class=HTMLResponse)
+@router.get("/{engagement_id}/credentials", response_class=HTMLResponse)
+@router.get("/{engagement_id}/scans", response_class=HTMLResponse)
+@router.get("/{engagement_id}/diff", response_class=HTMLResponse)
+@router.get("/{engagement_id}/operations", response_class=HTMLResponse)
+@router.get("/{engagement_id}/search", response_class=HTMLResponse)
 def engagement_page(request: Request, engagement_id: str, session: Session = Depends(get_session)) -> HTMLResponse:
     load_engagement(request, engagement_id, session)
     return shell(session, engagement_id)

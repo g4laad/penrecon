@@ -11,7 +11,7 @@ from sqlmodel import Session
 from tests.fixtures import SCAN_A, SCAN_B
 from tests.fixtures import api_url, TEST_ENGAGEMENT_ID
 
-DOCUMENT_PREFIX = f"/e/{TEST_ENGAGEMENT_ID}"
+DOCUMENT_PREFIX = f"/{TEST_ENGAGEMENT_ID}"
 
 def _assert_outcome(response, *, redirect_to: str | None = None) -> None:
     assert response.status_code == 200
@@ -42,7 +42,7 @@ def _credential_details(client: TestClient) -> list[dict]:
 def _create_host(client: TestClient, ip: str = "10.0.0.5") -> str:
     response = client.post(api_url("/hosts"), data={"ip": ip}, follow_redirects=False)
     _assert_outcome(response, redirect_to=response.json()["redirect_to"])
-    engagement_id, _, host_id = urlsplit(response.json()["redirect_to"]).path.strip("/").split("/")[1:]
+    engagement_id, _, host_id = urlsplit(response.json()["redirect_to"]).path.strip("/").split("/")
     return api_url(f"/hosts/{host_id}", engagement_id)
 
 
@@ -599,7 +599,7 @@ def test_api_mutations_return_json_even_when_html_is_requested(client: TestClien
         response = client.post(api_url("/hosts"), data={"ip": "10.0.0.8"}, headers=headers)
         destination = response.json()["redirect_to"]
         assert destination.startswith(DOCUMENT_PREFIX + "/hosts/")
-        assert client.get(api_url("/" + urlsplit(destination).path.strip("/").split("/", 2)[2], urlsplit(destination).path.strip("/").split("/")[1])).json()["host"]["ip"] == "10.0.0.8"
+        assert client.get(api_url("/" + urlsplit(destination).path.strip("/").split("/", 1)[1], TEST_ENGAGEMENT_ID)).json()["host"]["ip"] == "10.0.0.8"
     elif action in {"edit_host", "delete_host"}:
         path = _create_host(client)
         method = "PATCH" if action == "edit_host" else "DELETE"
@@ -613,11 +613,11 @@ def test_api_mutations_return_json_even_when_html_is_requested(client: TestClien
         response = client.post(api_url("/scans"), data={"tool": "nmap"},
                                files={"file": ("document.xml", SCAN_A, "text/xml")}, headers=headers)
         destination = DOCUMENT_PREFIX + "/scans"
-        assert client.get(api_url("/" + urlsplit(destination).path.strip("/").split("/", 2)[2], urlsplit(destination).path.strip("/").split("/")[1])).json()["scans"][0]["filename"] == "document.xml"
+        assert client.get(api_url("/scans")).json()["scans"][0]["filename"] == "document.xml"
     else:
         response = client.post(api_url("/operations"), data={"command": "id"}, headers=headers)
         destination = DOCUMENT_PREFIX + "/operations"
-        assert client.get(api_url("/" + urlsplit(destination).path.strip("/").split("/", 2)[2], urlsplit(destination).path.strip("/").split("/")[1])).json()["operations"][0]["command"] == "id"
+        assert client.get(api_url("/operations")).json()["operations"][0]["command"] == "id"
     _assert_outcome(response, redirect_to=destination)
     assert response.headers["content-type"].startswith("application/json")
     assert response.history == []

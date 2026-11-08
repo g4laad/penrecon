@@ -2,7 +2,7 @@
 export function apiUrl(url: string): string {
   const target = new URL(url, location.href);
   if (target.origin !== location.origin) throw new Error("API requests require the same origin");
-  const scope = target.pathname.match(/^\/e\/([^/]+)(\/.*)?$/);
+  const scope = target.pathname.match(/^\/([0-9a-f-]{36})(\/.*)?$/);
   let path = target.pathname;
   if (scope) {
     path = scope[2] && scope[2] !== "/" ? scope[2] : "/hosts";

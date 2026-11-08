@@ -19,7 +19,7 @@ from penrecon.queries.operations import operation_logs
 def _assert_outcome(response) -> None:
     assert response.status_code == 200
     assert "location" not in response.headers
-    assert response.json() == {"ok": True, "redirect_to": f"/e/{TEST_ENGAGEMENT_ID}/operations"}
+    assert response.json() == {"ok": True, "redirect_to": f"/{TEST_ENGAGEMENT_ID}/operations"}
 
 
 
@@ -517,7 +517,7 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
     assert response.status_code == 200
     assert response.json()["committed"] is True
     assert response.json()["cleanup_pending"] is True
-    assert response.json()["redirect_to"] == f"/e/{TEST_ENGAGEMENT_ID}/operations"
+    assert response.json()["redirect_to"] == f"/{TEST_ENGAGEMENT_ID}/operations"
     assert response.json()["detail"]
     assert set(response.json()) == {"ok", "committed", "cleanup_pending", "detail", "redirect_to"}
     assert "location" not in response.headers

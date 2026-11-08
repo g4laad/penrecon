@@ -152,7 +152,7 @@ export function AppShell({ data, path, className, children }: {
           <div className="shell workspace-toolbar">
             {data.engagement ? <>
               <label className="workspace-selector"><span>Engagement</span>
-                <NativeSelect value={data.engagement.id} onChange={(event) => location.assign(`/e/${event.target.value}/`)}>
+                <NativeSelect value={data.engagement.id} onChange={(event) => location.assign(`/${event.target.value}/`)}>
                   {data.engagements.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
                 </NativeSelect>
               </label>

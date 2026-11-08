@@ -102,7 +102,7 @@ def search_notes(session: Session, ql: str, *, engagement_id: str) -> list[NoteH
             continue
         hits.append(
             NoteHit(
-                href=f"/e/{engagement_id}/hosts/{host.id}", where=host.ip, kind="host",
+                href=f"/{engagement_id}/hosts/{host.id}", where=host.ip, kind="host",
                 title=note.title, preview=_note_preview(note.body_md, ql),
             )
         )

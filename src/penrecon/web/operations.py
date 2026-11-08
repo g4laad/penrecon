@@ -291,7 +291,7 @@ def _commit_operation(
 
 
 def _operation_committed_response(request: Request, engagement_id: str, cleanup_pending: bool, *, deleted: bool = False) -> Response:
-    destination = f"/e/{engagement_id}/operations"
+    destination = f"/{engagement_id}/operations"
     if cleanup_pending:
         return JSONResponse({
             "ok": True, "committed": True, "cleanup_pending": True,

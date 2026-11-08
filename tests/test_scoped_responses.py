@@ -17,14 +17,14 @@ def _host(client: TestClient, ip: str, engagement_id: str = TEST_ENGAGEMENT_ID) 
     assert response.status_code == 200
     document_path = urlsplit(response.json()["redirect_to"]).path
     host_id = int(document_path.rsplit("/", 1)[1])
-    assert document_path == f"/e/{engagement_id}/hosts/{host_id}"
+    assert document_path == f"/{engagement_id}/hosts/{host_id}"
     return api_url(f"/hosts/{host_id}", engagement_id), host_id
 
 
 def _engagement(client: TestClient) -> str:
     response = client.post("/api/engagements", data={"name": "Other", "description": "private scope metadata"})
     assert response.status_code == 200
-    return urlsplit(response.json()["redirect_to"]).path.strip("/").split("/")[1]
+    return urlsplit(response.json()["redirect_to"]).path.strip("/")
 
 
 def _embedded(response: Response) -> dict[str, Any]:
@@ -36,7 +36,7 @@ def _embedded(response: Response) -> dict[str, Any]:
 
 def test_bootstrap_is_slim_and_catalog_is_separate(client: TestClient) -> None:
     other = _engagement(client)
-    data = _embedded(client.get(f"/e/{TEST_ENGAGEMENT_ID}/"))
+    data = _embedded(client.get(f"/{TEST_ENGAGEMENT_ID}/"))
     assert set(data) == {"engagement", "engagements"}
     assert data["engagement"] == {"id": TEST_ENGAGEMENT_ID, "name": "Test engagement"}
     assert {entry["id"] for entry in data["engagements"]} == {TEST_ENGAGEMENT_ID, other}
@@ -69,7 +69,7 @@ def test_inventory_data_filters_sorts_and_paginates_without_shell(client: TestCl
 
 def test_inventory_html_contains_only_navigation_bootstrap(client: TestClient) -> None:
     _host(client, "10.0.0.1")
-    data = _embedded(client.get(f"/e/{TEST_ENGAGEMENT_ID}/?q=needle&fit=3&page=2"))
+    data = _embedded(client.get(f"/{TEST_ENGAGEMENT_ID}/?q=needle&fit=3&page=2"))
     assert set(data) == {"engagement", "engagements"}
     assert data["engagement"]["id"] == TEST_ENGAGEMENT_ID
     assert client.get(api_url("/hosts")).json()["rows"][0]["ip"] == "10.0.0.1"
@@ -160,7 +160,7 @@ def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(cl
     assert set(summary) == {"id", "kind", "username", "notes_preview", "host_count", "service_count"}
     assert summary["notes_preview"] == notes[:160]
     assert (summary["host_count"], summary["service_count"], data["total"]) == (1, 0, 1)
-    html = client.get(f"/e/{TEST_ENGAGEMENT_ID}/credentials")
+    html = client.get(f"/{TEST_ENGAGEMENT_ID}/credentials")
     assert set(_embedded(html)) == {"engagement", "engagements"}
     assert "private-secret-marker" not in html.text
     assert "buried-note-needle" not in html.text
@@ -210,7 +210,7 @@ def test_operation_lists_search_full_details_but_return_only_summaries(client: T
     summary = data["operations"][0]
     assert set(summary) == {"id", "started_at", "destination", "tool", "command"}
     assert "buried-operation-needle" not in json.dumps(summary)
-    html = client.get(f"/e/{TEST_ENGAGEMENT_ID}/operations")
+    html = client.get(f"/{TEST_ENGAGEMENT_ID}/operations")
     assert set(_embedded(html)) == {"engagement", "engagements"}
     assert "buried-operation-needle" not in html.text
     endpoint = api_url(f'/operations/{summary["id"]}')
@@ -287,7 +287,7 @@ def test_mutation_query_scope_cannot_be_overridden_by_form_body(client: TestClie
         api_url("/hosts"), data={"ip": "10.0.0.8", "engagement_id": other},
     )
     assert response.status_code == 200
-    assert response.json()["redirect_to"].startswith(f"/e/{TEST_ENGAGEMENT_ID}/hosts/")
+    assert response.json()["redirect_to"].startswith(f"/{TEST_ENGAGEMENT_ID}/hosts/")
     assert [row["ip"] for row in client.get(api_url("/hosts")).json()["rows"]] == ["10.0.0.8"]
     assert client.get(api_url("/hosts", other)).json()["rows"] == []
     edited = client.put(
@@ -335,7 +335,7 @@ def test_put_operation_replaces_entire_editable_form_and_keeps_attachment(client
     endpoint = api_url(f"/operations/{operation_id}")
     response = client.put(endpoint, data={"command": "replacement"})
     assert response.status_code == 200
-    assert response.json() == {"ok": True, "redirect_to": f"/e/{TEST_ENGAGEMENT_ID}/operations"}
+    assert response.json() == {"ok": True, "redirect_to": f"/{TEST_ENGAGEMENT_ID}/operations"}
     operation = client.get(endpoint).json()["operation"]
     assert operation["command"] == "replacement"
     assert operation["started_at"] is operation["ended_at"] is None

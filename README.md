@@ -22,7 +22,7 @@ Data (SQLite db + attachments) lives under `./data` — override with
 
 Open `/engagements` to create or select an engagement. The header selector switches
 to the selected engagement's host inventory. Browser workspace URLs start with
-`/e/<uuid>/`; API requests use `?engagement_id=<uuid>` instead. Separate tabs can
+`/<uuid>/`; API requests use `?engagement_id=<uuid>` instead. Separate tabs can
 work on different engagements independently.
 Upload files from the selected engagement's Scans page. Use the sidebar's
 Scans and Scan diff entries to switch between import history and comparisons.
@@ -477,7 +477,7 @@ path segment: `/api/hosts/12?engagement_id=UUID`. Missing or empty scope returns
 422; an unknown engagement returns 404. The query selects the scope for reads,
 mutations, and downloads; body fields cannot override it. Engagement metadata
 edits use `PUT /api/engagements?engagement_id=UUID`; catalog listing and
-creation remain unscoped. Browser navigation keeps `/e/UUID/...` URLs so each tab
+creation remain unscoped. Browser navigation uses `/UUID/...` URLs so each tab
 retains its own engagement. Old `/api/e/...` and redundant `/api/data/...`
 endpoints are removed, not aliased.
 

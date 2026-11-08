@@ -48,7 +48,7 @@ def create_engagement(request: Request, name: str = Form(""), description: str =
     session.add(engagement)
     session.commit()
     session.refresh(engagement)
-    return mutation_response(request, f"/e/{engagement.id}/")
+    return mutation_response(request, f"/{engagement.id}/")
 
 
 @router.put("/engagements", response_model=MutationResponse, response_model_exclude_unset=True)

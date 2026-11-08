@@ -13,7 +13,7 @@ function resourceURL(path: string, source: URLSearchParams, keys: string[]): str
 
 /** Resource reads follow the document URL; history never contains data URLs. */
 export function queryResources(target: URL, previous: URL): { urls: string[]; partial: boolean } {
-  const scope = target.pathname.match(/^(\/e\/[^/]+)(\/.*)$/);
+  const scope = target.pathname.match(/^(\/[0-9a-f-]{36})(\/.*)$/);
   if (!scope) return { urls: [target.pathname + target.search], partial: false };
   const [, prefix, path] = scope;
   if (path === "/") {

@@ -288,20 +288,20 @@ def create_host(
     """Create or select the canonical engagement/IP identity; blank is a no-op."""
     clean = ip.strip()
     if not clean:
-        return mutation_response(request, f"/e/{engagement_id}/")
+        return mutation_response(request, f"/{engagement_id}/")
     try:
         norm = normalize_ip(clean)
     except ValueError:
         return _invalid_ip_response(clean)
     existing = find_host_by_ip(session, norm, engagement_id=engagement_id)
     if existing is not None:
-        return mutation_response(request, f"/e/{engagement_id}/hosts/{existing.id}")
+        return mutation_response(request, f"/{engagement_id}/hosts/{existing.id}")
     now = datetime.now(UTC)
     host = Host(ip=norm, first_seen=now, last_seen=now, engagement_id=engagement_id)
     session.add(host)
     session.commit()
     session.refresh(host)
-    return mutation_response(request, f"/e/{engagement_id}/hosts/{host.id}")
+    return mutation_response(request, f"/{engagement_id}/hosts/{host.id}")
 
 
 @router.patch("/hosts/{host_id}", response_model=MutationResponse)
@@ -316,7 +316,7 @@ def edit_host(
     host = _owned_host(session, host_id, engagement_id=engagement_id)
     clean = ip.strip()
     if not clean:
-        return mutation_response(request, f"/e/{engagement_id}/hosts/{host_id}")
+        return mutation_response(request, f"/{engagement_id}/hosts/{host_id}")
     try:
         norm = normalize_ip(clean)
     except ValueError:
@@ -327,7 +327,7 @@ def edit_host(
             return _duplicate_ip_response(norm)
         host.ip = norm
         session.commit()
-    return mutation_response(request, f"/e/{engagement_id}/hosts/{host_id}")
+    return mutation_response(request, f"/{engagement_id}/hosts/{host_id}")
 
 
 @router.delete("/hosts/{host_id}", response_model=MutationResponse)
@@ -341,7 +341,7 @@ def delete_host(
     # Cascades remove dependent evidence and links; credentials themselves survive.
     session.delete(host)
     session.commit()
-    return mutation_response(request, f"/e/{engagement_id}/")
+    return mutation_response(request, f"/{engagement_id}/")
 
 
 @router.post("/hosts/{host_id}/services", response_model=MutationResponse)
