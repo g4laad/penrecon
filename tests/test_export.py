@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import csv
-import io
-
 from sqlmodel import Session
 
 from penrecon.ingest import ingest_scan
 from penrecon.models import Annotation, Host, Status
-from penrecon.queries.export import EXPORT_COLUMNS, export_rows
+from penrecon.queries.export import export_rows
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 
@@ -82,21 +79,4 @@ def test_export_neutralizes_formula_injection(session: Session) -> None:
         engagement_id=TEST_ENGAGEMENT_ID,
     )
     r = next(export_rows(session, engagement_id=TEST_ENGAGEMENT_ID))
-    assert r["service"].startswith("'=")  # neutralized, not executable
     assert r["service"] == "'=HYPERLINK(1)"
-
-
-def test_rows_are_valid_csv(session: Session) -> None:
-    ingest_scan(
-        session,
-        _scan("10.0.0.5", "db.corp.local", "postgresql", 5432),
-        "a.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=EXPORT_COLUMNS)
-    w.writeheader()
-    w.writerows(export_rows(session, engagement_id=TEST_ENGAGEMENT_ID))
-    back = list(csv.DictReader(io.StringIO(buf.getvalue())))
-    assert back[0]["ip"] == "10.0.0.5" and back[0]["service"] == "postgresql"

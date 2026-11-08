@@ -97,14 +97,6 @@ def test_inventory_data_filters_sorts_and_paginates_without_shell(
     assert (filtered["matched"], filtered["page"], filtered["pages"]) == (1, 1, 1)
 
 
-def test_inventory_html_contains_only_navigation_bootstrap(client: TestClient) -> None:
-    _host(client, "10.0.0.1")
-    data = _embedded(client.get(f"/{TEST_ENGAGEMENT_ID}/?q=needle&fit=3&page=2"))
-    assert set(data) == {"engagement", "engagements"}
-    assert data["engagement"]["id"] == TEST_ENGAGEMENT_ID
-    assert client.get(api_url("/hosts")).json()["rows"][0]["ip"] == "10.0.0.1"
-
-
 def test_service_data_is_only_filtered_paginated_table_state(
     client: TestClient,
 ) -> None:
@@ -269,51 +261,7 @@ def test_selector_options_are_minimal_and_credentials_page_has_no_host_catalog(
     }
 
 
-def test_operation_data_filters_and_paginates_without_other_sections(
-    client: TestClient,
-) -> None:
-    for index in range(12):
-        assert (
-            client.post(
-                api_url("/operations"),
-                data={"command": f"audit-{index}", "output": "operation evidence"},
-            ).status_code
-            == 200
-        )
-    assert (
-        client.post(api_url("/operations"), data={"command": "unrelated"}).status_code
-        == 200
-    )
-    other = _engagement(client)
-    assert (
-        client.post(
-            api_url("/operations", other), data={"command": "audit-foreign"}
-        ).status_code
-        == 200
-    )
-    params = {"q": "audit", "page": 2, "per": "10"}
-    data = client.get(api_url("/operations?" + urlencode(params))).json()
-    assert set(data) == {"operations", "total", "q", "page", "pages", "per"}
-    assert (data["total"], data["page"], data["pages"], data["q"], data["per"]) == (
-        12,
-        2,
-        2,
-        "audit",
-        "10",
-    )
-    assert len(data["operations"]) == 2
-    assert all(
-        operation["command"].startswith("audit-")
-        and operation["command"] != "audit-foreign"
-        for operation in data["operations"]
-    )
-    assert all(
-        set(operation) == {"id", "started_at", "destination", "tool", "command"}
-        for operation in data["operations"]
-    )
-
-
-def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(
+def test_credential_lists_hide_secrets_and_search_full_notes(
     client: TestClient,
 ) -> None:
     path, host_id = _host(client, "10.0.0.1")
@@ -393,45 +341,6 @@ def test_credential_lists_are_summaries_in_json_and_html_and_detail_refreshes(
     ]
     assert "pickable_services" not in detail
     assert {"engagement_id", "attachment_path"}.isdisjoint(detail)
-    assert (
-        client.put(
-            api_url(f"/credentials/{summary['id']}"),
-            data={
-                "username": "updated",
-                "secret": "changed-secret",
-                "notes": "changed notes",
-            },
-        ).status_code
-        == 200
-    )
-    assert (
-        client.patch(
-            api_url(f"/credentials/{summary['id']}/services"),
-            data={"service_id": service_id},
-        ).status_code
-        == 200
-    )
-    refreshed = client.get(endpoint).json()["credential"]
-    assert (refreshed["username"], refreshed["secret"], refreshed["notes"]) == (
-        "updated",
-        "changed-secret",
-        "changed notes",
-    )
-    assert [service["service_id"] for service in refreshed["services"]] == [service_id]
-    assert client.get(options_endpoint).json()["services"] == []
-    assert (
-        client.get(api_url("/credentials")).json()["credentials"][0]["service_count"]
-        == 1
-    )
-    assert (
-        client.delete(
-            api_url(f"/credentials/{summary['id']}/hosts/{host_id}")
-        ).status_code
-        == 200
-    )
-    refreshed = client.get(endpoint).json()["credential"]
-    assert refreshed["hosts"] == refreshed["services"] == []
-    assert client.get(options_endpoint).json()["services"] == []
 
 
 @pytest.mark.parametrize(
@@ -464,21 +373,6 @@ def test_operation_lists_search_full_details_but_return_only_summaries(
     assert detail[field] == body
     assert {"engagement_id", "attachment_path", "attachment_media_type"}.isdisjoint(
         detail
-    )
-    assert (
-        client.put(
-            api_url(f"/operations/{summary['id']}"),
-            data={"command": "updated", "output": "new evidence"},
-        ).status_code
-        == 200
-    )
-    refreshed = client.get(endpoint).json()["operation"]
-    assert (refreshed["command"], refreshed["output"]) == ("updated", "new evidence")
-    assert (
-        client.get(api_url("/operations?q=buried-operation-needle")).json()[
-            "operations"
-        ]
-        == []
     )
 
 

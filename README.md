@@ -469,6 +469,20 @@ Delete/reimport regression tests use separate sessions for deletion and upload,
 matching request lifetimes. Close the deletion session before reimport: database
 FK cascades do not mark already-loaded child objects as deleted in the ORM.
 
+Keep Python tests focused on observable behavior and meaningful boundaries:
+security and engagement isolation, user-data preservation, rollback, and
+search/pagination transitions. Prefer one representative workflow over duplicate
+happy-path checks at every layer; avoid mirroring generated schemas or testing
+standard-library behavior.
+
+For an optional statement/branch coverage report:
+
+```sh
+uv run --with pytest-cov pytest --cov=penrecon --cov-branch --cov-report=term-missing
+```
+
+Use coverage to assess gaps and compare test-suite changes, not as a 100% target.
+
 For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
 This watches and rebuilds the local bundle; refresh the browser after changes.
 Bundle URLs are versioned on rebuild so a normal refresh loads the updated

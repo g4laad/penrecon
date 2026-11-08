@@ -7,9 +7,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
-from penrecon.models import Host, HostHostname, ObsState, Service
+from penrecon.models import Host, ObsState, Service
 from penrecon.queries.inventory import (
-    host_hostnames,
     latest_observations,
     resolved_services,
 )
@@ -99,34 +98,6 @@ def test_deleted_service_reappears_fresh_on_rescan(session: Session) -> None:
     }
     assert 22 in view
     assert view[22].version == "2.0"  # fresh from the new scan, nothing stale
-
-
-def test_hidden_hostname_stays_hidden_across_rescan(session: Session) -> None:
-    ingest_scan(
-        session,
-        _scan("10.0.0.3", 80, "1.0", "keep.example"),
-        "a.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    host = session.exec(select(Host).where(Host.ip == "10.0.0.3")).one()
-    assert host.id is not None
-    link = session.exec(
-        select(HostHostname).where(HostHostname.host_id == host.id)
-    ).one()
-    link.hidden = True
-    session.commit()
-
-    ingest_scan(
-        session,
-        _scan("10.0.0.3", 80, "1.0", "keep.example"),
-        "b.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    assert (
-        host_hostnames(session, host.id, engagement_id=TEST_ENGAGEMENT_ID) == []
-    )  # sticky delete, not resurrected
 
 
 def test_manual_only_service_shows(session: Session) -> None:

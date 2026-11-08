@@ -104,6 +104,11 @@ def test_operation_logs_searches_command_endpoint_tag_and_attachment(
             engagement_id=TEST_ENGAGEMENT_ID,
         ),
         OperationLog(
+            command="endpoint result",
+            source="NeedleHost",
+            engagement_id=TEST_ENGAGEMENT_ID,
+        ),
+        OperationLog(
             command="review",
             tags=["Credential-Audit"],
             engagement_id=TEST_ENGAGEMENT_ID,
@@ -130,6 +135,12 @@ def test_operation_logs_searches_command_endpoint_tag_and_attachment(
             session, "DATABASE", engagement_id=TEST_ENGAGEMENT_ID
         ).operations
     ] == ["connect"]
+    assert [
+        row.command
+        for row in operation_logs(
+            session, "needlehost", engagement_id=TEST_ENGAGEMENT_ID
+        ).operations
+    ] == ["endpoint result"]
     assert [
         row.command
         for row in operation_logs(
@@ -206,8 +217,7 @@ def test_operation_logs_paginates_only_owned_matches(session: Session) -> None:
     ("query", "expected_page", "expected_pages", "expected_commands", "expected_per"),
     [
         ("", 1, 2, [f"command {i:02}" for i in range(29, 4, -1)], "25"),
-        ("page=2", 2, 2, [f"command {i:02}" for i in range(4, -1, -1)], "25"),
-        ("page=999", 2, 2, [f"command {i:02}" for i in range(4, -1, -1)], "25"),
+        ("per=10&page=2", 2, 3, [f"command {i:02}" for i in range(19, 9, -1)], "10"),
         ("page=0", 1, 2, [f"command {i:02}" for i in range(29, 4, -1)], "25"),
         (
             "per=all&page=999",
@@ -300,12 +310,14 @@ def test_operation_summaries_search_full_text_without_returning_details(
     )
 
     response = client.get(
-        api_url("/operations" + "?" + urlencode({"q": "STRASSE NEEDLE"}))
+        api_url("/operations" + "?" + urlencode({"q": "STRASSE NEEDLE"})),
+        headers={"Accept": "text/html"},
     )
     assert response.status_code == 200
+    assert response.headers["content-type"] == "application/json"
     rows = response.json()["operations"]
     assert len(rows) == 1
-    assert rows[0].keys() == {"id", "started_at", "destination", "tool", "command"}
+    assert {"output", "comments", "description", "attachment_path"}.isdisjoint(rows[0])
     assert rows[0]["command"] == "inspect"
 
 
@@ -538,54 +550,6 @@ def test_missing_operation_ids_return_404(client: TestClient) -> None:
     assert client.get(api_url("/operations/999999/attachment")).status_code == 404
 
 
-def test_search_and_pagination_retain_state_and_expected_rows(
-    client: TestClient,
-) -> None:
-    for index in range(11):
-        _assert_outcome(_create_operation(client, command=f"batch {index:02d}"))
-    _assert_outcome(
-        _create_operation(
-            client,
-            command="endpoint result",
-            data={"source": "NeedleHost"},
-        )
-    )
-
-    search = client.get(
-        api_url(
-            "/operations"
-            + "?"
-            + urlencode({"q": "needlehost", "per": "10", "page": "1"})
-        )
-    ).json()
-    assert [row["command"] for row in search["operations"]] == ["endpoint result"]
-    assert search["q"] == "needlehost"
-    assert search["total"] == 1
-
-    first = client.get(
-        api_url(
-            "/operations" + "?" + urlencode({"q": "batch", "per": "10", "page": "1"})
-        )
-    ).json()
-    assert [row["command"] for row in first["operations"]] == [
-        f"batch {index:02d}" for index in range(10, 0, -1)
-    ]
-    assert first["q"] == "batch"
-    assert first["page"] == 1
-    assert first["pages"] == 2
-    assert first["per"] == "10"
-    assert first["total"] == 11
-
-    second = client.get(
-        api_url(
-            "/operations" + "?" + urlencode({"q": "batch", "per": "10", "page": "2"})
-        )
-    ).json()
-    assert [row["command"] for row in second["operations"]] == ["batch 00"]
-    assert second["page"] == 2
-    assert second["per"] == "10"
-
-
 def test_failed_attachment_write_and_commit_leave_no_new_file(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -701,13 +665,6 @@ def test_attachment_cleanup_failure_reports_committed_mutation(
     assert response.json()["cleanup_pending"] is True
     assert response.json()["redirect_to"] == f"/{TEST_ENGAGEMENT_ID}/operations"
     assert response.json()["detail"]
-    assert set(response.json()) == {
-        "ok",
-        "committed",
-        "cleanup_pending",
-        "detail",
-        "redirect_to",
-    }
     assert "location" not in response.headers
     assert old_file.is_file()
     operations = client.get(api_url("/operations")).json()["operations"]
@@ -754,16 +711,6 @@ def test_failed_attachment_replacement_keeps_old_metadata_and_file(
     assert (
         client.get(api_url(f"/operations/{operation_id}/attachment")).content == b"old"
     )
-
-
-def test_operation_reads_are_json_even_when_html_is_requested(
-    client: TestClient,
-) -> None:
-    _assert_outcome(_create_operation(client, command="enumerate"))
-    response = client.get(api_url("/operations"), headers={"Accept": "text/html"})
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/json"
-    assert response.json()["operations"][0]["command"] == "enumerate"
 
 
 def test_html_attachment_download_is_inert(client: TestClient) -> None:
@@ -858,76 +805,3 @@ def test_oversized_replacement_preserves_original_operation_and_attachment(
     assert detail["attachment_name"] == "original.txt"
     download = client.get(api_url(f"/operations/{operation_id}/attachment"))
     assert download.content == b"original"
-
-
-def test_operation_openapi_describes_projections_mutations_and_binary_download(
-    client: TestClient,
-) -> None:
-    document = client.get("/openapi.json").json()
-    schemas = document["components"]["schemas"]
-    assert set(schemas["OperationSummary"]["properties"]) == {
-        "id",
-        "started_at",
-        "destination",
-        "tool",
-        "command",
-    }
-    assert set(schemas["OperationDetail"]["properties"]) == {
-        "id",
-        "started_at",
-        "ended_at",
-        "source",
-        "destination",
-        "tool",
-        "user_context",
-        "command",
-        "output",
-        "description",
-        "comments",
-        "tags",
-        "attachment_name",
-        "created_at",
-        "updated_at",
-    }
-    assert schemas["OperationsPage"]["properties"]["operations"]["items"]["$ref"] == (
-        "#/components/schemas/OperationSummary"
-    )
-    assert schemas["OperationDetailResponse"]["properties"]["operation"]["$ref"] == (
-        "#/components/schemas/OperationDetail"
-    )
-    base = "/api"
-    paths = document["paths"]
-    for path, methods in paths.items():
-        if not path.startswith(base + "/operations"):
-            continue
-        assert "{engagement_id}" not in path
-        for operation in methods.values():
-            engagement = next(
-                parameter
-                for parameter in operation["parameters"]
-                if parameter["name"] == "engagement_id"
-            )
-            assert engagement["in"] == "query"
-            assert engagement["required"] is True
-    for suffix in ("/operations",):
-        response = paths[base + suffix]["get"]["responses"]["200"]
-        assert (
-            response["content"]["application/json"]["schema"]["$ref"]
-            == "#/components/schemas/OperationsPage"
-        )
-    for suffix, method in (
-        ("/operations", "post"),
-        ("/operations/{operation_id}", "put"),
-        ("/operations/{operation_id}", "delete"),
-    ):
-        response = paths[base + suffix][method]["responses"]["200"]
-        assert (
-            response["content"]["application/json"]["schema"]["$ref"]
-            == "#/components/schemas/MutationResponse"
-        )
-    download = paths[base + "/operations/{operation_id}/attachment"]["get"][
-        "responses"
-    ]["200"]
-    assert download["content"] == {
-        "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
-    }

@@ -33,8 +33,9 @@ def _host_id(session: Session, ip: str) -> int:
     return host.id
 
 
-def test_first_scan_no_baseline_no_flag(session: Session) -> None:
-    # a single-scan DB has no baseline: "new" would flag every host, so nothing does
+def test_new_marker_requires_baseline_and_only_marks_latest_hosts(
+    session: Session,
+) -> None:
     ingest_scan(
         session,
         _scan("10.0.0.1", 80, "1.0"),
@@ -43,17 +44,6 @@ def test_first_scan_no_baseline_no_flag(session: Session) -> None:
         engagement_id=TEST_ENGAGEMENT_ID,
     )
     assert _change(session, "10.0.0.1") == ""
-
-
-def test_host_new_in_latest_scan_marks_new(session: Session) -> None:
-    # scan A establishes a baseline; scan B introduces a host absent from A
-    ingest_scan(
-        session,
-        _scan("10.0.0.9", 80, "1.0"),
-        "a.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
     ingest_scan(
         session,
         _scan("10.0.0.10", 80, "1.0"),
@@ -62,43 +52,7 @@ def test_host_new_in_latest_scan_marks_new(session: Session) -> None:
         engagement_id=TEST_ENGAGEMENT_ID,
     )
     assert _change(session, "10.0.0.10") == "new"
-
-
-def test_host_only_in_older_scan_is_not_new(session: Session) -> None:
-    # host seen only in the first scan, absent from the latest: stale, not new
-    ingest_scan(
-        session,
-        _scan("10.0.0.11", 80, "1.0"),
-        "a.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    ingest_scan(
-        session,
-        _scan("10.0.0.12", 80, "1.0"),
-        "b.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    assert _change(session, "10.0.0.11") == ""
-
-
-def test_unchanged_rescan_marks_nothing(session: Session) -> None:
-    ingest_scan(
-        session,
-        _scan("10.0.0.2", 80, "1.0"),
-        "a.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    ingest_scan(
-        session,
-        _scan("10.0.0.2", 80, "1.0"),
-        "b.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    assert _change(session, "10.0.0.2") == ""
+    assert _change(session, "10.0.0.1") == ""
 
 
 def test_version_change_marks_changed(session: Session) -> None:
@@ -139,7 +93,7 @@ def test_added_port_marks_changed_removed_ignored(session: Session) -> None:
     assert _change(session, "10.0.0.4") == "changed"
 
 
-def test_manual_edit_never_flags(session: Session) -> None:
+def test_unchanged_rescan_and_manual_edit_do_not_flag_changes(session: Session) -> None:
     ingest_scan(
         session,
         _scan("10.0.0.5", 80, "1.0"),
@@ -154,6 +108,7 @@ def test_manual_edit_never_flags(session: Session) -> None:
         "nmap",
         engagement_id=TEST_ENGAGEMENT_ID,
     )
+    assert _change(session, "10.0.0.5") == ""
     svc = session.exec(select(Service).where(Service.port == 80)).one()
     svc.m_version = "9.9-manual"
     session.commit()

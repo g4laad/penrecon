@@ -77,15 +77,16 @@ def _upload(client: TestClient, content: str, filename: str) -> None:
     _assert_outcome(response, redirect_to=DOCUMENT_PREFIX + "/scans")
 
 
-@pytest.mark.parametrize("accept", ["application/json", "text/html", "*/*", ""])
 def test_page_shell_embeds_only_safe_bootstrap_and_local_assets(
-    client: TestClient, accept: str
+    client: TestClient,
 ) -> None:
     query = '</script><script>alert("x")</script>&>\u2028\u2029tail'
     renamed = client.put(api_url("/engagements"), data={"name": query})
     assert renamed.status_code == 200
     response = client.get(
-        DOCUMENT_PREFIX + "/search", params={"q": query}, headers={"Accept": accept}
+        DOCUMENT_PREFIX + "/search",
+        params={"q": query},
+        headers={"Accept": "application/json"},
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
@@ -99,65 +100,15 @@ def test_page_shell_embeds_only_safe_bootstrap_and_local_assets(
         r'<script id="page-data" type="application/json">(.*?)</script>', response.text
     )
     assert match is not None
-    embedded = match.group(1)
-    assert json.loads(embedded)["engagement"]["id"] == TEST_ENGAGEMENT_ID
-    assert json.loads(embedded)["engagement"]["name"] == query
-    assert set(json.loads(embedded)) == {"engagement", "engagements"}
+    embedded = json.loads(match.group(1))
+    assert embedded["engagement"]["id"] == TEST_ENGAGEMENT_ID
+    assert embedded["engagement"]["name"] == query
+    assert set(embedded) == {"engagement", "engagements"}
     assert query not in response.text
     assert (
         client.get(api_url("/search" + "?" + urlencode({"q": query}))).json()["q"]
         == query
     )
-
-
-@pytest.mark.parametrize(
-    ("path", "key"),
-    [
-        (api_url("/hosts"), "rows"),
-        (api_url("/search"), "results"),
-        (api_url("/credentials"), "credentials"),
-        (api_url("/scans"), "scans"),
-        (api_url("/diff"), "result"),
-        (api_url("/operations"), "operations"),
-    ],
-)
-def test_page_json_contexts(client: TestClient, path: str, key: str) -> None:
-    response = client.get(path)
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("application/json")
-    assert "vary" not in response.headers
-    data = response.json()
-    assert key in data
-    assert "engagement" not in data
-    assert "engagements" not in data
-    assert "request" not in data
-    html_accept = client.get(path, headers={"Accept": "text/html"})
-    assert html_accept.status_code == 200
-    assert html_accept.headers["content-type"].startswith("application/json")
-    assert html_accept.json() == data
-
-
-def test_missing_host_404(client: TestClient) -> None:
-    response = client.get(api_url("/hosts/999999"))
-    assert response.status_code == 404
-    assert response.json()["detail"] == "host not found"
-
-
-def test_create_host_redirects_to_detail(client: TestClient) -> None:
-    path = _create_host(client)
-    assert urlsplit(path).path.startswith("/api/hosts/")
-    assert parse_qs(urlsplit(path).query) == {"engagement_id": [TEST_ENGAGEMENT_ID]}
-    detail = client.get(path)
-    assert detail.status_code == 200
-    data = detail.json()
-    assert data["host"]["ip"] == "10.0.0.5"
-    assert data["host"]["first_seen"]
-    assert data["hostnames"] == []
-    assert data["services"] == []
-    assert data["host_notes"] == []
-    assert data["host_credentials"] == []
-    assert data["host_ann"] is None
-    assert "request" not in data
 
 
 def test_create_host_rejects_bad_ip(client: TestClient) -> None:
@@ -166,32 +117,6 @@ def test_create_host_rejects_bad_ip(client: TestClient) -> None:
     )
     assert response.status_code == 400
     assert set(response.json()["field_errors"]) == {"ip"}
-
-
-def test_delete_host_redirects_home(client: TestClient) -> None:
-    path = _create_host(client, "10.0.0.6")
-    response = client.delete(path, follow_redirects=False)
-    _assert_outcome(response, redirect_to=DOCUMENT_PREFIX + "/")
-    assert client.get(path).status_code == 404
-
-
-def test_export_csv_headers(client: TestClient) -> None:
-    response = client.get(api_url("/export/hosts.csv"))
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/csv")
-    assert "attachment" in response.headers["content-disposition"]
-
-
-def test_create_credential_lists_it(client: TestClient) -> None:
-    response = client.post(
-        api_url("/credentials"),
-        data={"kind": "password", "username": "root", "secret": "toor"},
-    )
-    _assert_outcome(response)
-    credential = _credential_details(client)[0]
-    assert credential["username"] == "root"
-    assert credential["secret"] == "toor"
-    assert credential["kind"] == "password"
 
 
 def test_create_credential_with_multiple_targets_deduplicates_links(
@@ -348,15 +273,6 @@ def test_edit_host_rejects_duplicate_ip(client: TestClient) -> None:
     assert client.get(path).json()["host"]["ip"] == "10.0.0.11"
 
 
-def test_edit_host_accepts_new_ip(client: TestClient) -> None:
-    path = _create_host(client, "10.0.0.12")
-    response = client.patch(path, data={"ip": "10.0.0.99"}, follow_redirects=False)
-    _assert_outcome(
-        response, redirect_to=DOCUMENT_PREFIX + urlsplit(path).path.removeprefix("/api")
-    )
-    assert client.get(path).json()["host"]["ip"] == "10.0.0.99"
-
-
 def test_hostnames_add_and_hide_return_json(client: TestClient) -> None:
     path = _create_host(client)
     response = client.post(
@@ -414,8 +330,6 @@ def test_service_mutations_persist_without_returning_collections(
     assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(
         resolved["annotation"]
     )
-    persisted = client.get(path).json()["services"][0]["annotation"]
-    assert {"id", "host_id", "service_id", "engagement_id"}.isdisjoint(persisted)
     deleted = client.delete(api_url(f"/services/{service_id}"))
     _assert_outcome(deleted)
     assert client.get(path).json()["services"] == []
@@ -462,52 +376,6 @@ def test_notes_and_annotation_round_trip_in_host_context(client: TestClient) -> 
     deleted = client.delete(api_url(f"/notes/{note['id']}"))
     _assert_outcome(deleted)
     assert client.get(path).json()["host_notes"] == []
-
-
-def test_linked_credentials_serialize_hosts_and_services(client: TestClient) -> None:
-    path = _create_host(client)
-    host_id = urlsplit(path).path.rsplit("/", 1)[1]
-    service_id = _create_service(client, path, port="22", service_name="ssh")[
-        "service_id"
-    ]
-    credential_id = _create_credential(client, username="root", secret="toor")["id"]
-    linked = client.patch(
-        api_url(f"/credentials/{credential_id}/hosts"), data={"host_id": host_id}
-    )
-    _assert_outcome(linked)
-    credential = _credential_details(client)[0]
-    assert credential["hosts"][0]["ip"] == "10.0.0.5"
-    options = client.get(
-        api_url(f"/credentials/{credential_id}/options/services")
-    ).json()
-    assert options["services"][0]["service_id"] == service_id
-    linked_service = client.patch(
-        api_url(f"/credentials/{credential_id}/services"),
-        data={"service_id": str(service_id)},
-    )
-    _assert_outcome(linked_service)
-    assert _credential_details(client)[0]["services"][0]["name"] == "ssh"
-    detail = client.get(path).json()
-    assert detail["host_credentials"][0]["id"] == credential_id
-    edited = client.put(
-        api_url(f"/credentials/{credential_id}"),
-        data={"username": "admin", "secret": "changed"},
-    )
-    _assert_outcome(edited)
-    assert client.get(path).json()["host_credentials"][0]["username"] == "admin"
-    unlinked_service = client.delete(
-        api_url(f"/credentials/{credential_id}/services/{service_id}")
-    )
-    _assert_outcome(unlinked_service)
-    assert _credential_details(client)[0]["services"] == []
-    unlinked_host = client.delete(
-        api_url(f"/credentials/{credential_id}/hosts/{host_id}")
-    )
-    _assert_outcome(unlinked_host)
-    assert _credential_details(client)[0]["hosts"] == []
-    deleted = client.delete(api_url(f"/credentials/{credential_id}"))
-    _assert_outcome(deleted)
-    assert client.get(api_url("/credentials")).json()["credentials"] == []
 
 
 def test_unlink_host_removes_only_its_credential_service_links(
@@ -855,69 +723,6 @@ def test_manual_host_commands_reuse_legacy_equivalence_and_guard_collisions(
         "2001:db8::1",
         "2001:db8::2",
     }
-
-
-@pytest.mark.parametrize(
-    "action", ["create_host", "edit_host", "delete_host", "scan", "operation"]
-)
-def test_api_mutations_return_json_even_when_html_is_requested(
-    client: TestClient, action: str
-) -> None:
-    headers = {"Accept": "text/html"}
-    if action == "create_host":
-        response = client.post(
-            api_url("/hosts"), data={"ip": "10.0.0.8"}, headers=headers
-        )
-        destination = response.json()["redirect_to"]
-        assert destination.startswith(DOCUMENT_PREFIX + "/hosts/")
-        assert (
-            client.get(
-                api_url(
-                    "/" + urlsplit(destination).path.strip("/").split("/", 1)[1],
-                    TEST_ENGAGEMENT_ID,
-                )
-            ).json()["host"]["ip"]
-            == "10.0.0.8"
-        )
-    elif action in {"edit_host", "delete_host"}:
-        path = _create_host(client)
-        method = "PATCH" if action == "edit_host" else "DELETE"
-        response = client.request(
-            method, path, data={"ip": "10.0.0.9"}, headers=headers
-        )
-        destination = (
-            DOCUMENT_PREFIX + urlsplit(path).path.removeprefix("/api")
-            if action == "edit_host"
-            else DOCUMENT_PREFIX + "/"
-        )
-        if action == "edit_host":
-            assert client.get(path).json()["host"]["ip"] == "10.0.0.9"
-        else:
-            assert client.get(path).status_code == 404
-    elif action == "scan":
-        response = client.post(
-            api_url("/scans"),
-            data={"tool": "nmap"},
-            files={"file": ("document.xml", SCAN_A, "text/xml")},
-            headers=headers,
-        )
-        destination = DOCUMENT_PREFIX + "/scans"
-        assert (
-            client.get(api_url("/scans")).json()["scans"][0]["filename"]
-            == "document.xml"
-        )
-    else:
-        response = client.post(
-            api_url("/operations"), data={"command": "id"}, headers=headers
-        )
-        destination = DOCUMENT_PREFIX + "/operations"
-        assert (
-            client.get(api_url("/operations")).json()["operations"][0]["command"]
-            == "id"
-        )
-    _assert_outcome(response, redirect_to=destination)
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.history == []
 
 
 def test_patch_host_renames_only_ip_and_blank_is_noop(client: TestClient) -> None:

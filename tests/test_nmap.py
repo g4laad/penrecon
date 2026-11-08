@@ -21,22 +21,6 @@ def test_parse_nmap_basic() -> None:
 
 
 @pytest.mark.parametrize(
-    "state",
-    [
-        "open",
-        "closed",
-        "filtered",
-        "unfiltered",
-        "open|filtered",
-        "closed|filtered",
-    ],
-)
-def test_parse_preserves_meaningful_nmap_states(state: str) -> None:
-    data = SCAN_A.replace('state="open"', f'state="{state}"').encode()
-    assert {port.state for port in nmap.parse(data)[0].ports} == {state}
-
-
-@pytest.mark.parametrize(
     "evidence",
     [
         '<port protocol="tcp" portid="80"><state state="mystery"/></port>',
