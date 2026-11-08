@@ -258,11 +258,11 @@ function CredentialEditForm({ credential, kinds }: { credential: Credential; kin
 
 function CredentialDetail({
   credential,
-  kinds,
+  onEdit,
   hostOptions,
 }: {
   credential: Credential;
-  kinds: string[];
+  onEdit: () => void;
   hostOptions: HostOptions;
 }) {
   return (
@@ -278,17 +278,9 @@ function CredentialDetail({
           <Badge variant="secondary">{credential.kind}</Badge>
         </div>
         <div className="actions">
-          <Modal
-            title="Edit credential"
-            protectChanges="Discard unsaved credential changes?"
-            trigger={
-              <Button type="button" variant="outline" size="sm">
-                Edit credential
-              </Button>
-            }
-          >
-            <CredentialEditForm credential={credential} kinds={kinds} />
-          </Modal>
+          <Button type="button" variant="outline" size="sm" aria-haspopup="dialog" onClick={onEdit}>
+            Edit credential
+          </Button>
         </div>
       </header>
       <section className="stack gap-2" aria-labelledby="credential-secret">
@@ -342,6 +334,8 @@ function CredentialDetail({
 }
 
 export function CredentialsPage({ data }: { data: PageData }) {
+  // Own the draft above list/detail revalidation, including filtered-out records.
+  const [editing, setEditing] = useState<Credential | null>(null);
   const [, setUrl] = useState(() => location.href);
   useEffect(() => {
     const sync = () => setUrl(location.href);
@@ -396,6 +390,14 @@ export function CredentialsPage({ data }: { data: PageData }) {
           <CredentialCreateForm kinds={kinds} hostOptions={hostOptions} />
         </Modal>
       </PageHeader>
+      {editing && <Modal
+        title="Edit credential"
+        defaultOpen
+        onClose={() => setEditing(null)}
+        protectChanges="Discard unsaved credential changes?"
+      >
+        <CredentialEditForm credential={editing} kinds={kinds} />
+      </Modal>}
       <div
         className="credential-filters"
         role="search"
@@ -521,7 +523,7 @@ export function CredentialsPage({ data }: { data: PageData }) {
               label="credential"
             >{({ credential }) => <CredentialDetail
               credential={credential}
-              kinds={kinds}
+              onEdit={() => setEditing(credential)}
               hostOptions={hostOptions}
             />}</SelectedDetail>
           </div> : <Empty>

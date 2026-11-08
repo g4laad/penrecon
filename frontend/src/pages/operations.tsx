@@ -333,7 +333,7 @@ function OperationEditor({ operation }: { operation: Operation }) {
   );
 }
 
-function OperationDetails({ operation }: { operation: Operation }) {
+function OperationDetails({ operation, onEdit }: { operation: Operation; onEdit: () => void }) {
   const { status: copyStatus, copy } = useClipboard(operation.command);
   const metadata = [
     ["Start", operation.started_at?.replace("T", " ").slice(0, 16)],
@@ -362,17 +362,9 @@ function OperationDetails({ operation }: { operation: Operation }) {
               {tag}
             </Badge>
           ))}
-          <Modal
-            title={`Edit operation #${operation.id}`}
-            protectChanges="Discard unsaved operation changes?"
-            trigger={
-              <Button variant="outline" size="sm">
-                Edit operation
-              </Button>
-            }
-          >
-            <OperationEditor operation={operation} />
-          </Modal>
+          <Button variant="outline" size="sm" aria-haspopup="dialog" onClick={onEdit}>
+            Edit operation
+          </Button>
         </div>
       </header>
       {metadata.some(([, value]) => value) && (
@@ -435,6 +427,8 @@ function OperationDetails({ operation }: { operation: Operation }) {
 }
 
 export function OperationsPage({ data }: { data: PageData }) {
+  // Keep the editor's snapshot independent of refreshed summaries and details.
+  const [editing, setEditing] = useState<Operation | null>(null);
   const operations = useMemo(() => data.operations ?? [], [data.operations]);
   const [hash, setHash] = useState(() => location.hash);
   useEffect(() => {
@@ -491,6 +485,14 @@ export function OperationsPage({ data }: { data: PageData }) {
           </Modal>
         </PageHeader>
       </div>
+      {editing && <Modal
+        title={`Edit operation #${editing.id}`}
+        defaultOpen
+        onClose={() => setEditing(null)}
+        protectChanges="Discard unsaved operation changes?"
+      >
+        <OperationEditor operation={editing} />
+      </Modal>}
       <p className="muted text-xs" role="status">
         {data.total ?? operations.length} matched operation
         {(data.total ?? operations.length) === 1 ? "" : "s"}
@@ -543,7 +545,7 @@ export function OperationsPage({ data }: { data: PageData }) {
               revision={data}
               label="operation"
             >
-              {({ operation }) => <OperationDetails key={operation.id} operation={operation} />}
+              {({ operation }) => <OperationDetails key={operation.id} operation={operation} onEdit={() => setEditing(operation)} />}
             </SelectedDetail>
           ) : (
             <Empty>

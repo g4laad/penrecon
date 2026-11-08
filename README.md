@@ -366,6 +366,10 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   submission/reconciliation. Intentional filter navigation is not a draft save.
   Successful reconciliation commits the new page data before resetting forms.
   Failed saves and failed refreshes do not reset drafts.
+  Credential and operation editors keep their own draft snapshots while recovery
+  reloads lists and read-only details, even if the edited record leaves the
+  current filter. Checking current data preserves the locked draft and never
+  repeats its mutation; returning to editing remains an explicit decision.
 - **Request ownership:** query navigation, viewport-sized host loading,
   credential service loading, selected credential/operation details, and clipboard
   feedback reject stale completions. New navigation supersedes older requests.

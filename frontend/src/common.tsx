@@ -162,16 +162,21 @@ export function Modal({
   children,
   protectChanges = true,
   className,
+  defaultOpen = false,
+  onClose,
 }: {
   title: string;
-  trigger: ReactNode;
+  trigger?: ReactNode;
   children: ReactNode;
   protectChanges?: boolean | string;
   className?: string;
+  defaultOpen?: boolean;
+  onClose?: () => void;
 }) {
-  const [phase, setPhase] = useState<"closed" | "clean" | "dirty" | "committed">("closed");
+  const [phase, setPhase] = useState<"closed" | "clean" | "dirty" | "committed">(defaultOpen ? "clean" : "closed");
   const open = phase !== "closed";
   const content = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const initialForms = useRef<string[]>([]);
   const snapshot = useCallback((root: HTMLDivElement) =>
     Array.from(root.querySelectorAll("form"), (form) =>
@@ -210,15 +215,28 @@ export function Modal({
       initialForms.current = snapshot(node);
     }
   }, [protectChanges, snapshot]);
+  function close() {
+    setPhase("closed");
+  }
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!nextOpen) {
         if (content.current?.querySelector('form[aria-busy="true"]')) return;
         if (protectChanges && phase !== "committed" && hasChanges() && !window.confirm(typeof protectChanges === "string" ? protectChanges : "Discard unsaved changes?")) return;
       }
-      setPhase(nextOpen ? "clean" : "closed");
+      if (nextOpen) setPhase("clean");
+      else close();
+    }} onOpenChangeComplete={(isOpen) => {
+      if (!isOpen && onClose) {
+        onClose();
+        // The opener may have been replaced by detail revalidation.
+        requestAnimationFrame(() => {
+          const target = returnFocus.current?.isConnected ? returnFocus.current : document.getElementById("main");
+          target?.focus({ preventScroll: true });
+        });
+      }
     }}>
-      <DialogTrigger
+      {trigger !== undefined && <DialogTrigger
         render={
           isValidElement(trigger) && trigger.type !== Fragment ? (
             trigger
@@ -226,12 +244,15 @@ export function Modal({
             <Button variant="outline">{trigger}</Button>
           )
         }
-      />
-      <DialogContent className={`max-h-[90dvh] overflow-y-auto ${className ?? "sm:max-w-2xl"}`}>
+      />}
+      <DialogContent
+        className={`max-h-[90dvh] overflow-y-auto ${className ?? "sm:max-w-2xl"}`}
+        finalFocus={defaultOpen ? false : undefined}
+      >
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="sr-only">{title} form</DialogDescription>
         <CloseModal.Provider value={{
-          close: () => setPhase("closed"),
+          close,
           committed: () => setPhase("committed"),
         }}>
           <WorkflowBoundary>
