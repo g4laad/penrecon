@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from penrecon import commands
-from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session
+from penrecon.db import DATA_DIR, get_session
 from penrecon.models import OperationLog
 from penrecon.queries import operations as operation_queries
 from penrecon.queries import ownership as ownership_queries
@@ -177,12 +177,33 @@ def _apply_operation_form(operation: OperationLog, values: _OperationForm) -> No
     operation.tags = values.tags
 
 
+def _attachment_root(engagement_id: str) -> Path | None:
+    """Anchor storage to trusted data, never a caller-chosen or redirected root."""
+    try:
+        canonical_id = str(UUID(engagement_id))
+        if canonical_id != engagement_id:
+            return None
+        data_root = DATA_DIR.resolve()
+        expected = data_root / "engagements" / canonical_id / "operation-attachments"
+        root = expected.resolve()
+        root.relative_to(data_root)
+        # A symlinked directory must not alias another engagement (or any
+        # location outside storage), even when the stored path follows it.
+        if root != expected:
+            return None
+    except OSError, ValueError:
+        return None
+    return root
+
+
 def _safe_attachment_path(
     stored_path: str | None, *, engagement_id: str
 ) -> Path | None:
     if stored_path is None:
         return None
-    root = engagement_attachments_dir(engagement_id).resolve()
+    root = _attachment_root(engagement_id)
+    if root is None:
+        return None
     try:
         if Path(stored_path).is_absolute():
             return None
@@ -207,7 +228,11 @@ def _save_operation_attachment(
     original_name = Path(upload.filename or "").name
     if not original_name:
         raise commands.InvalidCommand("attachment", "Attachment filename is required.")
-    directory = engagement_attachments_dir(engagement_id)
+    directory = _attachment_root(engagement_id)
+    if directory is None:
+        raise commands.InvalidCommand(
+            "attachment", "Attachment storage is unavailable for this engagement."
+        )
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / uuid4().hex
     try:
@@ -226,7 +251,11 @@ def _save_operation_attachment(
         except OSError as cleanup:
             exc.add_note(f"Partial attachment cleanup pending: {cleanup}")
         raise
-    return original_name, str(destination.relative_to(DATA_DIR)), upload.content_type
+    return (
+        original_name,
+        str(destination.relative_to(DATA_DIR.resolve())),
+        upload.content_type,
+    )
 
 
 class _AttachmentAction(StrEnum):

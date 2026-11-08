@@ -9,7 +9,7 @@ import pytest
 from sqlmodel import Session
 from starlette.testclient import TestClient
 
-from penrecon.db import engagement_attachments_dir
+from penrecon.db import engagement_attachments_dir, get_session
 from penrecon.models import Engagement, OperationLog
 from penrecon.queries.operations import operation_logs
 from penrecon.web import operations
@@ -805,3 +805,219 @@ def test_oversized_replacement_preserves_original_operation_and_attachment(
     assert detail["attachment_name"] == "original.txt"
     download = client.get(api_url(f"/operations/{operation_id}/attachment"))
     assert download.content == b"original"
+
+
+@pytest.mark.parametrize("engagement_kind", ["traversal", "absolute", "noncanonical"])
+def test_untrusted_engagement_cannot_access_or_write_attachments(
+    client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    engagement_kind: str,
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(operations, "DATA_DIR", data)
+    monkeypatch.setitem(client.app.dependency_overrides, get_session, lambda: session)
+    if engagement_kind == "noncanonical":
+        engagement_id = TEST_ENGAGEMENT_ID.replace("-", "")
+        protected = data / "engagements" / engagement_id / "operation-attachments"
+        stored_path = f"engagements/{engagement_id}/operation-attachments/evidence"
+    else:
+        engagement_id = (
+            "../../outside"
+            if engagement_kind == "traversal"
+            else str(tmp_path / "outside")
+        )
+        protected = tmp_path / "outside" / "operation-attachments"
+        stored_path = "../outside/operation-attachments/evidence"
+    protected.mkdir(parents=True)
+    evidence = protected / "evidence"
+    evidence.write_bytes(b"must remain private")
+    session.add(Engagement(id=engagement_id, name="Untrusted stored engagement"))
+    session.commit()
+    operation = OperationLog(
+        engagement_id=engagement_id,
+        command="protected",
+        attachment_name="evidence.txt",
+        attachment_path=stored_path,
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+    url = api_url(f"/operations/{operation_id}", engagement_id)
+
+    download = client.get(
+        api_url(f"/operations/{operation_id}/attachment", engagement_id)
+    )
+    assert download.status_code == 404
+    upload = client.post(
+        api_url("/operations", engagement_id),
+        data={"command": "must not write"},
+        files={"attachment": ("new.txt", b"new", "text/plain")},
+    )
+    assert upload.status_code == 400
+    assert "attachment" in upload.json()["field_errors"]
+    assert list(protected.iterdir()) == [evidence]
+    assert client.delete(url).status_code == 200
+    assert evidence.read_bytes() == b"must remain private"
+
+
+@pytest.mark.parametrize("symlink_level", ["engagements", "engagement", "attachments"])
+def test_symlinked_attachment_root_cannot_read_write_or_delete_foreign_files(
+    client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    symlink_level: str,
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(operations, "DATA_DIR", data)
+    monkeypatch.setitem(client.app.dependency_overrides, get_session, lambda: session)
+    other_id = "b9ec54a7-99a7-4ecf-b489-07ee3ca012a2"
+    foreign = data / "engagements" / other_id / "operation-attachments"
+    if symlink_level == "engagements":
+        target = tmp_path / "outside"
+        target.mkdir()
+        (data / "engagements").symlink_to(target, target_is_directory=True)
+        foreign = target / TEST_ENGAGEMENT_ID / "operation-attachments"
+        foreign.mkdir(parents=True)
+    else:
+        foreign.mkdir(parents=True)
+        owned = data / "engagements" / TEST_ENGAGEMENT_ID
+        if symlink_level == "engagement":
+            owned.symlink_to(foreign.parent, target_is_directory=True)
+        else:
+            owned.mkdir()
+            (owned / "operation-attachments").symlink_to(
+                foreign, target_is_directory=True
+            )
+    evidence = foreign / "evidence"
+    evidence.write_bytes(b"foreign evidence")
+    operation = OperationLog(
+        engagement_id=TEST_ENGAGEMENT_ID,
+        command="symlinked",
+        attachment_name="evidence.txt",
+        attachment_path=f"engagements/{TEST_ENGAGEMENT_ID}/operation-attachments/evidence",
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
+    assert download.status_code == 404
+    upload = _create_operation(client, attachment=("new.txt", b"new", "text/plain"))
+    assert upload.status_code == 400
+    assert "attachment" in upload.json()["field_errors"]
+    assert list(foreign.iterdir()) == [evidence]
+    assert client.delete(api_url(f"/operations/{operation_id}")).status_code == 200
+    assert evidence.read_bytes() == b"foreign evidence"
+
+
+@pytest.mark.parametrize("stored_kind", ["traversal", "absolute", "foreign", "symlink"])
+def test_attachment_paths_cannot_read_or_delete_outside_owned_directory(
+    client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stored_kind: str,
+) -> None:
+    data = tmp_path / "data"
+    owned = data / "engagements" / TEST_ENGAGEMENT_ID / "operation-attachments"
+    owned.mkdir(parents=True)
+    monkeypatch.setattr(operations, "DATA_DIR", data)
+    monkeypatch.setitem(client.app.dependency_overrides, get_session, lambda: session)
+    other_id = "b9ec54a7-99a7-4ecf-b489-07ee3ca012a2"
+    foreign = data / "engagements" / other_id / "operation-attachments"
+    foreign.mkdir(parents=True)
+    evidence = foreign / "evidence"
+    evidence.write_bytes(b"foreign evidence")
+    if stored_kind == "absolute":
+        stored_path = str(evidence)
+    elif stored_kind == "traversal":
+        stored_path = (
+            f"engagements/{TEST_ENGAGEMENT_ID}/operation-attachments/../../"
+            f"{other_id}/operation-attachments/evidence"
+        )
+    elif stored_kind == "symlink":
+        (owned / "link").symlink_to(evidence)
+        stored_path = f"engagements/{TEST_ENGAGEMENT_ID}/operation-attachments/link"
+    else:
+        stored_path = f"engagements/{other_id}/operation-attachments/evidence"
+    operation = OperationLog(
+        engagement_id=TEST_ENGAGEMENT_ID,
+        command="foreign path",
+        attachment_name="evidence.txt",
+        attachment_path=stored_path,
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
+    assert download.status_code == 404
+    assert client.delete(api_url(f"/operations/{operation_id}")).status_code == 200
+    assert evidence.read_bytes() == b"foreign evidence"
+
+
+def test_attachment_symlink_within_owned_directory_remains_usable(
+    client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    owned = data / "engagements" / TEST_ENGAGEMENT_ID / "operation-attachments"
+    owned.mkdir(parents=True)
+    monkeypatch.setattr(operations, "DATA_DIR", data)
+    monkeypatch.setitem(client.app.dependency_overrides, get_session, lambda: session)
+    evidence = owned / "evidence"
+    evidence.write_bytes(b"owned evidence")
+    (owned / "link").symlink_to(evidence)
+    operation = OperationLog(
+        engagement_id=TEST_ENGAGEMENT_ID,
+        command="owned path",
+        attachment_name="evidence.txt",
+        attachment_path=f"engagements/{TEST_ENGAGEMENT_ID}/operation-attachments/link",
+    )
+    session.add(operation)
+    session.commit()
+    operation_id = operation.id
+
+    download = client.get(api_url(f"/operations/{operation_id}/attachment"))
+    assert download.status_code == 200
+    assert download.content == b"owned evidence"
+    assert client.delete(api_url(f"/operations/{operation_id}")).status_code == 200
+    assert not evidence.exists()
+
+
+def test_foreign_engagement_cannot_download_modify_or_delete_attachment(
+    client: TestClient,
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(operations, "DATA_DIR", tmp_path)
+    monkeypatch.setitem(client.app.dependency_overrides, get_session, lambda: session)
+    other_id = "b9ec54a7-99a7-4ecf-b489-07ee3ca012a2"
+    session.add(Engagement(id=other_id, name="Other engagement"))
+    session.commit()
+    _assert_outcome(
+        _create_operation(client, attachment=("owned.txt", b"owned", "text/plain"))
+    )
+    operation_id = _only_operation_id(client)
+    foreign_url = api_url(f"/operations/{operation_id}", other_id)
+
+    download = client.get(api_url(f"/operations/{operation_id}/attachment", other_id))
+    assert download.status_code == 404
+    assert (
+        client.put(
+            foreign_url, data={"command": "foreign", "remove_attachment": "true"}
+        ).status_code
+        == 404
+    )
+    assert client.delete(foreign_url).status_code == 404
+    own_download = client.get(api_url(f"/operations/{operation_id}/attachment"))
+    assert own_download.status_code == 200
+    assert own_download.content == b"owned"

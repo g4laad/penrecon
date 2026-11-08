@@ -6,6 +6,8 @@ import pytest
 from jsonschema import Draft202012Validator
 from starlette.testclient import TestClient
 
+from penrecon import commands
+from penrecon.web import inventory as inventory_web
 from tests.fixtures import SCAN_A, TEST_ENGAGEMENT_ID, api_url
 
 
@@ -186,6 +188,141 @@ def test_validation_errors_are_field_addressable_without_echoing_secrets(
     assert "private-invalid-input-must-not-echo" not in response.text
     assert "input" not in data
     assert client.get(api_url("/credentials")).json()["credentials"] == []
+
+
+@pytest.mark.parametrize(
+    "fields,field,message",
+    [
+        (
+            {"port": "-1"},
+            "port",
+            "Port must be between 0 and 65535.",
+        ),
+        (
+            {"port": "22", "proto": "private-invalid-protocol"},
+            "proto",
+            "Choose TCP, UDP, or SCTP.",
+        ),
+        (
+            {"port": "22", "state": "private-invalid-state"},
+            "state",
+            "Choose a supported service state, or leave blank to inherit scan evidence.",
+        ),
+    ],
+)
+def test_service_validation_uses_public_field_messages_not_exception_diagnostics(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fields: dict[str, str],
+    field: str,
+    message: str,
+) -> None:
+    created = client.post(api_url("/hosts"), data={"ip": "192.0.2.10"})
+    assert created.status_code == 200
+    host_id = urlsplit(created.json()["redirect_to"]).path.rsplit("/", 1)[1]
+    path = api_url(f"/hosts/{host_id}")
+    before = client.get(path).json()
+    monkeypatch.setattr(
+        commands.InvalidCommand,
+        "__str__",
+        lambda self: "internal-diagnostic-sentinel",
+    )
+
+    response = client.post(api_url(f"/hosts/{host_id}/services"), data=fields)
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": message,
+        "field_errors": {field: message},
+    }
+    assert "internal-diagnostic-sentinel" not in response.text
+    assert "private-invalid-" not in response.text
+    assert client.get(path).json() == before
+
+
+def test_credential_validation_preserves_public_message_and_422_status(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        commands.InvalidCommand,
+        "__str__",
+        lambda self: "internal-diagnostic-sentinel",
+    )
+
+    response = client.post(api_url("/credentials"), data={"notes": "Keep private"})
+
+    message = "a credential must carry at least a username or a secret"
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": message,
+        "field_errors": {"username": message},
+    }
+    assert "internal-diagnostic-sentinel" not in response.text
+    assert "Keep private" not in response.text
+    assert client.get(api_url("/credentials")).json()["credentials"] == []
+
+
+@pytest.mark.parametrize("name", [".", "private invalid hostname"])
+def test_hostname_validation_returns_actionable_public_field_message(
+    client: TestClient, name: str
+) -> None:
+    created = client.post(api_url("/hosts"), data={"ip": "192.0.2.10"})
+    assert created.status_code == 200
+    host_id = urlsplit(created.json()["redirect_to"]).path.rsplit("/", 1)[1]
+    path = api_url(f"/hosts/{host_id}")
+    before = client.get(path).json()
+
+    response = client.post(api_url(f"/hosts/{host_id}/hostnames"), data={"name": name})
+
+    message = "hostname must not be empty or contain whitespace"
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": message,
+        "field_errors": {"name": message},
+    }
+    assert "private invalid hostname" not in response.text
+    assert client.get(path).json() == before
+
+
+def test_hostname_validation_does_not_serialize_normalizer_exception(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = client.post(api_url("/hosts"), data={"ip": "192.0.2.10"})
+    assert created.status_code == 200
+    host_id = urlsplit(created.json()["redirect_to"]).path.rsplit("/", 1)[1]
+    path = api_url(f"/hosts/{host_id}")
+    before = client.get(path).json()
+
+    def fail_normalization(raw: str) -> str:
+        raise ValueError("internal-diagnostic-sentinel")
+
+    monkeypatch.setattr(inventory_web, "normalize_hostname", fail_normalization)
+    response = client.post(
+        api_url(f"/hosts/{host_id}/hostnames"), data={"name": "new.example"}
+    )
+
+    message = "hostname must not be empty or contain whitespace"
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": message,
+        "field_errors": {"name": message},
+    }
+    assert "internal-diagnostic-sentinel" not in response.text
+    assert client.get(path).json() == before
+
+
+def test_hostname_whitespace_remains_a_successful_noop(client: TestClient) -> None:
+    created = client.post(api_url("/hosts"), data={"ip": "192.0.2.10"})
+    assert created.status_code == 200
+    host_id = urlsplit(created.json()["redirect_to"]).path.rsplit("/", 1)[1]
+    path = api_url(f"/hosts/{host_id}")
+    before = client.get(path).json()
+
+    response = client.post(api_url(f"/hosts/{host_id}/hostnames"), data={"name": "   "})
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert client.get(path).json() == before
 
 
 def test_foreign_host_mutation_returns_404_without_changing_owner(

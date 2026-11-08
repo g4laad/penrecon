@@ -41,7 +41,10 @@ export function engagementUrl(url: string): string {
 
 export function ScopedLink({ href, ...props }: ComponentProps<"a">) {
   const scoped = href === undefined ? undefined : engagementUrl(href);
-  return <a {...props} href={scoped !== undefined && props.download !== undefined ? apiUrl(scoped) : scoped} />;
+  const target = scoped !== undefined && props.download !== undefined ? apiUrl(scoped) : scoped;
+  // Encode URL metacharacters without double-encoding existing percent escapes.
+  const safe = target?.replace(/[<>"']/g, (character) => `%${character.charCodeAt(0).toString(16)}`);
+  return <a {...props} href={safe} />;
 }
 
 export const PageContext = createContext<{

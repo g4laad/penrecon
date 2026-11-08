@@ -283,6 +283,12 @@ unknown; inspect current data before retrying.
   CLI clients may omit Origin.
 - API/HTML responses use `Cache-Control: no-store`. Attachments are inert
   downloads with `nosniff`; stored paths are not exposed.
+- Attachment storage requires canonical engagement UUIDs and stays within that
+  engagement's directory; redirected storage directories and escaping file paths
+  are rejected for uploads, downloads, and cleanup.
+- Validation responses expose explicit public field messages, not exception
+  diagnostics. Workspace IDs and link URL metacharacters are percent-encoded
+  without double-encoding existing URL escapes.
 - Limits: **32 MiB per upload, 33 MiB total request body**, including chunked
   bodies before form parsing. Every lookup/link/download checks ownership.
 

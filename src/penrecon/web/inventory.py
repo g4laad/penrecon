@@ -335,9 +335,10 @@ def add_hostname(
     owned_host(session, host_id, engagement_id=engagement_id)
     try:
         clean = normalize_hostname(name) if name.strip() else ""
-    except ValueError as exc:
+    except ValueError:
+        message = "hostname must not be empty or contain whitespace"
         return JSONResponse(
-            {"detail": str(exc), "field_errors": {"name": str(exc)}}, status_code=400
+            {"detail": message, "field_errors": {"name": message}}, status_code=400
         )
     if clean:
         link_hostname(

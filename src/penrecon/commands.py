@@ -29,9 +29,12 @@ from penrecon.queries import ownership as ownership_queries
 
 
 class InvalidCommand(ValueError):
+    """A field validation failure carrying an explicitly public, safe message."""
+
     def __init__(self, field: str, message: str) -> None:
         super().__init__(message)
         self.field = field
+        self.public_message = message
 
 
 @dataclass(frozen=True)

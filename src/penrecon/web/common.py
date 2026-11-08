@@ -91,6 +91,9 @@ def invalid_command(
     exc: commands.InvalidCommand, *, status_code: int = 400
 ) -> JSONResponse:
     return JSONResponse(
-        {"detail": str(exc), "field_errors": {exc.field: str(exc)}},
+        {
+            "detail": exc.public_message,
+            "field_errors": {exc.field: exc.public_message},
+        },
         status_code=status_code,
     )
