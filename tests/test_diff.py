@@ -7,7 +7,8 @@ from sqlmodel import Session
 
 from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
-from penrecon.queries import diff_scans, host_rows
+from penrecon.queries.diff import diff_scans
+from penrecon.queries.inventory import host_rows
 from tests.fixtures import SCAN_A, SCAN_B
 
 

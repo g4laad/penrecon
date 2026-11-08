@@ -6,7 +6,7 @@ from sqlmodel import Session
 
 from penrecon.inventory import normalize_ip
 from penrecon.ingest import ingest_scan
-from penrecon.queries import host_hostnames, host_rows, resolved_services
+from penrecon.queries.inventory import host_hostnames, host_rows, resolved_services
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 
@@ -55,7 +55,7 @@ def test_import_reuses_legacy_ip_identity_without_merging_existing_collisions(
     session: Session, collision: bool,
 ) -> None:
     from penrecon.models import Host, Note
-    from penrecon.queries import notes_for
+    from penrecon.queries.annotations import notes_for
 
     legacy = Host(ip="2001:0DB8:0:0:0:0:0:1", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(legacy)
@@ -81,14 +81,14 @@ def test_import_reuses_legacy_ip_identity_without_merging_existing_collisions(
     if newer is not None:
         assert newer.id is not None
         assert resolved_services(session, newer.id, engagement_id=TEST_ENGAGEMENT_ID) == []
-        from penrecon.queries import latest_observations
+        from penrecon.queries.inventory import latest_observations
         assert latest_observations(session, newer.id, engagement_id=TEST_ENGAGEMENT_ID) == {}
         assert notes_for(session, newer.id, engagement_id=TEST_ENGAGEMENT_ID)[0].body_md == "also retain"
 
 
 def test_legacy_raw_history_matches_equivalent_ip_spelling(session: Session, tmp_path: Path) -> None:
     from penrecon.models import Host, Scan
-    from penrecon.queries import latest_observations
+    from penrecon.queries.inventory import latest_observations
 
     host = Host(ip="2001:0DB8::0001", engagement_id=TEST_ENGAGEMENT_ID)
     raw = tmp_path / "legacy.xml"

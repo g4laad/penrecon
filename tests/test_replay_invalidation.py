@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
 from penrecon.models import Host
-from penrecon.queries import host_change, host_rows, resolved_services
+from penrecon.queries.inventory import host_change, host_rows, resolved_services
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 

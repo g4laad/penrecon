@@ -19,7 +19,7 @@ from penrecon.models import (
     ScanEvidenceComplete,
     Service,
 )
-from penrecon.queries import host_rows, resolved_services
+from penrecon.queries.inventory import host_rows, resolved_services
 from tests.fixtures import TEST_ENGAGEMENT_ID
 
 

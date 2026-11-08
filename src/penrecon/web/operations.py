@@ -14,7 +14,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from penrecon import commands, queries
+from penrecon import commands
+from penrecon.queries import operations as operation_queries
+from penrecon.queries import ownership as ownership_queries
+from penrecon.queries import pagination as pagination_queries
 from penrecon.db import DATA_DIR, engagement_attachments_dir, get_session
 from penrecon.models import OperationLog
 from penrecon.web.common import (
@@ -303,12 +306,12 @@ def _operations_ctx(
 ) -> dict[str, object]:
     normalized_per = (
         per
-        if per == "all" or (len(per) <= 10 and per.isascii() and per.isdecimal() and int(per) in queries.PER_PAGE_OPTIONS)
+        if per == "all" or (len(per) <= 10 and per.isascii() and per.isdecimal() and int(per) in pagination_queries.PER_PAGE_OPTIONS)
         else "25"
     )
-    result = queries.operation_logs(
+    result = operation_queries.operation_logs(
         session, q, engagement_id=engagement_id,
-        page=page, per_page=queries.resolve_per_page(normalized_per),
+        page=page, per_page=pagination_queries.resolve_per_page(normalized_per),
     )
     return {
         "operations": result.operations,
@@ -339,7 +342,7 @@ def operation_detail(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
+    operation = ownership_queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         raise HTTPException(
             status_code=404, detail="operation not found", headers={"Cache-Control": "no-store"},
@@ -381,7 +384,7 @@ def edit_operation(
     session: Session = Depends(get_session),
 ) -> Response:
     """Replace editable fields; keep, replace, or explicitly remove the attachment."""
-    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
+    operation = ownership_queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
     try:
@@ -401,7 +404,7 @@ def delete_operation(
     request: Request,
     operation_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session),
 ) -> Response:
-    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
+    operation = ownership_queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None:
         return JSONResponse({"detail": "operation not found"}, status_code=404)
     change = _AttachmentChange.choose(operation, None, remove=True)
@@ -427,7 +430,7 @@ def delete_operation(
 def download_operation_attachment(
     operation_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session),
 ) -> Response:
-    operation = queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
+    operation = ownership_queries.get_owned(session, OperationLog, operation_id, engagement_id=engagement_id)
     if operation is None or not operation.attachment_name:
         return JSONResponse({"detail": "attachment not found"}, status_code=404)
     path = _safe_attachment_path(operation.attachment_path, engagement_id=engagement_id)

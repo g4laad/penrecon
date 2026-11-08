@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
 from penrecon.models import Host, HostHostname, ObsState, Service
-from penrecon.queries import host_hostnames, latest_observations, resolved_services
+from penrecon.queries.inventory import host_hostnames, latest_observations, resolved_services
 
 
 def _scan(ip: str, port: int, version: str, hostname: str) -> bytes:

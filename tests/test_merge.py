@@ -10,7 +10,8 @@ from sqlmodel import Session, select
 
 from penrecon.ingest import ScanParseError, ingest_scan
 from penrecon.models import Host, Service
-from penrecon.queries import diff_scans, host_rows, host_timeline, resolved_services, latest_observations
+from penrecon.queries.diff import diff_scans
+from penrecon.queries.inventory import host_rows, host_timeline, resolved_services, latest_observations
 from tests.fixtures import SCAN_A, SCAN_B
 
 

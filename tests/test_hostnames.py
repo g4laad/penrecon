@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from penrecon.ingest import ingest_scan
 from penrecon.inventory import hide_hostname, link_hostname
-from penrecon.queries import host_hostnames, host_rows
+from penrecon.queries.inventory import host_hostnames, host_rows
 
 
 def _scan(ip: str, hostnames: list[str]) -> bytes:

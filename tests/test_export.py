@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from penrecon.ingest import ingest_scan
 from penrecon.models import Annotation, Host, Status
-from penrecon.queries import EXPORT_COLUMNS, export_rows
+from penrecon.queries.export import EXPORT_COLUMNS, export_rows
 
 
 def _scan(ip: str, hostname: str, service: str, port: int) -> bytes:

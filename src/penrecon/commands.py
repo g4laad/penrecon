@@ -10,7 +10,8 @@ from enum import StrEnum
 
 from sqlmodel import Session, select
 
-from penrecon import queries
+from penrecon.queries import inventory as inventory_queries
+from penrecon.queries import ownership as ownership_queries
 from penrecon.history import Overrides, State
 from penrecon.inventory import normalize_protocol
 from penrecon.models import (
@@ -70,7 +71,7 @@ ServiceSnapshot = tuple[State, Overrides]
 
 
 def _snapshot(service: Service, observation: Observation | None) -> ServiceSnapshot:
-    return queries.service_state(service, observation), queries.service_overrides(service)
+    return inventory_queries.service_state(service, observation), inventory_queries.service_overrides(service)
 
 
 def _record(session: Session, service: Service, before: ServiceSnapshot | None, after: ServiceSnapshot | None) -> None:
@@ -137,7 +138,7 @@ def link_credential_host(session: Session, credential: Credential, host: Host) -
     if credential.engagement_id != host.engagement_id:
         raise InvalidCommand("host_id", "host belongs to another engagement")
     assert credential.id is not None and host.id is not None
-    if queries.get_owned(session, CredentialHost, (credential.id, host.id), engagement_id=credential.engagement_id) is not None:
+    if ownership_queries.get_owned(session, CredentialHost, (credential.id, host.id), engagement_id=credential.engagement_id) is not None:
         return LinkOutcome.already_linked
     session.add(CredentialHost(credential_id=credential.id, host_id=host.id, engagement_id=credential.engagement_id))
     return LinkOutcome.linked
@@ -147,9 +148,9 @@ def link_credential_service(session: Session, credential: Credential, service: S
     if credential.engagement_id != service.engagement_id:
         raise InvalidCommand("service_id", "service belongs to another engagement")
     assert credential.id is not None and service.id is not None
-    if queries.get_owned(session, CredentialHost, (credential.id, service.host_id), engagement_id=credential.engagement_id) is None:
+    if ownership_queries.get_owned(session, CredentialHost, (credential.id, service.host_id), engagement_id=credential.engagement_id) is None:
         raise InvalidCommand("service_id", "Link the service's host to this credential before linking the service.")
-    if queries.get_owned(session, CredentialService, (credential.id, service.id), engagement_id=credential.engagement_id) is not None:
+    if ownership_queries.get_owned(session, CredentialService, (credential.id, service.id), engagement_id=credential.engagement_id) is not None:
         return LinkOutcome.already_linked
     session.add(CredentialService(credential_id=credential.id, service_id=service.id, engagement_id=credential.engagement_id))
     return LinkOutcome.linked
@@ -167,6 +168,6 @@ def unlink_credential_host(session: Session, credential: Credential, host: Host)
     ).all()
     for link in links:
         session.delete(link)
-    host_link = queries.get_owned(session, CredentialHost, (credential.id, host.id), engagement_id=credential.engagement_id)
+    host_link = ownership_queries.get_owned(session, CredentialHost, (credential.id, host.id), engagement_id=credential.engagement_id)
     if host_link is not None:
         session.delete(host_link)

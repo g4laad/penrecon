@@ -6,7 +6,7 @@ from sqlmodel import select
 from starlette.testclient import TestClient
 
 from penrecon.ingest import ingest_scan
-from penrecon.queries import resolved_services
+from penrecon.queries.inventory import resolved_services
 from tests.fixtures import api_url, SCAN_A
 
 from penrecon.models import (
@@ -17,7 +17,7 @@ from penrecon.models import (
     Host,
     Service,
 )
-from penrecon.queries import credential_service_options, credential_summaries, credential_view, credentials_for_host
+from penrecon.queries.credentials import credential_service_options, credential_summaries, credential_view, credentials_for_host
 
 
 def _host(session: Session, ip: str) -> Host:

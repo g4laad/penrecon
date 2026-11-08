@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from sqlmodel import Session, select
 
-from penrecon import commands, queries
+from penrecon import commands
+from penrecon.queries import annotations as annotation_queries
+from penrecon.queries import credentials as credential_queries
+from penrecon.queries import inventory as inventory_queries
+from penrecon.queries import ownership as ownership_queries
+from penrecon.queries import pagination as pagination_queries
 from penrecon.db import get_session
 from penrecon.inventory import (
     find_host_by_ip,
@@ -67,13 +72,13 @@ def _query_integer(raw: str) -> int | None:
 def _hosts_ctx(session: Session, table: _HostTable, *, engagement_id: str) -> dict[str, object]:
     q, port, tag, status, change = table.q, table.port, table.tag, table.status, table.change
     port_val = _query_integer(port)
-    direction = table.dir if table.dir in ("asc", "desc") else queries.SORT_DEFAULT_DIR.get(table.sort, "asc")
+    direction = table.dir if table.dir in ("asc", "desc") else pagination_queries.SORT_DEFAULT_DIR.get(table.sort, "asc")
     page_no = _query_integer(table.page) or 1
-    per_limit = queries.resolve_per_page(table.per)
+    per_limit = pagination_queries.resolve_per_page(table.per)
     fit = table.fit
     if len(fit) <= 2 and fit.isascii() and fit.isdecimal() and 1 <= int(fit) <= 50:
         per_limit = int(fit)
-    result = queries.host_page(
+    result = inventory_queries.host_page(
         session, engagement_id=engagement_id, q=q, port=port_val, tag=tag,
         status=status, change=change, sort=table.sort, direction=direction,
         page=page_no, per_page=per_limit,
@@ -119,11 +124,11 @@ def _services_ctx(
     assert host.id is not None
     direction = (
         table.dir if table.dir in ("asc", "desc")
-        else queries.SERVICE_SORT_DEFAULT_DIR.get(table.sort, "asc")
+        else pagination_queries.SERVICE_SORT_DEFAULT_DIR.get(table.sort, "asc")
     )
     page_no = _query_integer(table.page) or 1
-    per_limit = queries.resolve_per_page(table.per)
-    result = queries.service_page(
+    per_limit = pagination_queries.resolve_per_page(table.per)
+    result = inventory_queries.service_page(
         session, host.id, engagement_id=engagement_id,
         port=table.f_port, state=table.f_state, service=table.f_service,
         status=table.f_status, sort=table.sort, direction=direction,
@@ -139,7 +144,7 @@ def _services_ctx(
 
 
 def _owned_host(session: Session, host_id: int, *, engagement_id: str) -> Host:
-    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         raise HTTPException(status_code=404, detail="host not found")
     return host
@@ -166,7 +171,7 @@ def timeline_data(
 ) -> Response:
     _owned_host(session, host_id, engagement_id=engagement_id)
     return JSONResponse(encode_page({
-        "host_timeline": queries.host_timeline(
+        "host_timeline": inventory_queries.host_timeline(
             session, host_id, engagement_id=engagement_id,
             page=timeline_page, show_unchanged=timeline_unchanged,
         ),
@@ -196,7 +201,7 @@ def service_options(
     return JSONResponse({"services": [
         {"service_id": service.service_id, "port": service.port,
          "proto": service.proto, "service_name": service.service_name}
-        for service in queries.resolved_services(session, host_id, engagement_id=engagement_id)
+        for service in inventory_queries.resolved_services(session, host_id, engagement_id=engagement_id)
     ]})
 
 
@@ -214,14 +219,14 @@ def host_detail(
         "host": host,
         "statuses": list(Status),
         "states": list(ObsState),
-        "hostnames": queries.host_hostnames(session, host_id, engagement_id=engagement_id),
-        "host_ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
-        "host_notes": queries.notes_for(session, host_id, engagement_id=engagement_id),
+        "hostnames": inventory_queries.host_hostnames(session, host_id, engagement_id=engagement_id),
+        "host_ann": annotation_queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id),
+        "host_notes": annotation_queries.notes_for(session, host_id, engagement_id=engagement_id),
         "host_credentials": [
             host_credential(credential)
-            for credential in queries.credentials_for_host(session, host_id, engagement_id=engagement_id)
+            for credential in credential_queries.credentials_for_host(session, host_id, engagement_id=engagement_id)
         ],
-        "host_timeline": queries.host_timeline(
+        "host_timeline": inventory_queries.host_timeline(
             session, host_id, engagement_id=engagement_id,
             page=timeline_page, show_unchanged=timeline_unchanged,
         ),
@@ -362,7 +367,7 @@ def add_service(
             Service.host_id == host_id, Service.port == identity.port, Service.proto == identity.proto
         )
     ).first()
-    observation = queries.latest_observations(session, host_id, engagement_id=engagement_id).get(
+    observation = inventory_queries.latest_observations(session, host_id, engagement_id=engagement_id).get(
         (identity.port, identity.proto)
     )
     creating = service is None
@@ -386,20 +391,20 @@ def edit_service(
     session: Session = Depends(get_session),
 ) -> Response:
     """Replace editable overrides and triage; blank overrides restore scan values."""
-    service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
+    service = ownership_queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if service is None:
         raise HTTPException(status_code=404, detail="service not found")
     try:
         values = commands.ServiceOverrides.parse(state, service_name, product, version)
     except commands.InvalidCommand as exc:
         return invalid_command(exc)
-    observation = queries.latest_observations(session, service.host_id, engagement_id=engagement_id).get(
+    observation = inventory_queries.latest_observations(session, service.host_id, engagement_id=engagement_id).get(
         (service.port, service.proto)
     )
     commands.override_service(session, service, values, observation)
     # Saving persists both scan overrides and triage annotations together.
     tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
-    queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
+    annotation_queries.upsert_annotation(session, status, tag_list, service_id=service_id, engagement_id=engagement_id)
     return JSONResponse({"ok": True})
 
 
@@ -409,10 +414,10 @@ def delete_service(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
+    service = ownership_queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
     if service is None:
         raise HTTPException(status_code=404, detail="service not found")
-    observation = queries.latest_observations(session, service.host_id, engagement_id=engagement_id).get(
+    observation = inventory_queries.latest_observations(session, service.host_id, engagement_id=engagement_id).get(
         (service.port, service.proto)
     )
     commands.remove_service(session, service, observation)

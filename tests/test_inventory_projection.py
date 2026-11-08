@@ -28,7 +28,7 @@ from penrecon.models import (
     Service,
     Status,
 )
-from penrecon.queries import (
+from penrecon.queries.inventory import (
     host_page,
     host_rows,
     host_timeline,

@@ -7,20 +7,21 @@ writes reuse persisted scan state without recovering raw scans.
 
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
-from sqlalchemy import case, delete, event, false, func, inspect, insert, true, update
+from sqlalchemy import event, func, inspect, true
 from sqlalchemy.orm import SessionTransaction
 from sqlmodel import Session, col, select
+
+from penrecon import inventory_projection, scan_projection
 
 
 if TYPE_CHECKING:
     from penrecon.history import TimelineEntry
-    from penrecon.models import Host, HostScanEvidence, Observation, Scan
+    from penrecon.models import (
+        Annotation, Host, Hostname, HostHostname, HostScanEvidence, Observation, Scan, Service,
+    )
 
 _PENDING = "scan_projection_pending"
 _INVENTORY_PENDING = "inventory_projection_pending"
@@ -37,42 +38,16 @@ def _evidence_types() -> tuple[type[Scan], type[Host], type[HostScanEvidence], t
 
 
 @cache
-def _inventory_types() -> tuple[type[Any], ...]:
+def _inventory_types() -> tuple[
+    type[Scan], type[Host], type[HostScanEvidence], type[Observation],
+    type[Annotation], type[Hostname], type[HostHostname], type[Service],
+]:
     from penrecon.models import Annotation, Hostname, HostHostname, Service
 
     return _evidence_types() + (Annotation, Hostname, HostHostname, Service)
 
 
-@cache
-def _timeline_adapter() -> TypeAdapter[TimelineEntry]:
-    from penrecon.history import TimelineEntry
-
-    return TypeAdapter(TimelineEntry)
-
-
-@dataclass
-class _ReplayScope:
-    hosts: set[int] = field(default_factory=set)
-    new_hosts: dict[int, Host] = field(default_factory=dict)
-    scans: dict[int, Scan] = field(default_factory=dict)
-    deleted_scans: set[int] = field(default_factory=set)
-    full: bool = False
-
-    def merge(self, other: _ReplayScope) -> None:
-        self.hosts.update(other.hosts)
-        self.new_hosts.update(other.new_hosts)
-        self.scans.update(other.scans)
-        self.deleted_scans.update(other.deleted_scans)
-        self.full |= other.full
-
-    def copy(self) -> _ReplayScope:
-        return _ReplayScope(
-            set(self.hosts), dict(self.new_hosts), dict(self.scans),
-            set(self.deleted_scans), self.full,
-        )
-
-
-def _replay_targets(session: Session) -> dict[str, _ReplayScope]:
+def _replay_targets(session: Session) -> dict[str, scan_projection.ReplayScope]:
     return session.info.setdefault(_REPLAY_TARGETS, {})  # type: ignore[no-any-return]
 
 
@@ -86,7 +61,7 @@ def _inventory_pending(session: Session) -> set[str]:
 
 def _savepoints(
     session: Session,
-) -> dict[SessionTransaction, tuple[set[str], set[str], dict[str, _ReplayScope]]]:
+) -> dict[SessionTransaction, tuple[set[str], set[str], dict[str, scan_projection.ReplayScope]]]:
     return session.info.setdefault(_SAVEPOINTS, {})  # type: ignore[no-any-return]
 
 
@@ -102,249 +77,6 @@ def _collect(session: Session, _flush_context: Any, _instances: Any) -> None:
     if session.info.get(_REBUILDING):
         return
     _collect_changes(session)
-
-
-def _rebuild_engagement(
-    session: Session, engagement_id: str, scope: _ReplayScope | None = None,
-) -> None:
-    from penrecon.history import ReplayInputs, rebuild_history
-    from penrecon.inventory import normalize_ip
-    from penrecon.models import (
-        Host, HostScanDelta, HostScanState, Scan, ScanEvidenceComplete,
-    )
-
-    host_ids: set[int] | None = None
-    if scope is not None and not scope.full:
-        scan_ids = {
-            scan.id for scan in scope.scans.values()
-            if scan.id is not None and scan.id not in scope.deleted_scans
-        }
-        complete = set(session.execute(
-            select(ScanEvidenceComplete.scan_id).where(
-                ScanEvidenceComplete.engagement_id == engagement_id,
-                col(ScanEvidenceComplete.scan_id).in_(scan_ids),
-            )
-        ).scalars()) if scan_ids else set()
-        if scan_ids <= complete:
-            host_ids = set(scope.hosts)
-            host_ids.update(
-                host.id for host in scope.new_hosts.values() if host.id is not None
-            )
-            if scan_ids:
-                # Scan metadata edits affect its existing histories even when
-                # evidence itself was not changed in this transaction.
-                host_ids.update(session.execute(
-                    select(HostScanDelta.host_id).where(
-                        HostScanDelta.engagement_id == engagement_id,
-                        col(HostScanDelta.scan_id).in_(scan_ids),
-                    )
-                ).scalars())
-            # Legacy aliases are separate identities, but evidence attribution
-            # can affect the raw fallback of a canonical sibling.
-            identities = list(session.execute(
-                select(Host.id, Host.ip).where(Host.engagement_id == engagement_id)
-            ))
-            canonical: dict[int, str] = {}
-            for identity, ip in identities:
-                if identity is not None:
-                    try:
-                        canonical[identity] = normalize_ip(ip)
-                    except ValueError:
-                        continue
-            affected_ips = {canonical[identity] for identity in host_ids if identity in canonical}
-            host_ids.update(
-                identity for identity, ip in canonical.items() if ip in affected_ips
-            )
-
-    scan_ids_ordered = list(session.execute(
-        select(Scan.id).where(Scan.engagement_id == engagement_id)
-        .order_by(col(Scan.imported_at).desc())
-    ).scalars())
-    latest_scan_id = scan_ids_ordered[0] if scan_ids_ordered else None
-    host_filter = [col(Host.engagement_id) == engagement_id]
-    state_filter = [col(HostScanState.engagement_id) == engagement_id]
-    delta_filter = [col(HostScanDelta.engagement_id) == engagement_id]
-    if host_ids is not None:
-        host_filter.append(col(Host.id).in_(host_ids))
-        state_filter.append(col(HostScanState.host_id).in_(host_ids))
-        delta_filter.append(col(HostScanDelta.host_id).in_(host_ids))
-    states = {
-        row.host_id: row for row in session.execute(
-            select(HostScanState).where(*state_filter)
-        ).scalars()
-    }
-    session.execute(delete(HostScanDelta).where(*delta_filter))
-    hosts = session.execute(select(Host).where(*host_filter)).scalars().all()
-    inputs = ReplayInputs.load(session, engagement_id=engagement_id, host_ids=host_ids)
-    adapter = _timeline_adapter()
-    for host in hosts:
-        assert host.id is not None
-        entries, latest = rebuild_history(
-            session, host.id, engagement_id=engagement_id, inputs=inputs,
-        )
-        change = ""
-        if len(entries) == 1:
-            if len(scan_ids_ordered) > 1 and entries[0].scan_id == latest_scan_id:
-                change = "new"
-        elif entries and entries[-1].changes:
-            change = "changed"
-        state = states.get(host.id)
-        if state is None:
-            state = HostScanState(engagement_id=engagement_id, host_id=host.id)
-        state.latest = [row.model_dump(mode="json") for row in latest.values()]
-        state.change = change
-        session.add(state)
-        if entries:
-            session.execute(insert(HostScanDelta), [
-                {
-                    "engagement_id": engagement_id,
-                    "host_id": host.id,
-                    "scan_id": entry.scan_id,
-                    "entry": adapter.dump_python(entry, mode="json"),
-                }
-                for entry in entries
-            ])
-    session.flush()
-    # "New" is engagement-relative, unlike historical deltas. Refresh its
-    # scalar marker without replaying hosts absent from the changed scan.
-    new_hosts = select(HostScanDelta.host_id).where(
-        HostScanDelta.engagement_id == engagement_id,
-    ).group_by(col(HostScanDelta.host_id)).having(
-        func.count() == 1, func.min(HostScanDelta.scan_id) == latest_scan_id,
-    )
-    new_marker = (
-        col(HostScanState.host_id).in_(new_hosts)
-        if len(scan_ids_ordered) > 1 else false()
-    )
-    marker = case(
-        (new_marker, "new"),
-        (col(HostScanState.change) == "new", ""),
-        else_=col(HostScanState.change),
-    )
-    session.execute(update(HostScanState).where(
-        col(HostScanState.engagement_id) == engagement_id,
-        col(HostScanState.change) != marker,
-    ).values(change=marker).execution_options(synchronize_session="fetch"))
-
-
-def _rebuild_inventory(session: Session, engagement_id: str) -> None:
-    from penrecon.models import (
-        Annotation, CurrentService, Host, Hostname, HostHostname, HostScanState,
-        HostSummary, HostSummaryTag, Observation, Service, Status,
-    )
-    from penrecon.queries import service_state
-
-    states = {
-        row.host_id: row for row in session.execute(
-            select(HostScanState).where(HostScanState.engagement_id == engagement_id)
-        ).scalars()
-    }
-    annotations = {
-        row.host_id: row for row in session.execute(
-            select(Annotation).where(
-                Annotation.engagement_id == engagement_id,
-                col(Annotation.host_id).is_not(None),
-            )
-        ).scalars()
-    }
-    names: dict[int, list[str]] = defaultdict(list)
-    for host_id, name in session.execute(
-        select(HostHostname.host_id, Hostname.name).join(
-            Hostname,
-            (col(Hostname.id) == col(HostHostname.hostname_id))
-            & (col(Hostname.engagement_id) == col(HostHostname.engagement_id)),
-        ).where(
-            HostHostname.engagement_id == engagement_id,
-            HostHostname.hidden == False,  # noqa: E712
-        ).order_by(Hostname.name)
-    ):
-        names[host_id].append(name)
-    services: dict[int, list[Service]] = defaultdict(list)
-    for service in session.execute(
-        select(Service).where(Service.engagement_id == engagement_id)
-        .order_by(col(Service.port), Service.proto, col(Service.id))
-    ).scalars():
-        services[service.host_id].append(service)
-
-    current_rows: list[dict[str, Any]] = []
-    summary_rows: list[dict[str, Any]] = []
-    tag_rows: list[dict[str, Any]] = []
-    for host in session.execute(
-        select(Host).where(Host.engagement_id == engagement_id)
-    ).scalars():
-        assert host.id is not None
-        state = states.get(host.id)
-        latest: dict[tuple[int, str], Observation] = {}
-        for record in state.latest if state else []:
-            scanned = Observation.model_validate(record)
-            latest[(scanned.port, scanned.proto)] = scanned
-        open_services: list[tuple[int, str | None]] = []
-        for service in services.get(host.id, []):
-            observation = latest.get((service.port, service.proto))
-            effective = service_state(service, observation)
-            current_rows.append({
-                "engagement_id": engagement_id,
-                "service_id": service.id,
-                "host_id": host.id,
-                "port": service.port,
-                "proto": service.proto,
-                "state": effective.state,
-                "service_name": effective.service_name,
-                "product": effective.product,
-                "version": effective.version,
-                "observation_id": observation.id if observation else None,
-                "last_seen": observation.observed_at.strftime("%Y-%m-%d %H:%M") if observation else "",
-                "manual": observation is None or any((
-                    service.m_state, service.m_service_name, service.m_product, service.m_version,
-                )),
-                "service_name_lower": (effective.service_name or "").lower(),
-                "search_text": " ".join(value for value in (
-                    effective.service_name, effective.product, effective.version,
-                ) if value).lower(),
-            })
-            if effective.state == "open":
-                open_services.append((service.port, effective.service_name))
-        # TCP and UDP may share a port, with only one having a name.
-        open_services.sort(key=lambda value: (value[0], value[1] or ""))
-        annotation = annotations.get(host.id)
-        tags = annotation.tags if annotation else []
-        hostnames = names.get(host.id, [])
-        change = state.change if state else ""
-        ip_sort = "4294967296"
-        parts = host.ip.split(".")
-        if len(parts) == 4 and all(part.isascii() and part.isdecimal() for part in parts):
-            octets = [int(part) for part in parts]
-            if all(value <= 255 for value in octets):
-                # Legacy dotted addresses can retain leading zeroes.
-                numeric_ip = sum(value << shift for value, shift in zip(octets, (24, 16, 8, 0), strict=True))
-                ip_sort = f"{numeric_ip:010d}"
-        summary_rows.append({
-            "engagement_id": engagement_id,
-            "host_id": host.id,
-            "ip": host.ip,
-            "ip_sort": ip_sort,
-            "open_count": len(open_services),
-            "status": str(annotation.status if annotation else Status.new),
-            "triaged": annotation is not None,
-            "change": change,
-            "change_rank": {"new": 0, "changed": 1}.get(change, 2),
-            "hostnames": hostnames,
-            "tags": tags,
-            "open_services": open_services,
-            "search_values": [value.lower() for value in (
-                host.ip, *hostnames, *(name for _port, name in open_services if name), *tags,
-            )],
-        })
-        tag_rows.extend({
-            "engagement_id": engagement_id, "host_id": host.id, "tag": tag,
-        } for tag in sorted(set(tags)))
-
-    for model, rows in (
-        (CurrentService, current_rows), (HostSummary, summary_rows), (HostSummaryTag, tag_rows),
-    ):
-        session.execute(delete(model).where(col(model.engagement_id) == engagement_id))
-        for start in range(0, len(rows), 500):
-            session.execute(insert(model), rows[start:start + 500])
 
 
 def prepare_read(session: Session) -> None:
@@ -364,7 +96,7 @@ def prepare_read(session: Session) -> None:
     session.info[_REBUILDING] = True
     evidence_scopes: set[str] = set()
     inventory_scopes: set[str] = set()
-    replay_targets: dict[str, _ReplayScope] = {}
+    replay_targets: dict[str, scan_projection.ReplayScope] = {}
     try:
         # Collect before cascading deletion and before flush forgets old scopes.
         _collect_changes(session)
@@ -374,10 +106,10 @@ def prepare_read(session: Session) -> None:
         replay_targets = session.info.pop(_REPLAY_TARGETS, {})
         session.info.pop("timeline_raw", None)
         for engagement_id in sorted(evidence_scopes):
-            _rebuild_engagement(session, engagement_id, replay_targets.get(engagement_id))
+            scan_projection.rebuild_engagement(session, engagement_id, replay_targets.get(engagement_id))
         session.flush()
         for engagement_id in sorted(inventory_scopes):
-            _rebuild_inventory(session, engagement_id)
+            inventory_projection.rebuild_inventory(session, engagement_id)
         session.flush()
     except BaseException:
         if session.is_active:
@@ -386,7 +118,9 @@ def prepare_read(session: Session) -> None:
             _pending(session).update(evidence_scopes)
             _inventory_pending(session).update(inventory_scopes)
             for engagement_id, scope in replay_targets.items():
-                _replay_targets(session).setdefault(engagement_id, _ReplayScope()).merge(scope)
+                _replay_targets(session).setdefault(
+                    engagement_id, scan_projection.ReplayScope(),
+                ).merge(scope)
         else:
             session.info.pop(_PENDING, None)
             session.info.pop(_INVENTORY_PENDING, None)
@@ -441,7 +175,9 @@ def _collect_changes(session: Session) -> None:
                     continue
                 evidence_scopes.update(scopes)
                 for engagement_id in scopes:
-                    target = _replay_targets(session).setdefault(engagement_id, _ReplayScope())
+                    target = _replay_targets(session).setdefault(
+                        engagement_id, scan_projection.ReplayScope(),
+                    )
                     if len(scopes) > 1 or (history.has_changes() and state.identity):
                         target.full = True
                     if isinstance(row, Host):
@@ -501,7 +237,7 @@ def scan_history(
     from penrecon.models import HostScanDelta
 
     latest = latest_for_host(session, host_id, engagement_id=engagement_id)
-    adapter = _timeline_adapter()
+    adapter = scan_projection.timeline_adapter()
     entries = [
         adapter.validate_python(value) for value in session.execute(
             select(HostScanDelta.entry).where(

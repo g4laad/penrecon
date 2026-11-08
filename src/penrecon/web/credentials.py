@@ -7,7 +7,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from penrecon import commands, queries
+from penrecon import commands
+from penrecon.queries import credentials as credential_queries
+from penrecon.queries import ownership as ownership_queries
+from penrecon.queries import pagination as pagination_queries
 from penrecon.db import get_session
 from penrecon.models import CredKind, Credential, CredentialService, Host, Service
 from penrecon.web.common import ErrorResponse, MutationResponse, invalid_command, require_engagement
@@ -87,9 +90,9 @@ _NO_STORE = {"Cache-Control": "no-store"}
 def _per_page(raw: str) -> int | None:
     if raw == "all" or (
         len(raw) <= 10 and raw.isascii() and raw.isdecimal()
-        and int(raw) in queries.PER_PAGE_OPTIONS
+        and int(raw) in pagination_queries.PER_PAGE_OPTIONS
     ):
-        return queries.resolve_per_page(raw)
+        return pagination_queries.resolve_per_page(raw)
     return 25
 
 
@@ -105,10 +108,10 @@ def edit_credential(
     session: Session = Depends(get_session),
 ) -> Response:
     """Replace editable scalar fields, preserving all host/service associations."""
-    cred = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    cred = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if cred is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    if host_id is not None and queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+    if host_id is not None and ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="host not found")
     try:
         values = commands.CredentialValues.parse(kind, username, secret, notes)
@@ -131,7 +134,7 @@ def credentials_page(
 ) -> Response:
     """List identities and association counts without fetching credential secrets."""
     per_page = _per_page(per)
-    result = queries.credential_summaries(
+    result = credential_queries.credential_summaries(
         session, filter, kind, scope, engagement_id=engagement_id,
         page=page, per_page=per_page,
     )
@@ -150,7 +153,7 @@ def credential_detail(
     session: Session = Depends(get_session),
 ) -> Response:
     """Reveal one owned credential and its linked associations."""
-    credential = queries.credential_view(session, cred_id, engagement_id=engagement_id)
+    credential = credential_queries.credential_view(session, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(
             status_code=404, detail="credential not found", headers=_NO_STORE,
@@ -174,7 +177,7 @@ def credential_service_options(
     )).first() is None:
         raise HTTPException(status_code=404, detail="credential not found", headers=_NO_STORE)
     per_page = _per_page(per)
-    result = queries.credential_service_options(
+    result = credential_queries.credential_service_options(
         session, cred_id, engagement_id=engagement_id, q=q, page=page, per_page=per_page,
     )
     return JSONResponse(encode_page({
@@ -202,10 +205,10 @@ def create_credential(
     selected_hosts = set(host_ids)
     selected_services = set(service_ids)
     for host_id in selected_hosts:
-        if queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+        if ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
             return JSONResponse({"detail": "host not found"}, status_code=422, headers=_NO_STORE)
     for service_id in selected_services:
-        service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
+        service = ownership_queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
         if service is None:
             return JSONResponse({"detail": "service not found"}, status_code=422, headers=_NO_STORE)
         if service.host_id not in selected_hosts:
@@ -219,12 +222,12 @@ def create_credential(
     session.flush()
     assert credential.id is not None
     for host_id in selected_hosts:
-        host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+        host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
         assert host is not None
         commands.link_credential_host(session, credential, host)
     session.flush()  # Service guards must see every staged host association.
     for service_id in selected_services:
-        service = queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
+        service = ownership_queries.get_owned(session, Service, service_id, engagement_id=engagement_id)
         assert service is not None
         commands.link_credential_service(session, credential, service)
     session.commit()
@@ -238,10 +241,10 @@ def delete_credential(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    cred = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    cred = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if cred is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    if host_id is not None and queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
+    if host_id is not None and ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="host not found")
     session.delete(cred)  # FK cascade drops its host/service link rows.
     session.commit()
@@ -257,12 +260,12 @@ def link_cred_host(
 ) -> Response:
     """Add one host association without replacing existing associations."""
     hid = int(host_id) if host_id.strip().isdigit() else None
-    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    credential = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
     if hid is None:
         raise HTTPException(status_code=422, detail="Select a host, then choose Link host.")
-    host = queries.get_owned(session, Host, hid, engagement_id=engagement_id)
+    host = ownership_queries.get_owned(session, Host, hid, engagement_id=engagement_id)
     if host is None:
         raise HTTPException(status_code=404, detail="Host is no longer available. Reload credentials and select another host.")
     commands.link_credential_host(session, credential, host)
@@ -277,10 +280,10 @@ def unlink_cred_host(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    credential = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         raise HTTPException(status_code=404, detail="host not found")
     commands.unlink_credential_host(session, credential, host)
@@ -297,8 +300,8 @@ def link_cred_service(
 ) -> Response:
     """Add one service association without replacing existing associations."""
     sid = int(service_id) if service_id.strip().isdigit() else None
-    svc = queries.get_owned(session, Service, sid, engagement_id=engagement_id) if sid is not None else None
-    credential = queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
+    svc = ownership_queries.get_owned(session, Service, sid, engagement_id=engagement_id) if sid is not None else None
+    credential = ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id)
     if credential is None:
         raise HTTPException(status_code=404, detail="credential not found")
     if svc is None:
@@ -321,11 +324,11 @@ def unlink_cred_service(
     engagement_id: str = Depends(require_engagement),
     session: Session = Depends(get_session),
 ) -> Response:
-    if queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
+    if ownership_queries.get_owned(session, Credential, cred_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="credential not found")
-    if queries.get_owned(session, Service, service_id, engagement_id=engagement_id) is None:
+    if ownership_queries.get_owned(session, Service, service_id, engagement_id=engagement_id) is None:
         raise HTTPException(status_code=404, detail="service not found")
-    link = queries.get_owned(session, CredentialService, (cred_id, service_id), engagement_id=engagement_id)
+    link = ownership_queries.get_owned(session, CredentialService, (cred_id, service_id), engagement_id=engagement_id)
     if link is not None:
         session.delete(link)
         session.commit()

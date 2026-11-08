@@ -7,7 +7,12 @@ from typing import Any
 
 from fastapi.encoders import jsonable_encoder
 
-from penrecon import queries
+from penrecon.queries import annotations as annotation_queries
+from penrecon.queries import credentials as credential_queries
+from penrecon.queries import diff as diff_queries
+from penrecon.queries import inventory as inventory_queries
+from penrecon.queries import operations as operation_queries
+from penrecon.queries import search as search_queries
 from penrecon.history import HostTimeline, TimelineEntry
 from penrecon.models import Annotation, Host, Note, OperationLog, Scan
 
@@ -16,7 +21,7 @@ def _fields(value: object, *names: str) -> dict[str, object]:
     return {name: encode_page(getattr(value, name)) for name in names}
 
 
-def host_credential(credential: queries.HostCredentialView) -> dict[str, object]:
+def host_credential(credential: credential_queries.HostCredentialView) -> dict[str, object]:
     """Encode the purpose-specific credential projection for one displayed host."""
     return {
         **_fields(credential, "id", "kind", "username", "secret", "notes"),
@@ -46,23 +51,23 @@ _ENCODERS: dict[type[object], Callable[[Any], object]] = {
         "user_context", "command", "output", "description", "comments", "tags",
         "attachment_name", "created_at", "updated_at",
     ),
-    queries.OperationSummary: lambda operation: _fields(
+    operation_queries.OperationSummary: lambda operation: _fields(
         operation, "id", "started_at", "destination", "tool", "command",
     ),
-    queries.CredentialSummary: lambda credential: _fields(
+    credential_queries.CredentialSummary: lambda credential: _fields(
         credential, "id", "kind", "username", "notes_preview", "host_count", "service_count",
     ),
-    queries.CredentialView: lambda credential: _fields(
+    credential_queries.CredentialView: lambda credential: _fields(
         credential, "id", "kind", "username", "secret", "notes", "created_at",
         "hosts", "services",
     ),
-    queries.HostRow: lambda row: _fields(
+    inventory_queries.HostRow: lambda row: _fields(
         row, "id", "ip", "hostnames", "open_count", "status", "tags",
         "open_services", "change", "triaged",
     ),
-    queries.SearchResults: lambda results: _fields(results, "hosts", "notes", "credentials"),
-    queries.NoteHit: lambda note: _fields(note, "href", "where", "title", "preview"),
-    queries.DiffResult: lambda result: {
+    search_queries.SearchResults: lambda results: _fields(results, "hosts", "notes", "credentials"),
+    annotation_queries.NoteHit: lambda note: _fields(note, "href", "where", "title", "preview"),
+    diff_queries.DiffResult: lambda result: {
         "scan_a": _fields(result.scan_a, "id", "filename"),
         "scan_b": _fields(result.scan_b, "id", "filename"),
         "entries": encode_page(result.entries),

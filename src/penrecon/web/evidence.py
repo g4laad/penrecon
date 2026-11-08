@@ -17,7 +17,11 @@ from sqlmodel import Session, col, select
 from starlette.concurrency import run_in_threadpool
 from starlette.types import Receive, Scope, Send
 
-from penrecon import queries
+from penrecon.queries import annotations as annotation_queries
+from penrecon.queries import diff as diff_queries
+from penrecon.queries import export as export_queries
+from penrecon.queries import ownership as ownership_queries
+from penrecon.queries import search as search_queries
 from penrecon.db import get_session
 from penrecon.ingest import ScanParseError, ingest_scan
 from penrecon.models import Engagement, Host, Note, Scan, Status
@@ -107,7 +111,7 @@ class AnnotationContextResponse(BaseModel):
 
 
 def owned_host(session: Session, host_id: int, engagement_id: str) -> Host:
-    host = queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
+    host = ownership_queries.get_owned(session, Host, host_id, engagement_id=engagement_id)
     if host is None:
         raise HTTPException(404, detail="host not found")
     return host
@@ -115,7 +119,7 @@ def owned_host(session: Session, host_id: int, engagement_id: str) -> Host:
 
 @router.get("/search", response_model=SearchResponse)
 def search(q: str = "", engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
-    return JSONResponse(encode_page({"q": q.strip(), "results": queries.search(session, q, engagement_id=engagement_id)}))
+    return JSONResponse(encode_page({"q": q.strip(), "results": search_queries.search(session, q, engagement_id=engagement_id)}))
 
 
 class _CSVResponse(StreamingResponse):
@@ -139,8 +143,8 @@ class _CSVResponse(StreamingResponse):
 @router.get("/export/hosts.csv", response_class=Response, responses={200: {"content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}}, "description": "Current inventory, one row per service; spreadsheet formulas escaped."}})
 def export_hosts_csv(engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
     def stream_csv() -> Generator[str, None, None]:
-        with closing(queries.export_rows(session, engagement_id=engagement_id)) as rows, io.StringIO(newline="") as buf:
-            writer = csv.DictWriter(buf, fieldnames=queries.EXPORT_COLUMNS)
+        with closing(export_queries.export_rows(session, engagement_id=engagement_id)) as rows, io.StringIO(newline="") as buf:
+            writer = csv.DictWriter(buf, fieldnames=export_queries.EXPORT_COLUMNS)
             writer.writeheader()
             for row in rows:
                 writer.writerow(row)
@@ -211,22 +215,22 @@ async def upload_scan(request: Request, file: UploadFile, tool: str = Form("nmap
 def diff(a: int | None = None, b: int | None = None, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
     rows = session.exec(select(Scan).where(Scan.engagement_id == engagement_id).order_by(col(Scan.imported_at).desc())).all()
     for scan_id in (a, b):
-        if scan_id is not None and queries.get_owned(session, Scan, scan_id, engagement_id=engagement_id) is None:
+        if scan_id is not None and ownership_queries.get_owned(session, Scan, scan_id, engagement_id=engagement_id) is None:
             raise HTTPException(404, detail="scan not found")
-    result = queries.diff_scans(session, a, b, engagement_id=engagement_id) if a and b else None
+    result = diff_queries.diff_scans(session, a, b, engagement_id=engagement_id) if a and b else None
     return JSONResponse(encode_page({"scans": rows, "result": result, "a": a, "b": b}))
 
 
 @router.get("/annotation", response_model=AnnotationContextResponse)
 def annotation_get(host_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> JSONResponse:
     owned_host(session, host_id, engagement_id)
-    return JSONResponse(encode_page({"host_id": host_id, "ann": queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id), "statuses": list(Status), "saved": False}))
+    return JSONResponse(encode_page({"host_id": host_id, "ann": annotation_queries.get_annotation(session, host_id=host_id, engagement_id=engagement_id), "statuses": list(Status), "saved": False}))
 
 
 @router.put("/annotation", response_model=MutationResponse, response_model_exclude_unset=True)
 def replace_annotation(host_id: int = Form(...), status: Status = Form(Status.new), tags: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> dict[str, bool]:
     owned_host(session, host_id, engagement_id)
-    queries.upsert_annotation(session, status, [tag.strip() for tag in tags.split(",") if tag.strip()], host_id=host_id, engagement_id=engagement_id)
+    annotation_queries.upsert_annotation(session, status, [tag.strip() for tag in tags.split(",") if tag.strip()], host_id=host_id, engagement_id=engagement_id)
     return {"ok": True}
 
 
@@ -240,7 +244,7 @@ def note_create(host_id: int = Form(...), title: str = Form(""), body_md: str = 
 
 @router.put("/notes/{note_id}", response_model=MutationResponse, response_model_exclude_unset=True)
 def note_edit(note_id: int, title: str = Form(""), body_md: str = Form(""), engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> dict[str, bool]:
-    note = queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
+    note = ownership_queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
     if note is None:
         raise HTTPException(404, detail="note not found")
     note.title = title.strip() or "Untitled"
@@ -252,7 +256,7 @@ def note_edit(note_id: int, title: str = Form(""), body_md: str = Form(""), enga
 
 @router.delete("/notes/{note_id}", response_model=MutationResponse, response_model_exclude_unset=True)
 def note_delete(note_id: int, engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> dict[str, bool]:
-    note = queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
+    note = ownership_queries.get_owned(session, Note, note_id, engagement_id=engagement_id)
     if note is None:
         raise HTTPException(404, detail="note not found")
     session.delete(note)

@@ -12,7 +12,7 @@ from penrecon.models import (
     Note,
     Status,
 )
-from penrecon.queries import search
+from penrecon.queries.search import search
 
 
 def _scan(ip: str, hostname: str, service: str) -> bytes:

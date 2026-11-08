@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 
 from penrecon.db import engagement_attachments_dir
 from penrecon.models import Engagement, OperationLog
-from penrecon.queries import operation_logs
+from penrecon.queries.operations import operation_logs
 
 def _assert_outcome(response) -> None:
     assert response.status_code == 200

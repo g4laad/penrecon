@@ -381,7 +381,8 @@ def timeline(
     page: int = 1, show_unchanged: bool = False,
 ) -> HostTimeline:
     """Page persisted scan deltas and immutable manual snapshots in SQL."""
-    from penrecon.projections import _timeline_adapter, prepare_read
+    from penrecon.projections import prepare_read
+    from penrecon.scan_projection import timeline_adapter
 
     prepare_read(session)
     scan_occurred = _timestamp_order(func.json_extract(HostScanDelta.entry, "$.occurred_at"))
@@ -430,7 +431,7 @@ def timeline(
     entries: dict[tuple[str, int], TimelineEntry] = {}
     scan_ids = [row_id for source, row_id in wanted if source == "scan"]
     if scan_ids:
-        adapter = _timeline_adapter()
+        adapter = timeline_adapter()
         for scan_id, payload in session.exec(select(HostScanDelta.scan_id, HostScanDelta.entry).where(
             HostScanDelta.engagement_id == engagement_id, HostScanDelta.host_id == host_id,
             col(HostScanDelta.scan_id).in_(scan_ids),

@@ -541,7 +541,7 @@ engagement validation in `web/common.py`; HTTP protections in `web/security.py`.
 Domain routers are `web/engagements.py`, `web/inventory.py`,
 `web/credentials.py`, `web/evidence.py`, and `web/operations.py`.
 `web/pages.py` owns only HTML delivery. Persistence and domain transitions stay
-in the existing query, command, ingestion, and history modules.
+in the query package, command, ingestion, history, and projection modules.
 Scoped JSON reads use these resource URLs; append `engagement_id=UUID` to every
 request (alongside any filter or pagination parameters):
 
@@ -578,6 +578,34 @@ Row-count choices live in the frontend; responses do not include
 `per_page_choices`. Host selectors use ID/address pairs, and host credential
 responses include only associations for that host. Database models retain their
 full metadata for internal queries and persistence.
+
+### Backend module layout
+
+Backend modules live under `src/penrecon/`. Query callers import the responsible
+submodule directly; `queries/__init__.py` intentionally exports nothing.
+
+| Module | Responsibility |
+| --- | --- |
+| `queries/inventory.py` | Effective host/service views, filtering, sorting, and inventory pagination |
+| `queries/credentials.py` | Credential summaries, details, associations, and service options |
+| `queries/annotations.py` | Triage annotations, host notes, and note search |
+| `queries/operations.py` | Operation-log search and pagination |
+| `queries/diff.py` | Immutable scan comparisons |
+| `queries/search.py` | Engagement-wide search composition |
+| `queries/export.py` | Streaming CSV rows and spreadsheet-formula protection |
+| `queries/ownership.py` | Engagement-scoped entity lookup |
+| `queries/pagination.py` | Shared page bounds, row limits, and sort defaults |
+| `projections.py` | Transaction hooks, invalidation, read preparation, and startup backfill |
+| `scan_projection.py` | Affected-host scan-state and delta rebuilding |
+| `inventory_projection.py` | Effective service, host-summary, and tag rebuilding |
+| `history.py` | Scan-evidence replay and unified scan/manual timelines |
+| `models.py`, `db.py` | SQLModel tables, engine configuration, and initialization |
+| `ingest.py`, `parsers/` | Scan ingestion and tool-specific parsing |
+| `inventory.py`, `commands.py` | Identity/link transitions and validated operator mutations |
+| `web/` | HTTP routing, request/response contracts, and local security |
+
+Projection rebuilding remains part of the source-write transaction. These module
+changes do not alter database tables, endpoint contracts, or stored data.
 
 ### Shared feature seams
 

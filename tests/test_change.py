@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from penrecon.history import host_history
 from penrecon.ingest import ingest_scan
 from penrecon.models import Host, Service
-from penrecon.queries import host_change, host_rows, resolved_services
+from penrecon.queries.inventory import host_change, host_rows, resolved_services
 
 
 def _change(session: Session, ip: str) -> str:
