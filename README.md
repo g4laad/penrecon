@@ -465,6 +465,10 @@ To apply safe lint fixes and formatting, run `uv run --locked ruff check --fix s
 and `uv run --locked ruff format src tests`. Keep the narrow SQLAlchemy and
 late-import exceptions: they preserve SQL expressions and model initialization order.
 
+Delete/reimport regression tests use separate sessions for deletion and upload,
+matching request lifetimes. Close the deletion session before reimport: database
+FK cascades do not mark already-loaded child objects as deleted in the ORM.
+
 For frontend work, run `npm --prefix frontend run dev` alongside FastAPI.
 This watches and rebuilds the local bundle; refresh the browser after changes.
 Bundle URLs are versioned on rebuild so a normal refresh loads the updated

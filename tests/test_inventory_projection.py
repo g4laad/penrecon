@@ -270,31 +270,41 @@ def test_delete_then_reimport_does_not_resurrect_stale_inventory_metadata(
         assert remaining[0].open_services == [(80, "http")]
     session.commit()
 
-    ingest_scan(
-        session,
-        SCAN_B.encode(),
-        "reimport.xml",
-        "nmap",
-        engagement_id=TEST_ENGAGEMENT_ID,
-    )
-    row = host_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
-    assert (row.open_count, row.open_services) == (2, [(22, "ssh"), (443, "https")])
-    assert row.tags == ([] if target == "host" else ["host-tag"])
-    assert (
-        host_page(
-            session, engagement_id=TEST_ENGAGEMENT_ID, q="deleted-override"
-        ).matched
-        == 0
-    )
-    views = resolved_services(session, row.id, engagement_id=TEST_ENGAGEMENT_ID)
-    ssh = next(view for view in views if view.port == 22)
-    assert (ssh.version, ssh.manual, ssh.annotation) == ("9.0", False, None)
-    assert (
-        service_page(
-            session, row.id, engagement_id=TEST_ENGAGEMENT_ID, status="exploited"
-        ).total
-        == 0
-    )
+    # Deletion and upload run in separate sessions in production. Closing the
+    # deletion session also releases children removed by database FK cascades.
+    engine = session.get_bind()
+    session.close()
+    with Session(engine) as import_session:
+        ingest_scan(
+            import_session,
+            SCAN_B.encode(),
+            "reimport.xml",
+            "nmap",
+            engagement_id=TEST_ENGAGEMENT_ID,
+        )
+        row = host_rows(import_session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+        assert (row.open_count, row.open_services) == (2, [(22, "ssh"), (443, "https")])
+        assert row.tags == ([] if target == "host" else ["host-tag"])
+        assert (
+            host_page(
+                import_session, engagement_id=TEST_ENGAGEMENT_ID, q="deleted-override"
+            ).matched
+            == 0
+        )
+        views = resolved_services(
+            import_session, row.id, engagement_id=TEST_ENGAGEMENT_ID
+        )
+        ssh = next(view for view in views if view.port == 22)
+        assert (ssh.version, ssh.manual, ssh.annotation) == ("9.0", False, None)
+        assert (
+            service_page(
+                import_session,
+                row.id,
+                engagement_id=TEST_ENGAGEMENT_ID,
+                status="exploited",
+            ).total
+            == 0
+        )
 
 
 def test_clearing_overrides_reveals_latest_scan_and_updates_open_filters(
