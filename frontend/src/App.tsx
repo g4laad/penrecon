@@ -39,25 +39,17 @@ import type { HostRow, PageData } from "./types";
 import { AppShell, navigation } from "./components/app-shell";
 import { queryResources } from "./lib/query-data";
 import { apiUrl } from "./lib/api";
+import { CredentialsPage } from "./pages/credentials";
+import { OperationsPage } from "./pages/operations";
 
 const HostPage = lazy(() =>
   import("./pages/host").then((module) => ({ default: module.HostPage })),
-);
-const CredentialsPage = lazy(() =>
-  import("./pages/credentials").then((module) => ({
-    default: module.CredentialsPage,
-  })),
 );
 const ScansPage = lazy(() =>
   import("./pages/scans").then((module) => ({ default: module.ScansPage })),
 );
 const DiffPage = lazy(() =>
   import("./pages/scans").then((module) => ({ default: module.DiffPage })),
-);
-const OperationsPage = lazy(() =>
-  import("./pages/operations").then((module) => ({
-    default: module.OperationsPage,
-  })),
 );
 
 function HostTable({

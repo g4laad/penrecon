@@ -101,6 +101,9 @@ Geist Variable fonts are bundled locally; technical data uses system monospace.
   disappears, focus moves to main without scrolling. Detail loads invalidate on
   selection or list refresh, withhold obsolete detail, and expose loading/error/
   Retry states; late responses must not overwrite current selection or drafts.
+- Credentials and Operations page components ship in the application entry,
+  avoiding a post-list-request module fetch and Suspense reveal delay before
+  selected details can load. Summary/detail API reads remain separate.
 
 ## Engagement catalog and shell
 
