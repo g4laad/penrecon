@@ -14,11 +14,16 @@ wheels/
 /scratch_data/
 .mypy_cache/
 .pytest_cache/
+/data-test/
+/result
 
 # local scan files and installed skill/plugin cache
 /scan*
 /.claude/
 /.impeccable/
+/.omp/lsp.json
+/.agents/
+/skills-lock.json
 
 # Playwright
 node_modules/
