@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Generator
+from contextlib import closing
 from datetime import UTC, datetime
 
+from anyio import CancelScope
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
+from starlette.concurrency import run_in_threadpool
+from starlette.types import Receive, Scope, Send
 
 from penrecon import queries
 from penrecon.db import get_session
@@ -111,14 +116,41 @@ def search(q: str = "", engagement_id: str = Depends(require_engagement), sessio
     return JSONResponse(encode_page({"q": q.strip(), "results": queries.search(session, q, engagement_id=engagement_id)}))
 
 
+class _CSVResponse(StreamingResponse):
+    """Close the export cursor before request-session teardown, even on disconnect."""
+
+    def __init__(self, chunks: Generator[str, None, None], filename: str) -> None:
+        self._chunks = chunks
+        super().__init__(
+            chunks, media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with CancelScope(shield=True):
+                await run_in_threadpool(self._chunks.close)
+
+
 @router.get("/export/hosts.csv", response_class=Response, responses={200: {"content": {"text/csv": {"schema": {"type": "string", "format": "binary"}}}, "description": "Current inventory, one row per service; spreadsheet formulas escaped."}})
 def export_hosts_csv(engagement_id: str = Depends(require_engagement), session: Session = Depends(get_session)) -> Response:
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=queries.EXPORT_COLUMNS)
-    writer.writeheader()
-    writer.writerows(queries.export_rows(session, engagement_id=engagement_id))
+    def stream_csv() -> Generator[str, None, None]:
+        with closing(queries.export_rows(session, engagement_id=engagement_id)) as rows, io.StringIO(newline="") as buf:
+            writer = csv.DictWriter(buf, fieldnames=queries.EXPORT_COLUMNS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+                if buf.tell() >= 64 * 1024:
+                    yield buf.getvalue()
+                    buf.seek(0)
+                    buf.truncate(0)
+            if buf.tell():
+                yield buf.getvalue()
+
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    return Response(buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="penrecon-hosts-{stamp}.csv"'})
+    return _CSVResponse(stream_csv(), f"penrecon-hosts-{stamp}.csv")
 
 
 @router.get("/scans", response_model=ScansResponse)

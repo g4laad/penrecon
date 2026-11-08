@@ -249,6 +249,11 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
 - **Merge, latest-wins**: current host/service state is the newest observation
   per `(host, port, proto)`; a web-tool scan never erases port data. Hosts are
   keyed by IP, with hostnames linked.
+- **CSV export** streams engagement-scoped current inventory from the maintained
+  host/service projections, with bounded database fetches and roughly 64 KiB
+  output chunks (a single large row can exceed that). Hosts without services
+  remain included; manual overrides, visible hostnames, host triage, and
+  spreadsheet-formula escaping are preserved.
 - **Diff** any two scans: added / removed / changed ports and versions.
 - **Host timeline**: open a host's Timeline tab (`#timeline`) for newest-first
   scan groups and manual service actions, expandable before/after changes, and a latest-change
@@ -550,9 +555,9 @@ full metadata for internal queries and persistence.
   normalization; callers own commits.
 - `commands.py` owns validated service override/removal and credential association
   transitions. `history.py` owns explicit/missing/covered scan-evidence replay.
-- `queries.latest_observations()` and the shared service-name resolver keep
-  inventory, exports, and credential associations on the same current state.
-  Credential assembly reuses each host's observation map.
+- Inventory and CSV export share the maintained `HostSummary`/`CurrentService`
+  projections. Credential assembly uses `queries.latest_observations()` and the
+  shared service-name resolver, reusing each host's observation map.
 - The web layer binds service-table state for reads and operation input once for
   create/edit. Operation validation remains inside the handler, after ownership
   and attachment-conflict checks.

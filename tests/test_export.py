@@ -26,7 +26,7 @@ def test_one_row_per_service_and_serviceless_host(session: Session) -> None:
     ingest_scan(session, _scan("10.0.0.5", "db.corp.local", "postgresql", 5432), "a.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
     session.add(Host(ip="10.0.0.9", engagement_id=TEST_ENGAGEMENT_ID))  # host with no services must still appear
     session.commit()
-    rows = export_rows(session, engagement_id=TEST_ENGAGEMENT_ID)
+    rows = list(export_rows(session, engagement_id=TEST_ENGAGEMENT_ID))
     assert [r["ip"] for r in rows] == ["10.0.0.5", "10.0.0.9"]
     svc = rows[0]
     assert svc["port"] == "5432" and svc["proto"] == "tcp" and svc["state"] == "open"
@@ -42,14 +42,14 @@ def test_host_status_and_tags_included(session: Session) -> None:
     session.add(Annotation(host_id=host.id,
                            status=Status.interesting, tags=["prod", "pivot"], engagement_id=TEST_ENGAGEMENT_ID))
     session.commit()
-    r = export_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+    r = next(export_rows(session, engagement_id=TEST_ENGAGEMENT_ID))
     assert r["status"] == "interesting" and r["tags"] == "prod pivot"
 
 
 def test_export_neutralizes_formula_injection(session: Session) -> None:
     # a target advertises a formula-shaped service banner
     ingest_scan(session, _scan("10.0.0.7", "h.local", "=HYPERLINK(1)", 8080), "x.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
-    r = export_rows(session, engagement_id=TEST_ENGAGEMENT_ID)[0]
+    r = next(export_rows(session, engagement_id=TEST_ENGAGEMENT_ID))
     assert r["service"].startswith("'=")          # neutralized, not executable
     assert r["service"] == "'=HYPERLINK(1)"
 

@@ -5,6 +5,7 @@ and annotation access.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, TypeVar
@@ -261,12 +262,6 @@ def latest_observations(
 ) -> dict[tuple[int, str], Observation]:
     """Persisted latest trustworthy scan evidence; manual overrides stay separate."""
     return projections.latest_for_host(session, host_id, engagement_id=engagement_id)
-
-
-def _hostnames_for(session: Session, host_id: int, *, engagement_id: str) -> list[str]:
-    return [
-        name for _id, name in host_hostnames(session, host_id, engagement_id=engagement_id)
-    ]
 
 
 def host_hostnames(
@@ -923,39 +918,44 @@ def _csv_safe(value: str) -> str:
     return "'" + value if value.startswith(_CSV_RISKY_PREFIXES) else value
 
 
-def export_rows(session: Session, *, engagement_id: str) -> list[dict[str, str]]:
-    """One flat row per service across all hosts, for CSV export. A host with no
-    services still yields one row (empty service columns) so nothing is dropped.
-    Reflects current merged state — manual overrides win over observations,
-    exactly like the host detail view."""
-    rows: list[dict[str, str]] = []
-    for host in session.exec(
-        select(Host).where(Host.engagement_id == engagement_id).order_by(Host.ip)
-    ).all():
-        assert host.id is not None
-        ann = get_annotation(session, host_id=host.id, engagement_id=engagement_id)
-        base = {
-            "ip": _csv_safe(host.ip),
-            "hostnames": _csv_safe(
-                " ".join(_hostnames_for(session, host.id, engagement_id=engagement_id))
-            ),
-            "status": ann.status.value if ann else Status.new.value,
-            "tags": _csv_safe(" ".join(ann.tags) if ann else ""),
-        }
-        services = resolved_services(session, host.id, engagement_id=engagement_id)
-        if not services:
-            rows.append({**base, "port": "", "proto": "", "state": "",
-                         "service": "", "product": "", "version": ""})
-            continue
-        for s in services:
-            rows.append({
-                **base, "port": str(s.port), "proto": _csv_safe(s.proto),
-                "state": _csv_safe(s.state),
-                "service": _csv_safe(s.service_name or ""),
-                "product": _csv_safe(s.product or ""),
-                "version": _csv_safe(s.version or ""),
-            })
-    return rows
+def export_rows(
+    session: Session, *, engagement_id: str,
+) -> Generator[dict[str, str], None, None]:
+    """Stream effective inventory values, including hosts without services.
+
+    Scalar projections avoid ORM identity-map growth; cursor fetches are bounded
+    independently of the number of hosts or services in the engagement.
+    """
+    projections.prepare_read(session)
+    statement = sql_select(
+        col(HostSummary.ip), col(HostSummary.hostnames),
+        col(HostSummary.status), col(HostSummary.tags),
+        col(CurrentService.port), col(CurrentService.proto), col(CurrentService.state),
+        col(CurrentService.service_name), col(CurrentService.product), col(CurrentService.version),
+    ).outerjoin(
+        CurrentService,
+        (col(CurrentService.host_id) == col(HostSummary.host_id))
+        & (col(CurrentService.engagement_id) == col(HostSummary.engagement_id)),
+    ).where(
+        col(HostSummary.engagement_id) == engagement_id,
+    ).order_by(
+        col(HostSummary.ip), col(CurrentService.port),
+        col(CurrentService.proto), col(CurrentService.service_id),
+    ).execution_options(yield_per=256)
+    with session.execute(statement) as result:
+        for ip, hostnames, status, tags, port, proto, state, name, product, version in result:
+            yield {
+                "ip": _csv_safe(ip),
+                "hostnames": _csv_safe(" ".join(hostnames)),
+                "status": status,
+                "tags": _csv_safe(" ".join(tags)),
+                "port": str(port) if port is not None else "",
+                "proto": _csv_safe(proto or ""),
+                "state": _csv_safe(state or ""),
+                "service": _csv_safe(name or ""),
+                "product": _csv_safe(product or ""),
+                "version": _csv_safe(version or ""),
+            }
 
 
 def search(session: Session, q: str, *, engagement_id: str) -> SearchResults:

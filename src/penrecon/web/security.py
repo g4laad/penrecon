@@ -104,13 +104,18 @@ class LocalSecurityMiddleware:
                         break
                 body.seek(0)
                 remaining = total
+                replay_complete = False
 
                 async def replay() -> Message:
-                    nonlocal remaining
+                    nonlocal remaining, replay_complete
+                    if replay_complete:
+                        return await receive()
                     if remaining == 0:
+                        replay_complete = True
                         return {"type": "http.request", "body": b"", "more_body": False}
                     chunk = body.read(min(65536, remaining))
                     remaining -= len(chunk)
+                    replay_complete = remaining == 0
                     return {"type": "http.request", "body": chunk, "more_body": remaining > 0}
 
                 await self.app(scope, replay, secure_send)

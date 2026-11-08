@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from penrecon.ingest import ingest_scan
 from penrecon.models import Host, HostHostname, ObsState, Service
-from penrecon.queries import _hostnames_for, latest_observations, resolved_services
+from penrecon.queries import host_hostnames, latest_observations, resolved_services
 
 
 def _scan(ip: str, port: int, version: str, hostname: str) -> bytes:
@@ -70,7 +70,7 @@ def test_hidden_hostname_stays_hidden_across_rescan(session: Session) -> None:
     session.commit()
 
     ingest_scan(session, _scan("10.0.0.3", 80, "1.0", "keep.example"), "b.xml", "nmap", engagement_id=TEST_ENGAGEMENT_ID)
-    assert _hostnames_for(session, host.id, engagement_id=TEST_ENGAGEMENT_ID) == []  # sticky delete, not resurrected
+    assert host_hostnames(session, host.id, engagement_id=TEST_ENGAGEMENT_ID) == []  # sticky delete, not resurrected
 
 
 def test_manual_only_service_shows(session: Session) -> None:
