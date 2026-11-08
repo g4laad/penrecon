@@ -397,6 +397,8 @@ requests. Omit `PENRECON_DATA` when returning to your normal `./data` database.
   overwriting earlier bytes. Duplicate hosts in one import merge deterministically;
   conflicting coverage does not invent closure. All six nmap port states survive
   in both stored observations and current/history views.
+  Nmap scan-level port coverage is parsed once per file; omitted-port candidates
+  are expanded only for unambiguous closed/filtered aggregate inference.
 - **Operation attachments:** keep, replace, and remove are distinct intents.
   Cancelling removal restores the previous replacement choice. New files are
   compensated on rollback; old files are removed only after metadata commits.

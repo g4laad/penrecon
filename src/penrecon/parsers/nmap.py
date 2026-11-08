@@ -66,7 +66,7 @@ def _timestamp(*values: str | None) -> datetime | None:
     return None
 
 
-def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> dict[str, Any]:
+def _scan_coverage(root: ET.Element) -> dict[str, set[int]]:
     scanned: dict[str, set[int]] = {}
     invalid: set[str] = set()
     for info in root.findall("scaninfo"):
@@ -79,8 +79,14 @@ def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> di
         scanned.setdefault(proto, set()).update(selected)
     for proto in invalid:
         scanned.pop(proto, None)
+    return scanned
+
+
+def _coverage(
+    host: ET.Element, ports: list[PortResult],
+    scanned: dict[str, set[int]], scanned_ranges: dict[str, list[list[int]]],
+) -> dict[str, Any]:
     explicit = {(port.proto, port.port) for port in ports}
-    candidates = {(proto, port) for proto, values in scanned.items() for port in values} - explicit
     assigned: dict[tuple[str, int], str] = {}
     conflicted: set[tuple[str, int]] = set()
     outstanding: list[tuple[str, int]] = []
@@ -112,11 +118,15 @@ def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> di
             outstanding.append((state, total - len(named)))
     # An aggregate count only identifies omitted ports when every remaining
     # covered port is accounted for and all have one unambiguous state.
-    remaining = candidates - assigned.keys()
     states = {state for state, count in outstanding if count}
-    if len(states) == 1 and len(remaining) == sum(count for _, count in outstanding):
-        state = next(iter(states))
-        if state in {"closed", "filtered"}:
+    if len(states) == 1 and (state := next(iter(states))) in {"closed", "filtered"}:
+        excluded = explicit | assigned.keys()
+        remaining = {
+            (proto, port)
+            for proto, values in scanned.items() for port in values
+            if (proto, port) not in excluded
+        }
+        if len(remaining) == sum(count for _, count in outstanding):
             assigned.update(dict.fromkeys(remaining, state))
     groups: dict[tuple[str, str], set[int]] = {}
     for (proto, port), state in assigned.items():
@@ -124,7 +134,7 @@ def _coverage(root: ET.Element, host: ET.Element, ports: list[PortResult]) -> di
             groups.setdefault((proto, state), set()).add(port)
     return {
         "known": bool(scanned),
-        "ports": {proto: _ranges(values) for proto, values in scanned.items()},
+        "ports": {proto: [pair.copy() for pair in ranges] for proto, ranges in scanned_ranges.items()},
         "states": [
             {"proto": proto, "state": state, "ports": _ranges(values)}
             for (proto, state), values in sorted(groups.items())
@@ -141,6 +151,8 @@ def parse(data: bytes) -> ScanResult:
         raise ValueError("Expected nmap XML exported with -oX")
     hosts: dict[str, HostResult] = {}
     finished = root.find("runstats/finished")
+    scanned: dict[str, set[int]] | None = None
+    scanned_ranges: dict[str, list[list[int]]] = {}
     for host in root.findall("host"):
         address = next(
             (node.get("addr") for node in host.findall("address") if node.get("addrtype") in {"ipv4", "ipv6"}),
@@ -175,12 +187,15 @@ def parse(data: bytes) -> ScanResult:
             normalize_hostname(node.get("name", ""))
             for node in host.findall("hostnames/hostname") if node.get("name")
         ))
+        if scanned is None:
+            scanned = _scan_coverage(root)
+            scanned_ranges = {proto: _ranges(values) for proto, values in scanned.items()}
         result = HostResult(
             ip=address,
             hostnames=names,
             ports=ports,
             scanned_at=_timestamp(host.get("starttime"), root.get("start"), host.get("endtime"), finished.get("time") if finished is not None else None),
-            coverage=_coverage(root, host, ports),
+            coverage=_coverage(host, ports, scanned, scanned_ranges),
         )
         previous = hosts.get(address)
         if previous is not None:
